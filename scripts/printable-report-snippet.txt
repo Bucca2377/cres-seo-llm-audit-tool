@@ -1,0 +1,737 @@
+/* ================= PRINTABLE REPORT =============================== */
+// CRES-branded multi-page audit PDF. Mirrors the format of existing CRES
+// Marketing Audit Reports (cover page with CRES wordmark + orange rule,
+// running page header/footer via @page rules, section headers with teal
+// underline, status-coded findings tables, Impact callouts on critical
+// issues, and priority-categorized recommendations).
+
+const PRINT_NAVY = "#062347";
+const PRINT_TEAL = "#006a6a";
+const PRINT_ORANGE = "#f25620";
+const PRINT_MUTED = "#93b2ab";
+const PRINT_BODY = "#1f2937";
+
+const STATUS_BG: Record<ChecklistStatus, string> = {
+  complete: "#e4f2ee",
+  partial: "#fdebe1",
+  missing: "#fdebe1",
+};
+const STATUS_TEXT: Record<ChecklistStatus, string> = {
+  complete: "#15803d",
+  partial: "#9a7200",
+  missing: "#b14a2a",
+};
+const STATUS_LABEL: Record<ChecklistStatus, string> = {
+  complete: "Functional",
+  partial: "Incomplete",
+  missing: "Absent / Gap",
+};
+
+function PrintSectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h2
+      style={{
+        fontFamily: "'Barlow Condensed', sans-serif",
+        fontWeight: 700,
+        fontSize: 22,
+        color: PRINT_NAVY,
+        margin: "0 0 18px 0",
+        paddingBottom: 6,
+        borderBottom: `2px solid ${PRINT_TEAL}`,
+        letterSpacing: "0.02em",
+      }}
+    >
+      {children}
+    </h2>
+  );
+}
+
+function PrintIssueHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h3
+      style={{
+        fontFamily: "'Barlow Condensed', sans-serif",
+        fontWeight: 700,
+        fontSize: 15,
+        color: PRINT_NAVY,
+        margin: "16px 0 6px 0",
+        letterSpacing: "0.02em",
+      }}
+    >
+      {children}
+    </h3>
+  );
+}
+
+function PrintImpactCallout({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        background: "#fdebe1",
+        borderLeft: `4px solid ${PRINT_ORANGE}`,
+        padding: "8px 12px",
+        margin: "6px 0 14px 0",
+        fontSize: 10.5,
+        lineHeight: 1.6,
+        color: "#3a2a22",
+      }}
+    >
+      <span style={{ color: PRINT_ORANGE, fontWeight: 700 }}>Impact: </span>
+      {children}
+    </div>
+  );
+}
+
+function PrintPriorityHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h3
+      style={{
+        fontFamily: "'Barlow Condensed', sans-serif",
+        fontWeight: 700,
+        fontSize: 12,
+        color: PRINT_TEAL,
+        margin: "16px 0 8px 0",
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+      }}
+    >
+      {children}
+    </h3>
+  );
+}
+
+interface ParsedRec {
+  category: "immediate" | "high" | "ongoing" | "other";
+  text: string;
+}
+
+function categorizeRecommendation(line: string): ParsedRec {
+  const lower = line.toLowerCase();
+  if (
+    lower.includes("[quick win]") ||
+    lower.includes("immediate") ||
+    lower.includes("this week") ||
+    lower.includes("today")
+  ) {
+    return { category: "immediate", text: line };
+  }
+  if (
+    lower.includes("[map pack]") ||
+    lower.includes("[strategic]") ||
+    lower.includes("[content]") ||
+    lower.includes("high priority") ||
+    lower.includes("within 2 weeks") ||
+    lower.includes("within two weeks")
+  ) {
+    return { category: "high", text: line };
+  }
+  if (lower.includes("[long-tail]") || lower.includes("[ongoing]") || lower.includes("ongoing")) {
+    return { category: "ongoing", text: line };
+  }
+  return { category: "other", text: line };
+}
+
+function splitRecommendations(text: string): string[] {
+  if (!text) return [];
+  const parts = text
+    .split(/(?:^|\n)\s*\d+\.\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : [text.trim()];
+}
+
+function PrintableReport({ property }: { property: Property }) {
+  const llmRecs = property.llmAuditRecommendations;
+  const llmTs = property.llmAuditTimestamp;
+  const seo = property.seoAudit;
+
+  const now = new Date();
+  const monthYear = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const auditDateBase = llmTs ? new Date(llmTs) : seo ? new Date(seo.timestamp) : now;
+  const auditDate = auditDateBase.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const earnedLLM = LLM_ITEMS.reduce(
+    (s, i) => s + earnedPoints(i.pts, statusOf(property, i.id)),
+    0
+  );
+  const totalLLM = LLM_ITEMS.reduce((s, i) => s + i.pts, 0);
+  const scorePct = totalLLM > 0 ? Math.round((earnedLLM / totalLLM) * 100) : 0;
+
+  let seoMP = 0;
+  let seoP1 = 0;
+  let seoAvg: number | null = null;
+  if (seo) {
+    seoMP = seo.ranks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
+    seoP1 = seo.ranks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
+    const valid = seo.ranks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
+    seoAvg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
+  }
+
+  const cssName = property.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const pageStyles = `
+@media print {
+  @page {
+    size: letter;
+    margin: 0.85in 0.65in 0.75in 0.65in;
+    @top-left {
+      content: "CRES  |  Marketing Audit  |  ${cssName}  |  ${monthYear}";
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 8.5pt;
+      color: #062347;
+      margin-top: 0.4in;
+    }
+    @top-right { content: ""; }
+    @bottom-center {
+      content: "Confidential – Prepared by CRES  |  Page " counter(page);
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 8.5pt;
+      color: #888;
+      margin-bottom: 0.4in;
+    }
+  }
+}`;
+
+  const missingHigh = LLM_ITEMS.filter(
+    (i) => statusOf(property, i.id) === "missing" && i.pts >= 10
+  );
+  const partialHigh = LLM_ITEMS.filter(
+    (i) => statusOf(property, i.id) === "partial" && i.pts >= 10
+  );
+  const completeCount = LLM_ITEMS.filter(
+    (i) => statusOf(property, i.id) === "complete"
+  ).length;
+
+  const llmSummaryLine =
+    llmTs && completeCount > 0
+      ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%), with ${completeCount} of ${LLM_ITEMS.length} optimization checks fully met.`
+      : llmTs
+      ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%) — significant optimization headroom remains across the 10-item checklist.`
+      : "An LLM Visibility audit has not yet been run for this property. Run it from the LLM Visibility tab to populate this section.";
+
+  const seoSummaryLine = seo
+    ? `Across ${seo.queries.length} auto-generated search queries representative of in-market renter intent, the property appears in the Google Map Pack for ${seoMP} and on Page 1 organically for ${seoP1}${seoAvg ? ` (average organic rank #${seoAvg})` : ""}.`
+    : "A SEO Audit has not yet been run for this property. Run it from the SEO & Rank Check tab to populate this section.";
+
+  const gapLine =
+    missingHigh.length > 0 || partialHigh.length > 0
+      ? `The most material gaps identified are: ${[...missingHigh, ...partialHigh]
+          .slice(0, 3)
+          .map((i) => i.label)
+          .join("; ")}. Detailed findings and prioritized actions follow.`
+      : "Detailed findings and prioritized actions follow.";
+
+  const llmRecLines = splitRecommendations(llmRecs || "");
+  const seoRecLines = splitRecommendations(seo?.recommendations || "");
+  const allRecs: ParsedRec[] = [
+    ...llmRecLines.map(categorizeRecommendation),
+    ...seoRecLines.map(categorizeRecommendation),
+  ];
+  const recImmediate = allRecs.filter((r) => r.category === "immediate" || r.category === "other").slice(0, 5);
+  const recHigh = allRecs.filter((r) => r.category === "high").slice(0, 6);
+  const recOngoing = allRecs.filter((r) => r.category === "ongoing");
+
+  const bodyP: React.CSSProperties = {
+    fontFamily: "'Josefin Sans', sans-serif",
+    fontSize: 11,
+    lineHeight: 1.6,
+    color: PRINT_BODY,
+    margin: "0 0 10px 0",
+  };
+  const findingsTd: React.CSSProperties = {
+    padding: "8px 10px",
+    fontSize: 10.5,
+    lineHeight: 1.55,
+    color: PRINT_BODY,
+    verticalAlign: "top",
+    borderBottom: "0.5px solid #d8d8d8",
+  };
+  const findingsTh: React.CSSProperties = {
+    padding: "7px 10px",
+    background: PRINT_NAVY,
+    color: "white",
+    textAlign: "left",
+    fontFamily: "'Barlow Condensed', sans-serif",
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+  };
+
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
+      <div
+        className="printable-report"
+        style={{
+          color: PRINT_BODY,
+          fontFamily: "'Josefin Sans', sans-serif",
+          fontSize: 11,
+          lineHeight: 1.55,
+        }}
+      >
+        {/* ============ COVER PAGE ============ */}
+        <section
+          className="pb-after"
+          style={{ textAlign: "center", paddingTop: "1.4in" }}
+        >
+          <div
+            style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontWeight: 700,
+              fontSize: 62,
+              letterSpacing: "0.22em",
+              color: PRINT_NAVY,
+              marginBottom: 28,
+            }}
+          >
+            CRES
+          </div>
+          <div
+            style={{
+              width: "52%",
+              borderTop: `3px solid ${PRINT_ORANGE}`,
+              margin: "0 auto 32px",
+            }}
+          />
+          <h1
+            style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontWeight: 700,
+              fontSize: 32,
+              color: PRINT_NAVY,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              margin: 0,
+            }}
+          >
+            Marketing Audit Report
+          </h1>
+          <div
+            style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 13,
+              color: PRINT_TEAL,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              marginTop: 8,
+              marginBottom: 28,
+            }}
+          >
+            LLM &amp; SEO Visibility
+          </div>
+          <div
+            style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 22,
+              fontWeight: 700,
+              color: PRINT_NAVY,
+              marginBottom: 8,
+            }}
+          >
+            {property.name}
+          </div>
+          <div style={{ fontSize: 13, color: "#222", marginBottom: 18 }}>
+            {property.address || "(no address set)"}
+          </div>
+          {property.managerName && (
+            <div style={{ fontSize: 12, color: PRINT_MUTED, marginBottom: 6 }}>
+              Managed by {property.managerName}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: PRINT_MUTED, marginBottom: 6 }}>
+            Audit Date: {auditDate}
+          </div>
+          <div style={{ fontSize: 12, color: PRINT_MUTED }}>Prepared by: CRES</div>
+        </section>
+
+        {/* ============ EXECUTIVE SUMMARY ============ */}
+        <section className="pb-before">
+          <PrintSectionHeader>Executive Summary</PrintSectionHeader>
+          <p style={bodyP}>
+            This audit reviewed the LLM search visibility and Google ranking position of{" "}
+            <strong>{property.name}</strong>
+            {property.address ? ` (${property.address})` : ""}
+            {property.managerName ? `, managed by ${property.managerName}` : ""}. The audit covered
+            two dimensions: AI search citability via a 10-item LLM Visibility checklist (Google
+            Business Profile, schema markup, review volume and quality, NAP consistency across ILS
+            platforms, structured FAQ, Bing presence, third-party citations, and owner review
+            response), and live Google ranking performance via real-time SerpAPI queries.
+          </p>
+          <p style={bodyP}>{llmSummaryLine}</p>
+          <p style={bodyP}>{seoSummaryLine}</p>
+          <p style={bodyP}>{gapLine}</p>
+        </section>
+
+        {/* ============ PROPERTY PROFILE ============ */}
+        <section className="pb-before">
+          <PrintSectionHeader>Property Profile</PrintSectionHeader>
+          <table>
+            <tbody>
+              {(
+                [
+                  ["Name", property.name],
+                  ["Address", property.address || "—"],
+                  ["Units", property.units || "—"],
+                  ["Year Built", property.yearBuilt || "—"],
+                  [
+                    "Rent Range",
+                    property.priceMin && property.priceMax
+                      ? `$${property.priceMin.toLocaleString()} – $${property.priceMax.toLocaleString()}/mo`
+                      : "—",
+                  ],
+                  ["Manager", property.managerName || "—"],
+                  ["Nearby", property.nearBy || "—"],
+                  ["Amenities", property.amenities.length ? property.amenities.join(", ") : "—"],
+                ] as [string, React.ReactNode][]
+              ).map(([k, v]) => (
+                <tr key={k}>
+                  <td
+                    style={{
+                      padding: "5px 14px 5px 0",
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: PRINT_NAVY,
+                      width: 110,
+                      verticalAlign: "top",
+                      borderBottom: "0.5px solid #e0e0e0",
+                    }}
+                  >
+                    {k}
+                  </td>
+                  <td
+                    style={{
+                      padding: "5px 0",
+                      fontSize: 11,
+                      color: PRINT_BODY,
+                      verticalAlign: "top",
+                      borderBottom: "0.5px solid #e0e0e0",
+                    }}
+                  >
+                    {v || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        {/* ============ LLM VISIBILITY FINDINGS ============ */}
+        {(llmTs || llmRecs) && (
+          <section className="pb-before">
+            <PrintSectionHeader>LLM Visibility Audit Findings</PrintSectionHeader>
+            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
+              Audited {llmTs ? new Date(llmTs).toLocaleString() : "—"}. Score{" "}
+              <strong style={{ color: PRINT_NAVY }}>
+                {earnedLLM}/{totalLLM}
+              </strong>{" "}
+              ({scorePct}%).
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th style={findingsTh}>Data Point</th>
+                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Status</th>
+                  <th style={findingsTh}>Audit Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {LLM_ITEMS.map((item) => {
+                  const status = statusOf(property, item.id);
+                  const earned = earnedPoints(item.pts, status);
+                  const ev = property.checklistEvidence?.[String(item.id)];
+                  return (
+                    <tr key={item.id} className="pb-avoid">
+                      <td
+                        style={{
+                          ...findingsTd,
+                          fontFamily: "'Josefin Sans', sans-serif",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: PRINT_NAVY,
+                          width: 170,
+                        }}
+                      >
+                        {item.label}
+                      </td>
+                      <td
+                        style={{
+                          ...findingsTd,
+                          background: STATUS_BG[status],
+                          color: STATUS_TEXT[status],
+                          fontWeight: 700,
+                          fontSize: 10,
+                          textAlign: "center",
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {STATUS_LABEL[status]}
+                        <div
+                          style={{
+                            fontSize: 9,
+                            color: STATUS_TEXT[status],
+                            fontWeight: 500,
+                            marginTop: 2,
+                          }}
+                        >
+                          {earned}/{item.pts} pts
+                        </div>
+                      </td>
+                      <td style={findingsTd}>
+                        {ev || `No audit evidence captured. ${item.description}`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        )}
+
+        {/* ============ SEO RANK FINDINGS ============ */}
+        {seo && (
+          <section className="pb-before">
+            <PrintSectionHeader>SEO &amp; Rank Check Findings</PrintSectionHeader>
+            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
+              Audited {new Date(seo.timestamp).toLocaleString()}. {seo.queries.length} queries
+              checked against live Google data via SerpAPI.
+            </p>
+
+            <div
+              className="pb-avoid"
+              style={{ display: "flex", gap: 10, marginBottom: 18 }}
+            >
+              {(
+                [
+                  ["Map Pack Hits", `${seoMP}/${seo.queries.length}`, "Goal: 3+ of 6"],
+                  ["Page 1 Organic", `${seoP1}/${seo.queries.length}`, "Goal: 4+ of 6"],
+                  [
+                    "Avg Organic Rank",
+                    seoAvg ? `#${seoAvg}` : "—",
+                    seoAvg ? `Page ${Math.ceil(seoAvg / 10)} average` : "Not ranking",
+                  ],
+                ] as [string, string, string][]
+              ).map(([label, val, sub]) => (
+                <div
+                  key={label}
+                  style={{
+                    flex: 1,
+                    padding: "9px 12px",
+                    border: "1px solid #cfcfcf",
+                    borderLeft: `3px solid ${PRINT_TEAL}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 9,
+                      color: "#666",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      marginBottom: 4,
+                    }}
+                  >
+                    {label}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 22,
+                      fontWeight: 700,
+                      color: PRINT_NAVY,
+                      lineHeight: 1,
+                      marginBottom: 3,
+                    }}
+                  >
+                    {val}
+                  </div>
+                  <div style={{ fontSize: 9, color: "#888" }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style={findingsTh}>Query</th>
+                  <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>Map Pack</th>
+                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Organic</th>
+                  <th style={findingsTh}>Top Competitor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {seo.queries.map((q, i) => {
+                  const r = seo.ranks[i];
+                  const mapText = r.map_pack_rank
+                    ? `#${r.map_pack_rank}`
+                    : r.map_pack_appeared
+                    ? "Not top 3"
+                    : "—";
+                  const mapColor = r.map_pack_rank ? "#15803d" : "#888";
+                  const orgText = r.organic_rank
+                    ? `#${r.organic_rank} · P${r.organic_page}`
+                    : "Not in top 100";
+                  const orgColor =
+                    r.organic_rank && r.organic_rank <= 10
+                      ? "#15803d"
+                      : r.organic_rank && r.organic_rank <= 30
+                      ? "#9a7200"
+                      : "#b14a2a";
+                  return (
+                    <tr key={i} className="pb-avoid">
+                      <td style={{ ...findingsTd, fontWeight: 500 }}>{q}</td>
+                      <td
+                        style={{
+                          ...findingsTd,
+                          fontWeight: 700,
+                          color: mapColor,
+                          textAlign: "center",
+                        }}
+                      >
+                        {mapText}
+                      </td>
+                      <td
+                        style={{
+                          ...findingsTd,
+                          fontWeight: 700,
+                          color: orgColor,
+                          textAlign: "center",
+                        }}
+                      >
+                        {orgText}
+                      </td>
+                      <td style={{ ...findingsTd, fontSize: 10, color: "#555" }}>
+                        {r.top_map_pack[0] || r.top_organic[0]?.name || "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        )}
+
+        {/* ============ CRITICAL ISSUES ============ */}
+        {(missingHigh.length > 0 || partialHigh.length > 0) && (
+          <section className="pb-before">
+            <PrintSectionHeader>Critical Issues Impacting Visibility</PrintSectionHeader>
+            {[...missingHigh, ...partialHigh].slice(0, 4).map((item, idx) => {
+              const status = statusOf(property, item.id);
+              const ev = property.checklistEvidence?.[String(item.id)];
+              return (
+                <div key={item.id} className="pb-avoid">
+                  <PrintIssueHeader>
+                    Issue {idx + 1}: {item.label}
+                  </PrintIssueHeader>
+                  <p style={bodyP}>
+                    <strong>What was observed:</strong>{" "}
+                    {ev
+                      ? ev
+                      : `No audit evidence captured for this item. The check measures: ${item.description.toLowerCase()}`}
+                  </p>
+                  <PrintImpactCallout>
+                    {status === "missing"
+                      ? `This gap is worth ${item.pts} points on the LLM Visibility scorecard and directly suppresses AI-assistant citation of ${property.name}. Resolving it is high-leverage; the work is described in the Recommendations section.`
+                      : `This is partially in place but not earning full credit (${earnedPoints(item.pts, status)}/${item.pts} pts). Closing the remaining gap converts measurable visibility from "partial" to "complete" and is typically a same-week task.`}
+                  </PrintImpactCallout>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        {/* ============ RECOMMENDATIONS ============ */}
+        {(llmRecs || seo?.recommendations) && (
+          <section className="pb-before">
+            <PrintSectionHeader>Recommendations to Drive Visibility</PrintSectionHeader>
+
+            {recImmediate.length > 0 && (
+              <>
+                <PrintPriorityHeader>Immediate Priority (This Week)</PrintPriorityHeader>
+                <ul style={{ paddingLeft: 18, margin: "0 0 12px 0" }}>
+                  {recImmediate.map((r, i) => (
+                    <li
+                      key={i}
+                      style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}
+                    >
+                      {r.text}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {recHigh.length > 0 && (
+              <>
+                <PrintPriorityHeader>High Priority (Within 2 Weeks)</PrintPriorityHeader>
+                <ul style={{ paddingLeft: 18, margin: "0 0 12px 0" }}>
+                  {recHigh.map((r, i) => (
+                    <li
+                      key={i}
+                      style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}
+                    >
+                      {r.text}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {recOngoing.length > 0 && (
+              <>
+                <PrintPriorityHeader>Ongoing Optimization</PrintPriorityHeader>
+                <ul style={{ paddingLeft: 18, margin: "0 0 12px 0" }}>
+                  {recOngoing.map((r, i) => (
+                    <li
+                      key={i}
+                      style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}
+                    >
+                      {r.text}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        )}
+
+        {/* ============ SUMMARY ============ */}
+        {(llmTs || seo) && (
+          <section className="pb-before">
+            <PrintSectionHeader>Summary</PrintSectionHeader>
+            <p style={bodyP}>
+              {property.name}&rsquo;s digital visibility was evaluated across two dimensions:
+              AI-assistant citability and live Google ranking. {llmSummaryLine} {seoSummaryLine}
+            </p>
+            <p style={bodyP}>
+              The actions detailed in the Recommendations section are ordered by expected return
+              on effort. Items in the Immediate Priority band are typically completable within five
+              business days and require no third-party engagement. High Priority items generally
+              involve coordination with the property website host, ILS account managers, or onsite
+              staff. Ongoing Optimization is the maintenance layer that preserves the gains from
+              the first two bands and prevents regression.
+            </p>
+          </section>
+        )}
+
+        {/* ============ EMPTY STATE ============ */}
+        {!llmTs && !llmRecs && !seo && (
+          <section className="pb-before">
+            <PrintSectionHeader>No Audits Yet</PrintSectionHeader>
+            <p style={bodyP}>
+              No audits have been run for this property. Run the LLM Visibility audit and the SEO
+              Audit from their respective tabs, then print this report.
+            </p>
+          </section>
+        )}
+      </div>
+    </>
+  );
+}
+

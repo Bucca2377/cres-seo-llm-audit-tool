@@ -41,65 +41,39 @@ textarea {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
 
-/* Print stylesheet — turns the browser print dialog into a clean PDF export */
-.print-only { display: none; }
+/* Print stylesheet — generates a CRES-branded multi-page audit PDF */
+.printable-report { display: none; }
 
 @media print {
-  @page {
-    size: letter;
-    margin: 0.6in 0.5in 0.7in 0.5in;
-  }
-
-  body {
+  html, body {
     background: white !important;
+    color: #111 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* Hide all interactive chrome */
-  .no-print,
-  button,
-  input,
-  textarea,
-  select {
-    display: none !important;
-  }
-
-  /* Show printable-only sections */
-  .print-only {
-    display: block !important;
-  }
-
-  /* Cards expand fully, no scrollbars, no shadow */
-  * {
-    box-shadow: none !important;
-    overflow: visible !important;
-  }
-
-  /* Avoid cutting tables / cards across pages */
-  table,
-  thead,
-  tbody,
-  tr {
-    page-break-inside: avoid;
-  }
-
-  h1, h2, h3, .print-section-title {
-    page-break-after: avoid;
-  }
-
-  /* Ensure full-width content */
-  body, html {
-    width: 100%;
-    height: auto;
-  }
-
-  /* Hide the persistent navigation chrome */
+  /* Hide everything on screen */
   .top-bar,
-  .tab-nav {
-    display: none !important;
-  }
-
-  /* Property panel modal hides */
+  .tab-nav,
+  .screen-content,
   [data-print-hide="true"] {
     display: none !important;
   }
+
+  /* Show only the printable report */
+  .printable-report {
+    display: block !important;
+  }
+
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Page-break helpers */
+  .pb-before { page-break-before: always; }
+  .pb-after  { page-break-after: always; }
+  .pb-avoid  { page-break-inside: avoid; }
+
+  table { width: 100%; border-collapse: collapse; }
+  table, thead, tbody, tr { page-break-inside: avoid; }
 }

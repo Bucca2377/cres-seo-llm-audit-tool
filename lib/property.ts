@@ -18,6 +18,23 @@ export interface Property {
   managerName: string;
   checklistStatuses?: Record<string, ChecklistStatus>;
   checklistEvidence?: Record<string, string>;
+  llmAuditRecommendations?: string;
+  llmAuditTimestamp?: string;
+  seoAudit?: {
+    queries: string[];
+    ranks: Array<{
+      map_pack_appeared: boolean;
+      map_pack_rank: number | null;
+      expanded_map_pack_rank?: number | null;
+      top_map_pack: string[];
+      organic_rank: number | null;
+      organic_page: number | null;
+      top_organic: Array<{ name: string; domain: string }>;
+      diagnosis: string;
+    }>;
+    recommendations: string;
+    timestamp: string;
+  };
 }
 
 const ROSTER_KEY = "cres-roster";
@@ -307,6 +324,23 @@ export function useRoster() {
     importProperty,
     hydrated,
   };
+}
+
+export async function callSerp(opts: {
+  query: string;
+  location?: string;
+  engine?: "google" | "google_maps";
+}) {
+  const r = await fetch("/api/serp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: "SerpAPI request failed" }));
+    throw new Error(err.error || `SerpAPI failed (${r.status})`);
+  }
+  return r.json();
 }
 
 export async function callAI(opts: {
