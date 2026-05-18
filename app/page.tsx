@@ -163,37 +163,74 @@ Return ONLY a JSON object:
     setLoadingAudit(true);
     setAuditError(null);
     try {
+      const city =
+        property.address.split(",").slice(-2, -1)[0]?.trim() ||
+        property.address.split(",")[1]?.trim() ||
+        "";
       const itemsList = LLM_ITEMS.map(
         (i) => `${i.id}. ${i.label} — ${i.description}`
       ).join("\n");
-      const prompt = `Audit ${property.name} at ${property.address} for LLM search visibility. Use web search to verify each checklist item below. Be evidence-based and conservative — when uncertain, mark "partial" or "missing" with a note explaining why.
 
-CHECKLIST ITEMS:
+      const prompt = `Audit ${property.name} at ${property.address} for LLM search visibility. Use web search aggressively — do as many searches as needed to reach a confident verdict on each item.
+
+PROPERTY FACTS:
+- Name in our system: ${property.name}
+- Address: ${property.address}
+- City: ${city}
+${property.managerName ? `- Management company: ${property.managerName}` : ""}
+${property.amenities.length ? `- Known amenities: ${property.amenities.slice(0, 6).join(", ")}` : ""}
+
+PHASE 1 — PROPERTY IDENTIFICATION (do this first):
+The property may be listed online under a slightly different name (e.g., "View Apartments by Trion Living" when our system has "View Apartments"). Search multiple query variations to find its actual web footprint:
+- "${property.name}" alone
+- "${property.name} ${city}"
+- "${property.name} apartments ${city}"
+${property.managerName ? `- "${property.name} ${property.managerName}"` : ""}
+- The property's likely website domain
+
+Note the property's:
+- Official Google Business Profile name (record the EXACT name as it appears on Google)
+- Official website URL
+- Listed phone number
+- Visible review counts and ratings from Google, Apartments.com, Yelp, Apartment Ratings, etc.
+
+PHASE 2 — GRADE EACH CHECKLIST ITEM:
+
+CHECKLIST:
 ${itemsList}
 
-How to evaluate each item:
-1. Google Business Profile — search for "${property.name} ${property.address}". Complete if a verified business listing exists with photos, hours, description; partial if listing exists but is sparse/unverified; missing if no GBP found.
-2. Apartment Schema Markup — search for the property's official website. Complete only if you can confirm JSON-LD RentalApartment markup is present; partial if a website exists but schema can't be verified from search snippets; missing if no website found.
-3. Review Volume — complete if 50+ reviews across Google + Apartments.com combined; partial if 20-49; missing if <20 or unable to find.
-4. Review Quality — complete if average rating ≥4.0; partial if 3.0-3.9; missing if <3.0 or no reviews exist.
-5. NAP Consistency Across ILS — check Apartments.com, Zillow, Rent.com listings for this property. Complete if name/address/phone match exactly across platforms; partial if minor formatting differences; missing if major inconsistencies or platforms missing entirely.
-6. Structured FAQ on Website — search the property website (if found) for a FAQ page. Complete if a structured Q&A FAQ exists; partial if some FAQ-style content but no dedicated page; missing if no FAQ found.
-7. Bing Places Claimed — search Bing for the property. Complete if a claimed Bing Places listing is visible; partial if listing exists but appears unclaimed; missing if no Bing presence.
-8. Amenities Structured Data — check Apartments.com and Zillow listings. Complete if amenities are tagged consistently across platforms; partial if some platforms missing amenity tags; missing if amenities are largely absent.
-9. Perplexity / Web Citations — search for "${property.name}" plus "best apartments" or "rental guide" in its city. Complete if cited in 2+ third-party guides; partial if 1 citation; missing if none.
-10. Owner Response to Reviews — check Google reviews for the property. Complete if owner/manager responds to ≥75% of reviews; partial if some responses; missing if no responses visible.
+Grading rubric — when evidence is clearly visible in search results, lean toward "complete". Only mark "missing" when MULTIPLE varied searches turn up nothing. Use "partial" for moderate evidence that doesn't fully meet the bar.
 
-Return ONLY a JSON object in this exact shape, no prose before or after:
+1. Google Business Profile — COMPLETE if search results show a Google Business listing for this property at any of its name variations, displaying ANY of: star rating + review count, business hours, address pinned on map, photos, or "Apartment rental agency"/"Apartments" category. PARTIAL only if a listing exists but appears truly sparse (no description, no photos, fewer than 5 reviews). MISSING only if no GBP appears under any name variation after multiple searches.
+
+2. Apartment Schema Markup — Check the property's official website (visit the homepage if found). COMPLETE only if you can confirm JSON-LD/RentalApartment schema. PARTIAL if the website exists and is well-structured but schema can't be confirmed from snippets. MISSING if no official website found.
+
+3. Review Volume — Sum visible review counts across Google + Apartments.com + Yelp + Apartment Ratings + any other platforms. COMPLETE if total ≥50 across platforms. PARTIAL if 20-49. MISSING if <20 or unable to find any. (A GBP with 312 Google reviews alone clearly qualifies as COMPLETE.)
+
+4. Review Quality — COMPLETE if average rating ≥4.0 on the primary platform (usually Google). PARTIAL if 3.0-3.9. MISSING if <3.0 or no reviews exist.
+
+5. NAP Consistency — Search for the property on Apartments.com, Zillow, Rent.com, Apartment Finder. COMPLETE if name + address + phone appear consistently across at least 3 platforms. PARTIAL if minor formatting differences (St./Street, Ave/Avenue) or missing from 1-2 platforms. MISSING if major inconsistencies or absent from most platforms.
+
+6. Structured FAQ on Website — If you found the website in Phase 1, look for an /faq, /questions, or /resident-faq URL. COMPLETE if a dedicated FAQ page exists. PARTIAL if FAQ-style content exists but not on a dedicated page. MISSING if no FAQ content found OR no website found.
+
+7. Bing Places — Search Bing.com for the property name + city. COMPLETE if a Bing local business listing appears with reviews/hours. PARTIAL if a Bing entry exists but seems unclaimed (no description, no photos). MISSING if no Bing local presence.
+
+8. Amenities Structured Data — Check the property's Apartments.com listing. COMPLETE if the listing has a fully populated amenities section (10+ amenities tagged). PARTIAL if some amenities listed but sparse (<10). MISSING if no Apartments.com listing or no amenities listed.
+
+9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
+
+10. Owner Response to Reviews — Check Google reviews for the property. COMPLETE if you can see management responses to most recent reviews (look at the top 5-10 reviews on Google). PARTIAL if some responses visible. MISSING if no management responses on visible reviews.
+
+Return ONLY a JSON object, no prose before or after:
 {
   "audit": [
-    {"id": 1, "status": "complete" | "partial" | "missing", "evidence": "one short sentence with the specific finding"},
-    {"id": 2, "status": "...", "evidence": "..."},
-    ... (entries for all 10 items, in id order)
+    {"id": 1, "status": "complete" | "partial" | "missing", "evidence": "one specific sentence citing what you found, including names/numbers"},
+    ... (entries for ALL 10 items, in id order)
   ],
   "recommendations": "1. First action\\n2. Second action\\n3. Third action\\n4. Fourth action\\n5. Fifth action"
 }
 
-Recommendations must be specific to ${property.name}'s actual gaps (use the property's amenities and location). Order by highest impact first.`;
+Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartments by Trion Living' at 10701 N Pecos St with 312 Google reviews at 3.8 stars, hours and photos present" — NOT generic statements like "GBP exists"). Recommendations must be specific to ${property.name}'s actual gaps and reference the audit findings. Order by highest impact first.`;
 
       const data = await callAI({ prompt, maxTokens: 4000, useWebSearch: true });
       const text = (data.content || [])
@@ -1275,7 +1312,7 @@ export default function MarketingHub() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#eff2f5", fontFamily: "'Josefin Sans',sans-serif" }}>
-      <div style={{ background: B.oxford, padding: "0 32px", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
+      <div className="top-bar" style={{ background: B.oxford, padding: "0 32px", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 20, letterSpacing: "0.14em", color: "white" }}>CRES</div>
           <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.15)" }} />
@@ -1464,6 +1501,25 @@ export default function MarketingHub() {
             <span style={{ width: 6, height: 6, background: "#22c55e", borderRadius: "50%", animation: "lp 2s infinite", display: "inline-block" }} />
             <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#22c55e" }}>Live AI</span>
           </div>
+          <button
+            onClick={() => window.print()}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 20,
+              padding: "4px 14px",
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 11,
+              color: "white",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            title="Open the browser print dialog. Choose 'Save as PDF' as the destination to download a PDF of the current tab's findings."
+          >
+            <span>📄</span> Print Report
+          </button>
           <button onClick={() => setSettingsOpen(true)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>⚙</span> Edit
           </button>
@@ -1471,7 +1527,74 @@ export default function MarketingHub() {
       </div>
 
       <div style={{ padding: "24px 32px" }}>
-        <div style={{ display: "flex", gap: 0, marginBottom: 22, borderBottom: `2px solid #e0e0e0`, background: "white", borderRadius: "10px 10px 0 0", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+        {/* Print-only header (hidden on screen, shown in PDF) */}
+        <div
+          className="print-only"
+          style={{
+            marginBottom: 20,
+            paddingBottom: 14,
+            borderBottom: `2px solid ${B.oxford}`,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "'Barlow Condensed',sans-serif",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: "0.18em",
+              color: B.caribbean,
+              textTransform: "uppercase",
+              marginBottom: 4,
+            }}
+          >
+            CRES Marketing Intelligence
+          </div>
+          <div
+            style={{
+              fontFamily: "'Barlow Condensed',sans-serif",
+              fontWeight: 700,
+              fontSize: 26,
+              color: B.oxford,
+              lineHeight: 1.1,
+              marginBottom: 4,
+            }}
+          >
+            {property.name}
+          </div>
+          <div
+            style={{
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 12,
+              color: "#666",
+              marginBottom: 8,
+            }}
+          >
+            {property.address}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 18,
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 11,
+              color: "#888",
+            }}
+          >
+            <span>
+              <strong>Report:</strong>{" "}
+              {tab === "llm"
+                ? "LLM Visibility Audit"
+                : tab === "seo"
+                ? "SEO & Rank Check"
+                : "Content"}
+            </span>
+            <span>
+              <strong>Generated:</strong> {new Date().toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        <div className="tab-nav" style={{ display: "flex", gap: 0, marginBottom: 22, borderBottom: `2px solid #e0e0e0`, background: "white", borderRadius: "10px 10px 0 0", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
           {TABS.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: "13px 0", border: "none", borderBottom: tab === t.id ? `3px solid ${B.caribbean}` : "3px solid transparent", background: "transparent", color: tab === t.id ? B.caribbean : "#888", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, fontWeight: tab === t.id ? 400 : 300, cursor: "pointer", marginBottom: -2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all 0.14s" }}>
               {t.label}

@@ -40,3 +40,66 @@ textarea {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+
+/* Print stylesheet — turns the browser print dialog into a clean PDF export */
+.print-only { display: none; }
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.6in 0.5in 0.7in 0.5in;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  /* Hide all interactive chrome */
+  .no-print,
+  button,
+  input,
+  textarea,
+  select {
+    display: none !important;
+  }
+
+  /* Show printable-only sections */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Cards expand fully, no scrollbars, no shadow */
+  * {
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  /* Avoid cutting tables / cards across pages */
+  table,
+  thead,
+  tbody,
+  tr {
+    page-break-inside: avoid;
+  }
+
+  h1, h2, h3, .print-section-title {
+    page-break-after: avoid;
+  }
+
+  /* Ensure full-width content */
+  body, html {
+    width: 100%;
+    height: auto;
+  }
+
+  /* Hide the persistent navigation chrome */
+  .top-bar,
+  .tab-nav {
+    display: none !important;
+  }
+
+  /* Property panel modal hides */
+  [data-print-hide="true"] {
+    display: none !important;
+  }
+}
