@@ -18,38 +18,48 @@
 ## Part 1: Platform Architecture (Target State)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    CRES PM PLATFORM                              │
-├──────────────────────────────────┬──────────────────────────────┤
-│  PROPERTY MANAGEMENT             │  MARKETING INTELLIGENCE       │
-│                                  │                               │
-│  • Dashboard                     │  • LLM Visibility ✅          │
-│  • Tenants & Leases              │  • SEO & Rank Check ✅        │
-│  • Maintenance / Work Orders     │  • Content Generator ✅       │
-│  • Living Ledger (financial core)│  • Lead Attribution           │
-│  • Automation Hub                │  • PPC Campaigns              │
-│  • Vendors                       │  • ILS Listings               │
-│  • Reporting                     │                               │
-├──────────────────────────────────┼──────────────────────────────┤
-│  LEASING INTELLIGENCE (FLAIR)    │  OWNER & PORTFOLIO            │
-│                                  │                               │
-│  • Live Lead-Response Dialer     │  • Portfolio Dashboard        │
-│  • Call Recording + Scoring      │  • Owner Portal (read-only)   │
-│  • Agent Scorecards              │  • Monthly Owner PDF Report   │
-│  • Secret Shop Reports           │  • Benchmarking               │
-│  • Coaching / Action Items       │                               │
-├──────────────────────────────────┴──────────────────────────────┤
-│                AI LAYER (Anthropic Claude)                       │
-│   Ambient insight cards · Chat panel · Web search                │
-│   Invoice extraction · Content generation · Audit reasoning      │
-├─────────────────────────────────────────────────────────────────┤
-│                DATA LAYER (Supabase)                             │
-│   Postgres · Auth · Realtime · Storage · Row-level security      │
-├─────────────────────────────────────────────────────────────────┤
-│                INTEGRATION LAYER                                 │
-│   Plaid · Resend · CallRail · GSC · Google Ads · Meta Ads        │
-│   SerpAPI · Stripe · AppFolio/Yardi · FLAIR API                  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          CRES PM PLATFORM                                 │
+├──────────────────────────────────┬───────────────────────────────────────┤
+│  PROPERTY OPERATIONS             │  MARKETING & LEAD INTELLIGENCE         │
+│                                  │                                        │
+│  • Dashboard                     │  • LLM Visibility ✅                   │
+│  • Tenants & Leases              │  • SEO & Rank Check ✅                 │
+│  • Maintenance / Work Orders     │  • Content Generator ✅                │
+│  • Living Ledger (financial core)│  • Lead Attribution                    │
+│  • Automation Hub                │  • PPC Campaigns (Google + Meta)       │
+│  • Vendors                       │  • ILS Listings                        │
+│  • Reporting                     │                                        │
+├──────────────────────────────────┼───────────────────────────────────────┤
+│  LEASING (FLAIR + Screening)     │  RESIDENT LIFECYCLE                    │
+│                                  │                                        │
+│  • Live Lead-Response Dialer     │  • Resident Portal (work orders, rent, │
+│  • Call Recording + Scoring      │    messaging, documents)               │
+│  • Agent Scorecards              │  • Screening & Application             │
+│  • Secret Shop Reports           │  • Renewals & Retention                │
+│  • Tenant Screening (API)        │  • Collections                         │
+│  • Application + Lease Signing   │  • Move-out flow                       │
+├──────────────────────────────────┼───────────────────────────────────────┤
+│  RESIDENT SERVICES MARKETPLACE   │  OWNER & PORTFOLIO                     │
+│                                  │                                        │
+│  • Laundry (Rinse, SudShare)     │  • Portfolio Dashboard                 │
+│  • Cleaning (Tend, Handy)        │  • Owner Portal (read-only)            │
+│  • Dog Walking (Wag, Rover)      │  • Monthly Owner PDF Report            │
+│  • Smart Access (Latch)          │  • Benchmarking                        │
+│  • Concierge (Hello Alfred)      │                                        │
+├──────────────────────────────────┴───────────────────────────────────────┤
+│                  AI LAYER (Anthropic Claude)                              │
+│   Ambient insight cards · Chat panel · Web search · Invoice extraction    │
+│   Content generation · Audit reasoning · Renewal letters · Risk scoring   │
+├──────────────────────────────────────────────────────────────────────────┤
+│                  DATA LAYER (Supabase)                                    │
+│   Postgres · Auth · Realtime · Storage · Row-level security               │
+├──────────────────────────────────────────────────────────────────────────┤
+│                  INTEGRATION LAYER                                        │
+│   Plaid · Resend · Stripe · Twilio · CallRail · GSC · Google + Meta Ads   │
+│   SerpAPI · FLAIR API · AppFolio/Yardi · TransUnion SmartMove · DocuSign  │
+│   TLG Collections · Service Providers (Rinse, Wag, Tend, Hello Alfred)    │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -171,11 +181,8 @@ Plaid Bank Feed Integration
 - Webhook auto-matches transactions to tenants by amount + date
 - Eliminates ~40 manual payment confirmations/month/property
 
-Tenant Portal (standalone /portal route)
-- Magic-link auth via email
-- Current balance + payment history + submit payment (Stripe ACH or card)
-- Payment success webhook → ledger entry created
-- Maintenance request form → creates work_order
+(Note: Resident Portal moved to Phase 5 — Resident Lifecycle, where it's
+treated as a full module rather than a payment-only stub.)
 ```
 
 ### Phase 3 — Marketing Intelligence Hub 🟡 (~40% already shipped)
@@ -298,7 +305,193 @@ Cost considerations
   still works at Step 1 (manual PDF upload) — degrades gracefully.
 ```
 
-### Phase 5 — Portfolio & Owner Layer 🔴
+### Phase 5 — Resident Lifecycle 🔴
+**3-4 weeks · The full prospect→resident→renewal→move-out flow**
+
+This phase brings the resident-facing modules into the platform. Each
+submodule is a build-vs-integrate decision; defaults below.
+
+```
+======================================================================
+5a. Screening & Application Module
+======================================================================
+Build: native application form, lease document storage, status tracking
+Integrate: identity + credit + criminal + eviction history checks
+
+Application flow
+- Public application form (per property, mobile-friendly)
+- Required fields: contact, income, employment, rental history,
+  emergency contact, vehicle info, pet info
+- File uploads: ID, pay stubs, bank statements
+- Application fee via Stripe ($50-$75 typical)
+- Status pipeline: submitted → screening → approved → lease-out
+
+Screening integrations (pick one as primary; can support multiple)
+- TransUnion SmartMove          ($25-$40/applicant) — industry standard
+- Experian RentBureau           ($30-$50/applicant) — strong on rental history
+- Plaid Income + Identity       ($1-$5/applicant)   — modern, bank-data-backed
+- LeasingDesk (RealPage)        ($35-$45/applicant) — bundled if on RealPage
+- AppFolio Screening            (free if on AppFolio) — only if AppFolio sync
+- AAOA (American Apartment Owners Association)      — lower volume, cheaper
+- Snappt or DocVerify           ($5-$10/applicant)  — document fraud detection
+
+Screening rule engine
+- Property-specific income multiplier (e.g., 2.5x or 3x monthly rent)
+- Credit score floor (e.g., 600+)
+- Eviction record gating
+- Criminal record gating (configurable per jurisdiction)
+- Conditional approval: higher deposit, co-signer required, etc.
+
+Lease execution
+- DocuSign or HelloSign integration for e-signatures
+- Lease templates per property
+- Auto-creates tenant record + ledger entries on countersign
+
+======================================================================
+5b. Resident Portal Module
+======================================================================
+Build: native portal at /portal route, mobile-first PWA
+Integrate: Stripe for payments, Twilio for messaging
+
+Authentication
+- Magic-link email login (no password)
+- Or SMS OTP via Twilio
+- Session persists 30 days
+
+Portal Features
+- Dashboard
+  · Balance due + next payment date
+  · Open work orders + status
+  · Recent activity (lease docs, notices, messages)
+  · Lease info (end date, renewal CTA if within 90 days)
+
+- Rent Payment
+  · ACH (free) or card (2.9% + $0.30) via Stripe
+  · Auto-pay enrollment
+  · Partial payment with payment plan
+  · Receipts auto-emailed
+  · Webhook → ledger_entry confirmed
+
+- Work Orders
+  · Submit new request (issue, category, priority, photos)
+  · View status / vendor / ETA
+  · Approve / reject completion
+  · Rate the work after close
+  · Real-time updates via Supabase Realtime
+
+- Messaging (Inbox)
+  · Two-way thread with property management
+  · Office hours auto-responder
+  · AI draft assistant for common questions (Claude — "Where do I park?",
+    "How do I refer a friend?", "Is the gym open today?")
+  · Push notifications via PWA or SMS fallback
+
+- Documents
+  · Lease + addenda
+  · Move-in inspection report
+  · Notices (rent increase, community announcements)
+  · Payment receipts
+
+- Profile
+  · Update contact info, emergency contact
+  · Pet registration
+  · Vehicle registration
+  · Renters insurance upload (auto-reminder if expiring)
+
+- Referrals
+  · Trackable referral link per resident
+  · Reward when referred prospect signs lease (configurable per property)
+
+Tech notes
+- Mobile-first (most residents will use phone)
+- PWA so it's installable to home screen without app store
+- Push notifications via web push API + Twilio SMS fallback
+
+======================================================================
+5c. Renewals & Retention Module
+======================================================================
+Build: native renewal flow + AI letter generation + retention scoring
+Integrate: optional renewal-specialist services
+
+Renewal pipeline
+- 120 days before lease_end: auto-create renewal record (status: pending)
+- 90 days before: Claude drafts renewal offer letter using property
+  context + market data + resident history
+  · Suggested new rent (configurable: flat, market-rate, formula)
+  · Lease term options (12 / 18 / 24 months)
+  · Incentives (free month, upgrade credit, etc.)
+- PM reviews + approves with one click
+- Letter sent via email + posted to resident portal
+- Resident accepts / counter-offers / declines in portal
+- All actions update tenant status in real time
+
+Retention scoring (AI-driven)
+- Per-resident risk score based on:
+  · Payment history (on-time %, late count)
+  · Work order satisfaction ratings
+  · Lease length (longer = lower churn risk)
+  · Recent inquiries about move-out / lease break
+  · Survey responses
+  · FLAIR call data (if they've called the office recently with frustration)
+- High-risk residents flagged for proactive outreach
+- Low-risk residents get streamlined renewal flow
+
+Exit surveys
+- Auto-sent on non-renewal
+- Captures reason for leaving (rent, amenities, management, life event)
+- Data feeds back into property improvement priorities
+
+======================================================================
+5d. Collections Module
+======================================================================
+Build: automated reminder cadence + payment plans + activity tracking
+Integrate: collections agency handoff for severe delinquency
+
+Delinquency pipeline
+- Day 1-5 past due: friendly portal banner + auto-email reminder
+- Day 6-10: text reminder via Twilio + late fee auto-assessed
+- Day 11-20: PM-initiated outreach (call + offer payment plan)
+- Day 21-30: pre-notice (warning of legal action)
+- Day 31+: file 3-day notice / eviction filing (depends on jurisdiction)
+- Day 60+: handoff to collections agency for past residents
+
+Payment plan tool
+- PM creates custom plan in portal: amount, due dates, auto-debit ACH
+- Resident signs digitally; plan tracked in ledger
+- Missed plan payment auto-escalates to next pipeline stage
+
+Collections agency integrations (handoff)
+- TLG Collections                 — multifamily-focused
+- EZ Collect                      — multifamily-focused
+- Resident Resources              — multifamily-focused
+- RentDebt Automated Collections  — multifamily-focused
+- Cross Country Collections       — general but multifamily-experienced
+
+PM workflow
+- Per-property delinquency dashboard
+- Per-resident timeline of all attempts
+- Bulk actions (send all 3-day notices for property X)
+- Court filing prep doc generator (Claude)
+
+======================================================================
+5e. Move-Out Flow
+======================================================================
+Build: native checklist + photo documentation + security deposit calc
+
+Move-out pipeline
+- 30-day notice intake (from resident portal or PM-entered)
+- Move-out inspection scheduled
+- Inspection app for PM (photos, damage notes, repair estimates)
+- Security deposit reconciliation
+  · Itemized deductions
+  · Refund calculation
+  · Auto-generated disposition letter (Claude)
+  · Compliance check per jurisdiction (deadlines vary by state)
+- Stripe refund initiation (or check via Resend → bookkeeper)
+- Vacancy turnover work orders auto-created
+```
+
+### Phase 6 — Portfolio & Owner Layer 🔴
 **2-3 weeks · Run the whole firm from one screen**
 
 ```
@@ -325,18 +518,125 @@ Benchmarking
 - AI identifies which property needs attention and why
 ```
 
-### Phase 6 — Advanced Integrations 🔴
+### Phase 7 — Resident Services Marketplace 🔴
+**2-3 weeks · In-app booking for life-logistics services**
+
+Residents book services through the resident portal; CRES gets revenue
+share or referral fees per booking. Each service is either embedded
+(direct API) or referral-link.
+
+```
+======================================================================
+Service Categories + Recommended Providers
+======================================================================
+
+Laundry & Dry Cleaning
+- Rinse              (B2C, white-label, app + delivery) — direct API
+- SudShare           (Uber-for-laundry) — referral or API
+- Press Wash         (pickup/delivery) — local markets
+- Recommend: Rinse as primary if market coverage; SudShare as fallback
+
+Home Cleaning
+- Tend               (subscription cleaning, multifamily-friendly)
+- Handy              (general home services, well-known brand)
+- TaskRabbit         (single tasks, more variable quality)
+- Cleanly            (laundry + cleaning combined)
+- Recommend: Tend for recurring, Handy for one-off
+
+Dog Walking & Pet Care
+- Wag                (largest, has API, multifamily partnerships)
+- Rover              (largest competitor, marketplace model)
+- PetCheck           (multifamily-focused, white-label option)
+- Recommend: Wag for API integration, Rover as referral link
+
+Smart Home / Access
+- Latch              (smart locks + community access — also amenity infra)
+- Igloohome          (smart locks)
+- August             (smart locks, consumer-grade)
+- Recommend: Latch if installing smart-access portfolio-wide
+
+Concierge & Errands
+- Hello Alfred       (white-label concierge for multifamily)
+- Amenify            (multifamily-focused engagement + services)
+- TaskRabbit         (errands, general)
+- Recommend: Hello Alfred or Amenify (both built for multifamily)
+
+Moving & Storage
+- Bellhop            (moving, has API)
+- Lugg               (on-demand moving, like Uber for moves)
+- Clutter            (valet storage)
+- MakeSpace          (on-demand storage)
+- Recommend: Bellhop for moving, Clutter for storage
+
+Furniture Rental
+- Feather            (modern, full-room packages)
+- CORT               (national, business-side)
+- Fernish            (subscription furniture)
+
+Resident Engagement / Events
+- Amenify            (events + services bundle)
+- Common Living      (community programming)
+
+Insurance
+- Lemonade Renters   (modern, API-friendly, low premium)
+- Roost Tenant       (multifamily-specialized)
+- ePremium / GetCovered (rental-specialist)
+
+Internet / Utilities
+- Citizens Disco     (bulk internet for multifamily)
+- Citizen Home       (white-label utility setup)
+- Citizen Wifi       (managed wifi for properties)
+
+======================================================================
+Marketplace Architecture
+======================================================================
+
+Per-resident
+- Browse services in portal
+- One-tap booking (provider handles fulfillment + payment)
+- CRES receives revenue share via referral tracking or API webhook
+- All bookings logged to resident timeline
+
+Per-property
+- PM enables/disables services per property (some only available in
+  certain markets or for properties of certain class)
+- Revenue tracking dashboard
+- Resident usage analytics (which services drive engagement)
+
+Per-portfolio
+- Negotiate bulk rates with key providers (Rinse, Hello Alfred, Tend)
+- Track revenue share across all properties
+- Service NPS / satisfaction surveys
+
+Integration model
+- Tier 1 (direct API, in-app booking): Rinse, Wag, Tend, Hello Alfred,
+  Latch, Lemonade
+- Tier 2 (referral link, attribution tracking): Rover, TaskRabbit,
+  Handy, Bellhop
+- Tier 3 (informational only, contact PM): one-off local providers
+
+Revenue model
+- Most providers offer 10-30% revenue share to multifamily partners
+- Some bundle the rev share into reduced monthly fee for the property
+- CRES platform takes platform fee (configurable per property contract)
+```
+
+### Phase 8 — Advanced Integrations 🔴
 **Ongoing**
 
 ```
 - AppFolio / Yardi bi-directional sync (CRES platform = intelligence layer
   on top of existing PM software)
 - Vendor mobile app (SMS-based, mark job started/complete, submit hours)
-- Automated rent escalation (Claude drafts renewal letters 90 days out)
+- Automated rent escalation notices (separate from Renewals — for mid-lease
+  rent adjustments where allowed)
 - Insurance + tax document parsing (Claude extracts premium, dates,
   assessed value; flags YoY anomalies)
 - Utility RUBS automation (utility@invoices.cres.com → Claude reads
   RUBS ratio → per-tenant billback)
+- Multi-language resident portal (Spanish at minimum; Vietnamese, Mandarin,
+  Tagalog for major markets)
+- Accessibility audit and WCAG 2.1 AA compliance pass on the resident portal
 ```
 
 ---
@@ -344,36 +644,78 @@ Benchmarking
 ## Part 4: Tech Stack
 
 ```
-Frontend:     Next.js 16+ (App Router)
+CORE PLATFORM
+Frontend:     Next.js 16+ (App Router) — also PWA shell for resident portal
 Database:     Supabase (Postgres + Auth + Realtime + Storage)
 ORM:          Prisma
 Styling:      Inline styles + brand CSS custom properties
+Hosting:      Vercel
+PDF:          Browser-native print + custom @page CSS
+
+AI + SEARCH
 AI:           Anthropic SDK (claude-sonnet-4-5 default)
 Search:       SerpAPI (real-time Google + Maps + Reviews)
 Charts:       Recharts
-Hosting:      Vercel
-Email:        Resend (invoice inbox, owner reports)
-Payments:     Stripe (tenant portal payments)
-PDF:          Browser-native print + custom @page CSS
-SMS:          Twilio (vendor app, Phase 6)
+
+MESSAGING + DELIVERY
+Email:        Resend (invoice inbox, owner reports, resident notices)
+SMS:          Twilio (resident texts, vendor app, payment reminders)
+E-signature:  DocuSign or HelloSign (lease execution)
+
+PAYMENTS
+Stripe:       Resident rent payments (ACH + card)
+              Application fees
+              Refund processing (security deposits)
+
+MARKETING & LEAD INTEL
+GSC:          Google Search Console API (live keyword data)
+Google Ads:   Google Ads API (live campaign data)
+Meta Ads:     Meta Marketing API
+CallRail:     Phone lead attribution
 FLAIR:        Direct API if available, else PDF parsing pipeline
+
+LEASING & RESIDENT LIFECYCLE
+Plaid:        Bank feed (Phase 2) + Income verification (Phase 5 screening)
+TransUnion:   SmartMove screening (primary recommendation)
+Experian:     RentBureau screening (alternative)
+Snappt:       Document fraud detection
+Collections:  TLG / EZ Collect / Resident Resources (delinquency handoff)
+
+RESIDENT SERVICES MARKETPLACE
+Rinse / SudShare:     Laundry
+Tend / Handy:         Cleaning
+Wag / Rover:          Pet services
+Hello Alfred:         Concierge
+Latch:                Smart access
+Bellhop / Clutter:    Moving + storage
+Lemonade / Roost:     Renters insurance
+
+LEGACY SYSTEM INTEGRATION (Phase 8)
+AppFolio / Yardi:     Bi-directional sync for portfolios already on legacy PM software
 ```
 
 ---
 
 ## Part 5: Build Priority Order
 
-If building from scratch today:
+If building from scratch today, optimized for fastest ROI per build week:
 
 1. **Phase 0 + Phase 1 Properties/Tenants/Vendors** — the operational shell. After this, CRES is on the platform for property data.
 2. **Phase 1 Living Ledger** — the financial differentiator. Same-day P&L is the original "why we built this."
 3. **Phase 3 Marketing Hub port** — move the SEO/LLM Audit Tool into the platform. ~40% of Phase 3 work already done; this is mostly plumbing.
-4. **Phase 4 FLAIR Module (Step 1)** — PDF intake. Solves the "FLAIR data lives in a folder" problem with minimal integration work.
-5. **Phase 2 Automation** — invoice inbox + Plaid eliminates the bulk of routine manual entry.
-6. **Phase 3 Lead Attribution** — solves an industry-wide problem and is uniquely valuable.
-7. **Phase 5 Owner Portal + Monthly Report** — the artifact owners actually want.
-8. **Phase 4 FLAIR Module (Step 2)** — API integration once Step 1 proves value.
-9. **Phase 6 Advanced Integrations** — order by individual ROI per property.
+4. **Phase 5b Resident Portal (rent payment + work orders + messaging)** — single highest-leverage resident-facing module. Eliminates daily friction for both residents and PMs. Stripe + Twilio + Supabase Realtime; ~2 weeks once Phase 1 is up.
+5. **Phase 4 FLAIR Module (Step 1)** — PDF intake. Solves the "FLAIR data lives in a folder" problem with minimal integration work.
+6. **Phase 2 Automation** — invoice inbox + Plaid eliminates the bulk of routine manual entry.
+7. **Phase 5a Screening & Application** — closes the prospect→resident loop. TransUnion SmartMove + Stripe + DocuSign. After this, the platform owns the full leasing pipeline.
+8. **Phase 5d Collections** — automated reminder cadence + payment plans. High operational savings; doesn't need any new integrations beyond Twilio + Stripe (already in by step 4).
+9. **Phase 5c Renewals & Retention** — AI-drafted renewal letters + retention scoring. Differentiator nobody in the legacy PM space is doing well.
+10. **Phase 3 Lead Attribution** — solves an industry-wide problem and is uniquely valuable; depends on FLAIR step 1 + Marketing port being complete.
+11. **Phase 6 Owner Portal + Monthly Report** — the artifact owners actually want; needs all upstream data flowing.
+12. **Phase 4 FLAIR Module (Step 2)** — API integration once Step 1 proves value and FLAIR partnership is formalized.
+13. **Phase 7 Resident Services Marketplace (Tier 1: Rinse, Wag, Tend, Hello Alfred, Latch, Lemonade)** — revenue-generating layer. Defer until Phase 5b Resident Portal is in real use; otherwise no surface to sell into.
+14. **Phase 5e Move-Out Flow** — completes the resident lifecycle. Lower urgency since most properties handle this manually today without much pain.
+15. **Phase 7 Tier 2 + Tier 3 Services** — long-tail marketplace expansion as portfolio appetite warrants.
+16. **Phase 8 Advanced Integrations** — AppFolio/Yardi sync, multi-language, accessibility pass. Order by individual ROI per property.
 
 ---
 
