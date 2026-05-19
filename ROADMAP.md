@@ -160,6 +160,15 @@ The two converge when this tool ports into the platform's Marketing module. Unti
 - ✅ Ranked recommendations (Immediate / High / Ongoing priority bands)
 - ✅ Persistent results + timestamps per property
 
+### Property Identity & Audit Accuracy *(May 2026)*
+- ✅ `website` field per property — used as primary match key for SEO rank checks
+- ✅ `gbpUrl` field per property — locks GBP identity via Google Maps URL
+- ✅ Tiered matching: GBP id → website domain → fuzzy name (last resort)
+- ✅ "✨ Enrich all" button — one-click SerpAPI lookup populates website + gbpUrl for every property in the roster (with progress bar + cancel)
+- ✅ Audit-time auto-capture — LLM Audit and SEO Audit silently fill website + gbpUrl on the first audit of a new property
+- ✅ Robust address parser — handles single-comma addresses (`1096 N Khione Loop Salisbury, MD 21804`) correctly
+- ✅ Diagnostic console logging when no match is found (shows parsed identifiers + top SerpAPI results for 30-second debugging)
+
 ### Content Generator
 - ✅ 6 content types via real Claude API:
   - Full Listing Description
@@ -235,14 +244,6 @@ Multi-property side-by-side audit summary for portfolio reviews. E.g., 3-5 prope
 Improve matching during HelloData import so "Reserve at Sawmill" / "Reserve at Saw Mill" don't create two entries.
 - Already partially handled in `nameMatches`
 - Extend to import-time merge logic in `build-clean-roster.mjs`
-
-🔴 **Manual GBP URL field per property**
-Paste the property's Google Maps URL into property settings to lock in identity, avoiding name-matching ambiguity.
-- Eliminates "wrong GBP detected" issues
-- Adds a direct-link button on the audit results
-
-🔴 **Property website URL field**
-Capture the actual website domain (e.g., `vangardlofts.com`) so audits check schema, FAQ, and pages on the right site directly rather than guessing from search snippets.
 
 🔴 **Address normalization on import**
 Some HelloData property addresses imported with city mismatches (e.g., Edge 26 is at "Edgewater, CO" per Google but our roster says "Wheat Ridge"). Add a verification step against the GBP address.
@@ -373,32 +374,32 @@ Until then: this tool ships standalone, costs ~$0.25-$0.45 per property audit, a
 
 If picking what to build next on the tool alone, optimized for **fastest path to the North Star** (full-funnel attribution) while keeping audit accuracy improvements in flight:
 
-**Quick wins first (1-2 days total)**
+**Quick wins first (~3 hr total)**
 1. **Spend meter UI wire-up** (~1 hr) — finishes a half-built feature, gives real-time cost visibility
-2. **Manual GBP URL field** (~2 hr) — eliminates the biggest source of audit accuracy errors
-3. **Property website URL field** (~1 hr) — same idea, helps Schema/FAQ checks + needed before the tracking pixel ships
-4. **Hard spending guardrail** (~2 hr) — prevents future cost surprises
+2. **Hard spending guardrail** (~2 hr) — prevents future cost surprises
+
+> ~~Manual GBP URL field~~ and ~~Property website URL field~~ — **shipped May 2026** as part of the property identity + auto-enrichment work. See Part 1 → "Property Identity & Audit Accuracy."
 
 **Attribution foundation (the North Star, ~2 weeks)**
-5. **`leads` table + capture API** (~1 day) — the schema everything hangs off
-6. **Universal tracking pixel** (~1 day) — first-party data starts flowing
-7. **UTM enforcement library + link builder** (~4 hr) — kills the untagged-link problem
-8. **LLM landing pages** (~3 hr) — first deterministic source attribution for AI traffic
-9. **Lead source dashboard v1** (~1-2 days) — answers "where leads come from" for the first time
-10. **ILS email forwarding parser** (~1-2 days) — captures the 40-60% of leads that ILSs currently hide
-11. **Dynamic Number Insertion (Twilio)** (~2-3 days) — phone calls become attributable
-12. **Identity resolution v1** (~2 days) — same prospect across email/phone/web stitches into one record
-13. **CPL reporting (cost ingestion)** (~1 day) — first real cost-per-lead numbers per channel
+3. **`leads` table + capture API** (~1 day) — the schema everything hangs off
+4. **Universal tracking pixel** (~1 day) — first-party data starts flowing
+5. **UTM enforcement library + link builder** (~4 hr) — kills the untagged-link problem
+6. **LLM landing pages** (~3 hr) — first deterministic source attribution for AI traffic
+7. **Lead source dashboard v1** (~1-2 days) — answers "where leads come from" for the first time
+8. **ILS email forwarding parser** (~1-2 days) — captures the 40-60% of leads that ILSs currently hide
+9. **Dynamic Number Insertion (Twilio)** (~2-3 days) — phone calls become attributable
+10. **Identity resolution v1** (~2 days) — same prospect across email/phone/web stitches into one record
+11. **CPL reporting (cost ingestion)** (~1 day) — first real cost-per-lead numbers per channel
 
 **Audit + reporting depth (in parallel as bandwidth allows)**
-14. **GSC CSV import** (~3 hr) — biggest data quality jump available, no API needed
-15. **Bulk PDF export** (~4 hr) — useful for portfolio reviews
-16. **Comparative report** (~1 day) — portfolio meetings
-17. **GSC OAuth integration** (~2 days) — live keyword data
-18. **Top 10 Market Queries** (~1 day) — defer until SerpAPI volume is acceptable
+12. **GSC CSV import** (~3 hr) — biggest data quality jump available, no API needed
+13. **Bulk PDF export** (~4 hr) — useful for portfolio reviews
+14. **Comparative report** (~1 day) — portfolio meetings
+15. **GSC OAuth integration** (~2 days) — live keyword data
+16. **Top 10 Market Queries** (~1 day) — defer until SerpAPI volume is acceptable
 
 **Deferred to PM Platform integration**
-19. **Funnel stages join** — requires tours + applications + leases from Resident Lifecycle module
-20. **CPLease + recommendation engine** — needs funnel data, then becomes the flagship artifact
+17. **Funnel stages join** — requires tours + applications + leases from Resident Lifecycle module
+18. **CPLease + recommendation engine** — needs funnel data, then becomes the flagship artifact
 
 Everything else is nice-to-have and can be deferred indefinitely.

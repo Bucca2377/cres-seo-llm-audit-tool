@@ -66,7 +66,7 @@
 
 ## Part 2: What's Live Today (May 2026)
 
-The first live module of the platform exists as a standalone tool — the **SEO / LLM Audit Tool** at `C:\Users\BrendanVanDeventer\Projects\cres-marketing-hub`. Production-ready, in active use by CRES on 73 properties. Approximately 40% of the planned Marketing Intelligence module is already shipped.
+The first live module of the platform exists as a standalone tool — the **SEO / LLM Audit Tool** at `C:\Users\BrendanVanDeventer\Projects\cres-marketing-hub`. Production-ready, in active use by CRES on 73 properties. Approximately **50% of the planned Marketing Intelligence module** is already shipped.
 
 | Feature | Where | Status |
 |---|---|---|
@@ -76,6 +76,10 @@ The first live module of the platform exists as a standalone tool — the **SEO 
 | Content Generator (6 types) | SEO/LLM Tool | ✅ |
 | Branded PDF Audit Reports | SEO/LLM Tool | ✅ |
 | Per-property audit persistence | SEO/LLM Tool | ✅ |
+| Property identity (website + GBP URL fields) | SEO/LLM Tool | ✅ |
+| Deterministic rank matching (domain + GBP id, name fallback) | SEO/LLM Tool | ✅ |
+| One-click batch enrichment for entire roster | SEO/LLM Tool | ✅ |
+| Audit-time auto-capture of website + GBP URL | SEO/LLM Tool | ✅ |
 
 Everything else in this roadmap is planned (🔴) unless flagged otherwise.
 
@@ -185,7 +189,7 @@ Plaid Bank Feed Integration
 treated as a full module rather than a payment-only stub.)
 ```
 
-### Phase 3 — Marketing Intelligence Hub 🟡 (~40% already shipped)
+### Phase 3 — Marketing Intelligence Hub 🟡 (~50% already shipped)
 **1-2 weeks remaining · Most heavy work already done in the SEO/LLM Audit Tool**
 
 ```
@@ -197,6 +201,12 @@ treated as a full module rather than a payment-only stub.)
 ✅ SEO & Rank Check (real Google data, Map Pack + organic)
 ✅ SEO Audit (auto-generated queries, parallel rank checks, ranked recs)
 ✅ Branded PDF reports
+✅ Property identity model (website + gbpUrl) for deterministic
+   rank-check matching; eliminates name-collision audit failures
+✅ One-click batch enrichment — SerpAPI lookup fills website + GBP URL
+   across the entire roster in a single click
+✅ Audit-time auto-capture — first audit of a new property silently
+   locks in its website + GBP URL for all future audits
 
 PORTING WORK (the platform integration)
 🔴 Move audit tool from standalone repo into Marketing module
@@ -747,7 +757,7 @@ If building from scratch today, optimized for fastest ROI per build week:
 
 1. **Phase 0 + Phase 1 Properties/Tenants/Vendors** — the operational shell. After this, CRES is on the platform for property data.
 2. **Phase 1 Living Ledger** — the financial differentiator. Same-day P&L is the original "why we built this."
-3. **Phase 3 Marketing Hub port** — move the SEO/LLM Audit Tool into the platform. ~40% of Phase 3 work already done; this is mostly plumbing.
+3. **Phase 3 Marketing Hub port** — move the SEO/LLM Audit Tool into the platform. ~50% of Phase 3 work already done (including the property identity layer needed for attribution); this is mostly plumbing.
 4. **Phase 5b Resident Portal (rent payment + work orders + messaging)** — single highest-leverage resident-facing module. Eliminates daily friction for both residents and PMs. Stripe + Twilio + Supabase Realtime; ~2 weeks once Phase 1 is up.
 5. **Phase 4 FLAIR Module (Step 1)** — PDF intake. Solves the "FLAIR data lives in a folder" problem with minimal integration work.
 6. **Phase 2 Automation** — invoice inbox + Plaid eliminates the bulk of routine manual entry.
