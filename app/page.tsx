@@ -27,11 +27,10 @@ const B = {
 const LLM_ITEMS: { id: number; label: string; pts: number; description: string }[] = [
   { id: 1, label: "Google Business Profile", pts: 20, description: "Verified listing with photos, hours, and a full description" },
   { id: 2, label: "Apartment Schema Markup", pts: 15, description: "JSON-LD RentalApartment structured data on the property website" },
-  { id: 3, label: "Review Volume (50+ target)", pts: 12, description: "50+ reviews across Google, Apartments.com, and Yelp" },
+  { id: 3, label: "Review Volume (30+ target)", pts: 12, description: "30+ reviews across Google, Apartments.com, and Yelp" },
   { id: 4, label: "Review Quality (4.0+ avg)", pts: 10, description: "Average rating of 4.0 stars or higher" },
   { id: 5, label: "NAP Consistency Across ILS", pts: 10, description: "Name / Address / Phone exact-match across every listing platform" },
   { id: 6, label: "Structured FAQ on Website", pts: 10, description: "Q&A page with schema markup, ideal for AI citation" },
-  { id: 7, label: "Bing Places Claimed", pts: 8, description: "Microsoft Bing Places listing claimed and verified" },
   { id: 8, label: "Amenities Structured Data", pts: 8, description: "All amenities tagged with standard taxonomy across platforms" },
   { id: 9, label: "Perplexity / Web Citations", pts: 5, description: "Cited in third-party rental guides or local content lists" },
   { id: 10, label: "Owner Response to Reviews", pts: 7, description: "Management responds to all reviews, recent and old" },
@@ -191,29 +190,71 @@ Return ONLY a JSON object:
         /* OK to proceed without ground truth */
       }
 
+      // Second pre-flight: fetch reviews + owner responses via google_maps_reviews
+      let responseRate: number | null = null;
+      let responsesChecked = 0;
+      let responsesWith = 0;
+      if (gbpGround) {
+        try {
+          const location = extractLocation(property.address);
+          const mapsResp = await callSerp({
+            query: `${property.name}${city ? " " + city : ""}`,
+            engine: "google_maps",
+            location,
+          });
+          const mapsResults = Array.isArray(mapsResp?.local_results)
+            ? mapsResp.local_results
+            : [];
+          const match = mapsResults.find((r: any) =>
+            nameMatches(`${r.title || r.name || ""} ${r.address || ""}`, property.name)
+          );
+          const dataId = match?.data_id;
+          if (dataId) {
+            const reviewsResp = await callSerp({
+              engine: "google_maps_reviews",
+              data_id: dataId,
+            });
+            const reviews = Array.isArray(reviewsResp?.reviews) ? reviewsResp.reviews : [];
+            responsesChecked = reviews.length;
+            responsesWith = reviews.filter((r: any) => r?.response).length;
+            responseRate =
+              responsesChecked > 0
+                ? Math.round((responsesWith / responsesChecked) * 100)
+                : null;
+          }
+        } catch {
+          /* skip — Item 10 falls back to manual verification */
+        }
+      }
+
       const groundTruthBlock = gbpGround
         ? `GOOGLE BUSINESS PROFILE GROUND TRUTH (verified via SerpAPI — Google's actual data):
 - Listing exists as: "${gbpGround.name}"
 - Address per Google: ${gbpGround.address}
 - Rating: ${gbpGround.rating !== null ? gbpGround.rating + " stars" : "not shown"}
 - Google review count: ${gbpGround.reviewCount !== null ? gbpGround.reviewCount + " reviews" : "not shown"}
-- Listing status: ${gbpGround.unclaimed ? "**UNCLAIMED** (owner has not verified the GBP)" : "claimed/verified"}
-- Hours: ${gbpGround.hasHours ? "listed" : "not listed"}
-- Phone: ${gbpGround.phone || "not listed"}
-- Website per Google: ${gbpGround.website || "not listed"}
+- Hours: ${gbpGround.hasHours ? "listed" : "NOT listed"}
+- Phone: ${gbpGround.phone || "NOT listed"}
+- Website per Google: ${gbpGround.website || "NOT listed"}
+- Owner response rate: ${
+            responseRate !== null
+              ? `${responseRate}% (${responsesWith} of ${responsesChecked} top reviews have owner/management responses)`
+              : "unable to verify automatically"
+          }
 
-For items 1, 3, and 4 BELOW, use the ground truth above — do not search the web for those items, just grade against the rubric:
-- Item 1 (Google Business Profile): COMPLETE if listing is claimed AND has hours AND ≥5 reviews. PARTIAL if listing exists but is unclaimed OR missing hours OR has <5 reviews. (Since the listing exists, MISSING is not valid here.)
-- Item 3 (Review Volume): COMPLETE if Google review count ≥50. PARTIAL if 20–49. MISSING if <20. (You may add Apartments.com/Yelp counts if helpful, but Google count is the floor.)
+For items 1, 3, 4, and 10 BELOW, use the ground truth above — do not search the web for those items, just grade against the rubric:
+- Item 1 (Google Business Profile): Focus on whether the listing is LIVE and ACTIVELY MANAGED. COMPLETE if the listing exists with rating, reviews, hours, and address all present (signs of an active, used profile). PARTIAL if the listing exists but shows signs of neglect — missing hours, missing website link, no phone, or zero reviews despite the property being established. MISSING is not valid here since the listing exists. In evidence, cite signs of active management ("hours present, X reviews, rating Y") and flag any gaps ("phone not listed" / "website link missing"). Do NOT mention "claimed" or "unclaimed" — that status is unreliable and the real signal is whether the profile is live and being maintained.
+- Item 3 (Review Volume): COMPLETE if Google review count ≥30. PARTIAL if 10–29. MISSING if <10. (You may add Apartments.com/Yelp counts if helpful, but Google count is the floor.)
 - Item 4 (Review Quality): COMPLETE if rating ≥4.0. PARTIAL if 3.0–3.9. MISSING if <3.0 or no rating.
+- Item 10 (Owner Response to Reviews): Use the owner response rate from ground truth. COMPLETE if rate ≥ 50%. PARTIAL if rate is 1-49%. MISSING if rate is exactly 0%. If "unable to verify automatically", default to PARTIAL with evidence "manual verification recommended".
 
-In your evidence sentences for items 1, 3, 4, cite the actual numbers (e.g., "Listing claimed, 254 reviews at 3.2 stars per Google").
+In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 stars; 8 of 10 top reviews have owner responses").
 `
         : `(No GBP ground truth from SerpAPI — fall back to web_search for items 1, 3, 4.)`;
 
       const prompt = `${groundTruthBlock}
 
-Audit ${property.name} at ${property.address} for LLM search visibility. Use web search aggressively — do as many searches as needed to reach a confident verdict on each item.
+Audit ${property.name} at ${property.address} for LLM search visibility. IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.
 
 PROPERTY FACTS:
 - Name in our system: ${property.name}
@@ -222,19 +263,8 @@ PROPERTY FACTS:
 ${property.managerName ? `- Management company: ${property.managerName}` : ""}
 ${property.amenities.length ? `- Known amenities: ${property.amenities.slice(0, 6).join(", ")}` : ""}
 
-PHASE 1 — PROPERTY IDENTIFICATION (do this first):
-The property may be listed online under a slightly different name (e.g., "View Apartments by Trion Living" when our system has "View Apartments"). Search multiple query variations to find its actual web footprint:
-- "${property.name}" alone
-- "${property.name} ${city}"
-- "${property.name} apartments ${city}"
-${property.managerName ? `- "${property.name} ${property.managerName}"` : ""}
-- The property's likely website domain
-
-Note the property's:
-- Official Google Business Profile name (record the EXACT name as it appears on Google)
-- Official website URL
-- Listed phone number
-- Visible review counts and ratings from Google, Apartments.com, Yelp, Apartment Ratings, etc.
+PHASE 1 — PROPERTY IDENTIFICATION:
+Use the ground truth above when present. If no ground truth, do ONE search "${property.name} ${city}" to identify the property's actual web footprint (name variations, official website). Do NOT do exploratory multi-query searches — the budget per audit is roughly 7 web searches total (1 identification + up to 1 per remaining item).
 
 PHASE 2 — GRADE EACH CHECKLIST ITEM:
 
@@ -248,7 +278,7 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
    - COMPLETE also if you find direct google.com/maps/place/ URLs in results pointing to this property.
    - PARTIAL: GBP isn't directly visible in search snippets BUT you found strong indirect evidence the business is established online — any of: a Yelp listing with hours/phone, a working official website (e.g., edge26.trionliving.com), a phone number that responds to searches, an active social presence. Established apartment communities almost always have a GBP — if there's clear evidence the business exists, lean PARTIAL rather than MISSING. Note in the evidence: "GBP likely exists but not directly visible in search results — manual verification recommended."
    - MISSING: only if you find NO web presence for the property at all (no website, no Yelp, no listings anywhere). This should be rare for established apartment communities.
-   - Try these search queries specifically: "${property.name} google", "${property.name} google maps", "${property.name} reviews", "${property.name} hours", and the phone number alone if you find one in Phase 1.
+   - Note: ground truth above is authoritative for this item. Do NOT search the web for GBP — use the ground truth data only.
 
 2. Apartment Schema Markup — Check the property's official website (visit the homepage if found). COMPLETE only if you can confirm JSON-LD/RentalApartment schema. PARTIAL if the website exists and is well-structured but schema can't be confirmed from snippets. MISSING if no official website found.
 
@@ -260,13 +290,11 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 
 6. Structured FAQ on Website — If you found the website in Phase 1, look for an /faq, /questions, or /resident-faq URL. COMPLETE if a dedicated FAQ page exists. PARTIAL if FAQ-style content exists but not on a dedicated page. MISSING if no FAQ content found OR no website found.
 
-7. Bing Places — Search Bing.com for the property name + city. COMPLETE if a Bing local business listing appears with reviews/hours. PARTIAL if a Bing entry exists but seems unclaimed (no description, no photos). MISSING if no Bing local presence.
-
 8. Amenities Structured Data — Check the property's Apartments.com listing. COMPLETE if the listing has a fully populated amenities section (10+ amenities tagged). PARTIAL if some amenities listed but sparse (<10). MISSING if no Apartments.com listing or no amenities listed.
 
 9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
 
-10. Owner Response to Reviews — Check Google reviews for the property. COMPLETE if you can see management responses to most recent reviews (look at the top 5-10 reviews on Google). PARTIAL if some responses visible. MISSING if no management responses on visible reviews.
+10. Owner Response to Reviews — See ground truth above (owner response rate from actual review data). Do NOT web-search for this item.
 
 Return ONLY a JSON object, no prose before or after:
 {
@@ -566,6 +594,12 @@ function nameMatches(haystack: string, needle: string): boolean {
   // also try without common suffixes/prefixes
   const stripped = n.replace(/\b(apartments?|the|lofts?)\b/g, "").trim();
   if (stripped.length > 3 && h.includes(stripped)) return true;
+  // also try with all whitespace removed — handles "Saw Mill" vs "Sawmill" and similar
+  const hNoSpace = h.replace(/[\s\-]/g, "");
+  const nNoSpace = n.replace(/[\s\-]/g, "");
+  if (nNoSpace.length > 3 && hNoSpace.includes(nNoSpace)) return true;
+  const strippedNoSpace = stripped.replace(/[\s\-]/g, "");
+  if (strippedNoSpace.length > 3 && hNoSpace.includes(strippedNoSpace)) return true;
   return false;
 }
 
@@ -936,12 +970,12 @@ function RankCheck({ property }: { property: Property }) {
                       }}
                     >
                       {googleResult.map_pack_rank
-                        ? `#${googleResult.map_pack_rank} of 3`
+                        ? `#${googleResult.map_pack_rank}`
                         : googleResult.expanded_map_pack_rank
-                        ? `Expanded #${googleResult.expanded_map_pack_rank} (not in 3-pack)`
+                        ? `#${googleResult.expanded_map_pack_rank}`
                         : googleResult.map_pack_appeared
                         ? "Not in top 20"
-                        : "Map Pack didn't appear"}
+                        : "—"}
                     </div>
                     {googleResult.top_map_pack && googleResult.top_map_pack.length > 0 && (
                       <div
@@ -1001,7 +1035,7 @@ function RankCheck({ property }: { property: Property }) {
                     >
                       {googleResult.organic_rank
                         ? `#${googleResult.organic_rank} · Page ${googleResult.organic_page ?? Math.ceil(googleResult.organic_rank / 10)}`
-                        : "Not in top 100"}
+                        : "Property not ranking"}
                     </div>
                     {googleResult.top_organic && googleResult.top_organic.length > 0 && (
                       <div
@@ -1284,6 +1318,7 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
       mapPackCount,
       page1Count,
       avgRank,
+      rankingCount: validRanks.length,
       strongestQuery: strongestIdx >= 0 ? queries[strongestIdx] : null,
       strongestRank: strongestIdx >= 0 ? ranks[strongestIdx] : null,
       weakestQuery: weakestIdx >= 0 ? queries[weakestIdx] : null,
@@ -1375,8 +1410,22 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
             <KPI
               label="Avg organic rank"
               value={summary.avgRank ? `#${summary.avgRank}` : "—"}
-              sub={summary.avgRank ? (summary.avgRank <= 10 ? "Page 1 avg" : summary.avgRank <= 20 ? "Page 2 avg" : "Page 3+ avg") : "Not ranking"}
-              accent={summary.avgRank && summary.avgRank <= 10 ? "#22c55e" : summary.avgRank && summary.avgRank <= 30 ? "#f59e0b" : B.tangelo}
+              sub={
+                summary.avgRank
+                  ? `Avg of the ${summary.rankingCount} of ${summary.total} ranking queries${
+                      summary.rankingCount < summary.total / 2 ? " (small sample)" : ""
+                    }`
+                  : "No queries ranking"
+              }
+              accent={
+                summary.rankingCount < summary.total / 2
+                  ? B.tangelo
+                  : summary.avgRank && summary.avgRank <= 10
+                  ? "#22c55e"
+                  : summary.avgRank && summary.avgRank <= 30
+                  ? "#f59e0b"
+                  : B.tangelo
+              }
             />
             <KPI
               label="Queries audited"
@@ -1427,7 +1476,7 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: B.oxford }}>
-                  {["Query", "Map Pack", "Organic", "Top competitor"].map((h) => (
+                  {["Query", "GBP Map Pack", "Website in Organic", "Who's Winning"].map((h) => (
                     <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "white" }}>
                       {h}
                     </th>
@@ -1455,7 +1504,7 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
                           {r.map_pack_rank
                             ? `#${r.map_pack_rank}`
                             : r.expanded_map_pack_rank
-                            ? `Exp #${r.expanded_map_pack_rank}`
+                            ? `#${r.expanded_map_pack_rank}`
                             : r.map_pack_appeared
                             ? "Not in top 20"
                             : "No pack"}
@@ -1468,7 +1517,7 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
                             fontWeight: 600,
                           }}
                         >
-                          {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : "Not in top 100"}
+                          {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : "Property not ranking"}
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px", color: "#666", fontSize: 11 }}>
@@ -1765,7 +1814,7 @@ function PrintableReport({ property }: { property: Property }) {
     size: letter;
     margin: 0.85in 0.65in 0.75in 0.65in;
     @top-left {
-      content: "CRES  |  Marketing Audit  |  ${cssName}  |  ${monthYear}";
+      content: "CRES  |  SEO / LLM Audit  |  ${cssName}  |  ${monthYear}";
       font-family: 'Josefin Sans', sans-serif;
       font-size: 8.5pt;
       color: #062347;
@@ -1829,20 +1878,20 @@ function PrintableReport({ property }: { property: Property }) {
     margin: "0 0 10px 0",
   };
   const findingsTd: React.CSSProperties = {
-    padding: "8px 10px",
-    fontSize: 10.5,
-    lineHeight: 1.55,
+    padding: "5px 8px",
+    fontSize: 10,
+    lineHeight: 1.45,
     color: PRINT_BODY,
     verticalAlign: "top",
     borderBottom: "0.5px solid #d8d8d8",
   };
   const findingsTh: React.CSSProperties = {
-    padding: "7px 10px",
+    padding: "5px 8px",
     background: PRINT_NAVY,
     color: "white",
     textAlign: "left",
     fontFamily: "'Barlow Condensed', sans-serif",
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 700,
     letterSpacing: "0.08em",
     textTransform: "uppercase",
@@ -1865,18 +1914,18 @@ function PrintableReport({ property }: { property: Property }) {
           className="pb-after"
           style={{ textAlign: "center", paddingTop: "1.4in" }}
         >
-          <div
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/cres-logo.svg"
+            alt="CRES"
             style={{
-              fontFamily: "'Barlow Condensed', sans-serif",
-              fontWeight: 700,
-              fontSize: 62,
-              letterSpacing: "0.22em",
-              color: PRINT_NAVY,
-              marginBottom: 28,
+              maxWidth: 320,
+              width: "60%",
+              height: "auto",
+              display: "block",
+              margin: "0 auto 28px",
             }}
-          >
-            CRES
-          </div>
+          />
           <div
             style={{
               width: "52%",
@@ -1895,21 +1944,9 @@ function PrintableReport({ property }: { property: Property }) {
               margin: 0,
             }}
           >
-            Marketing Audit Report
+            SEO / LLM Audit
           </h1>
-          <div
-            style={{
-              fontFamily: "'Barlow Condensed', sans-serif",
-              fontSize: 13,
-              color: PRINT_TEAL,
-              letterSpacing: "0.18em",
-              textTransform: "uppercase",
-              marginTop: 8,
-              marginBottom: 28,
-            }}
-          >
-            LLM &amp; SEO Visibility
-          </div>
+          <div style={{ marginBottom: 28 }} />
           <div
             style={{
               fontFamily: "'Barlow Condensed', sans-serif",
@@ -1924,89 +1961,10 @@ function PrintableReport({ property }: { property: Property }) {
           <div style={{ fontSize: 13, color: "#222", marginBottom: 18 }}>
             {property.address || "(no address set)"}
           </div>
-          {property.managerName && (
-            <div style={{ fontSize: 12, color: PRINT_MUTED, marginBottom: 6 }}>
-              Managed by {property.managerName}
-            </div>
-          )}
           <div style={{ fontSize: 12, color: PRINT_MUTED, marginBottom: 6 }}>
             Audit Date: {auditDate}
           </div>
           <div style={{ fontSize: 12, color: PRINT_MUTED }}>Prepared by: CRES</div>
-        </section>
-
-        {/* ============ EXECUTIVE SUMMARY ============ */}
-        <section className="pb-before">
-          <PrintSectionHeader>Executive Summary</PrintSectionHeader>
-          <p style={bodyP}>
-            This audit reviewed the LLM search visibility and Google ranking position of{" "}
-            <strong>{property.name}</strong>
-            {property.address ? ` (${property.address})` : ""}
-            {property.managerName ? `, managed by ${property.managerName}` : ""}. The audit covered
-            two dimensions: AI search citability via a 10-item LLM Visibility checklist (Google
-            Business Profile, schema markup, review volume and quality, NAP consistency across ILS
-            platforms, structured FAQ, Bing presence, third-party citations, and owner review
-            response), and live Google ranking performance via real-time SerpAPI queries.
-          </p>
-          <p style={bodyP}>{llmSummaryLine}</p>
-          <p style={bodyP}>{seoSummaryLine}</p>
-          <p style={bodyP}>{gapLine}</p>
-        </section>
-
-        {/* ============ PROPERTY PROFILE ============ */}
-        <section className="pb-before">
-          <PrintSectionHeader>Property Profile</PrintSectionHeader>
-          <table>
-            <tbody>
-              {(
-                [
-                  ["Name", property.name],
-                  ["Address", property.address || "—"],
-                  ["Units", property.units || "—"],
-                  ["Year Built", property.yearBuilt || "—"],
-                  [
-                    "Rent Range",
-                    property.priceMin && property.priceMax
-                      ? `$${property.priceMin.toLocaleString()} – $${property.priceMax.toLocaleString()}/mo`
-                      : "—",
-                  ],
-                  ["Manager", property.managerName || "—"],
-                  ["Nearby", property.nearBy || "—"],
-                  ["Amenities", property.amenities.length ? property.amenities.join(", ") : "—"],
-                ] as [string, React.ReactNode][]
-              ).map(([k, v]) => (
-                <tr key={k}>
-                  <td
-                    style={{
-                      padding: "5px 14px 5px 0",
-                      fontFamily: "'Barlow Condensed', sans-serif",
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: PRINT_NAVY,
-                      width: 110,
-                      verticalAlign: "top",
-                      borderBottom: "0.5px solid #e0e0e0",
-                    }}
-                  >
-                    {k}
-                  </td>
-                  <td
-                    style={{
-                      padding: "5px 0",
-                      fontSize: 11,
-                      color: PRINT_BODY,
-                      verticalAlign: "top",
-                      borderBottom: "0.5px solid #e0e0e0",
-                    }}
-                  >
-                    {v || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </section>
 
         {/* ============ LLM VISIBILITY FINDINGS ============ */}
@@ -2147,9 +2105,9 @@ function PrintableReport({ property }: { property: Property }) {
               <thead>
                 <tr>
                   <th style={findingsTh}>Query</th>
-                  <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>Map Pack</th>
-                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Organic</th>
-                  <th style={findingsTh}>Top Competitor</th>
+                  <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>GBP Map Pack</th>
+                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Website in Organic</th>
+                  <th style={findingsTh}>Who&rsquo;s Winning</th>
                 </tr>
               </thead>
               <tbody>
@@ -2158,7 +2116,7 @@ function PrintableReport({ property }: { property: Property }) {
                   const mapText = r.map_pack_rank
                     ? `#${r.map_pack_rank}`
                     : r.expanded_map_pack_rank
-                    ? `Exp #${r.expanded_map_pack_rank}`
+                    ? `#${r.expanded_map_pack_rank}`
                     : r.map_pack_appeared
                     ? "Not in top 20"
                     : "—";
@@ -2169,7 +2127,7 @@ function PrintableReport({ property }: { property: Property }) {
                     : "#888";
                   const orgText = r.organic_rank
                     ? `#${r.organic_rank} · P${r.organic_page}`
-                    : "Not in top 100";
+                    : "Property not ranking";
                   const orgColor =
                     r.organic_rank && r.organic_rank <= 10
                       ? "#15803d"
@@ -2207,35 +2165,6 @@ function PrintableReport({ property }: { property: Property }) {
                 })}
               </tbody>
             </table>
-          </section>
-        )}
-
-        {/* ============ CRITICAL ISSUES ============ */}
-        {(missingHigh.length > 0 || partialHigh.length > 0) && (
-          <section className="pb-before">
-            <PrintSectionHeader>Critical Issues Impacting Visibility</PrintSectionHeader>
-            {[...missingHigh, ...partialHigh].slice(0, 4).map((item, idx) => {
-              const status = statusOf(property, item.id);
-              const ev = property.checklistEvidence?.[String(item.id)];
-              return (
-                <div key={item.id} className="pb-avoid">
-                  <PrintIssueHeader>
-                    Issue {idx + 1}: {item.label}
-                  </PrintIssueHeader>
-                  <p style={bodyP}>
-                    <strong>What was observed:</strong>{" "}
-                    {ev
-                      ? ev
-                      : `No audit evidence captured for this item. The check measures: ${item.description.toLowerCase()}`}
-                  </p>
-                  <PrintImpactCallout>
-                    {status === "missing"
-                      ? `This gap is worth ${item.pts} points on the LLM Visibility scorecard and directly suppresses AI-assistant citation of ${property.name}. Resolving it is high-leverage; the work is described in the Recommendations section.`
-                      : `This is partially in place but not earning full credit (${earnedPoints(item.pts, status)}/${item.pts} pts). Closing the remaining gap converts measurable visibility from "partial" to "complete" and is typically a same-week task.`}
-                  </PrintImpactCallout>
-                </div>
-              );
-            })}
           </section>
         )}
 
@@ -2291,25 +2220,6 @@ function PrintableReport({ property }: { property: Property }) {
                 </ul>
               </>
             )}
-          </section>
-        )}
-
-        {/* ============ SUMMARY ============ */}
-        {(llmTs || seo) && (
-          <section className="pb-before">
-            <PrintSectionHeader>Summary</PrintSectionHeader>
-            <p style={bodyP}>
-              {property.name}&rsquo;s digital visibility was evaluated across two dimensions:
-              AI-assistant citability and live Google ranking. {llmSummaryLine} {seoSummaryLine}
-            </p>
-            <p style={bodyP}>
-              The actions detailed in the Recommendations section are ordered by expected return
-              on effort. Items in the Immediate Priority band are typically completable within five
-              business days and require no third-party engagement. High Priority items generally
-              involve coordination with the property website host, ILS account managers, or onsite
-              staff. Ongoing Optimization is the maintenance layer that preserves the gains from
-              the first two bands and prevents regression.
-            </p>
           </section>
         )}
 

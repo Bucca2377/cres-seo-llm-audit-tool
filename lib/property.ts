@@ -326,10 +326,24 @@ export function useRoster() {
   };
 }
 
+function emitSpend(detail: {
+  source: "anthropic" | "serpapi";
+  cost: number;
+  searches?: number;
+  webSearches?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+}) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("cres-spend", { detail }));
+  }
+}
+
 export async function callSerp(opts: {
-  query: string;
+  query?: string;
   location?: string;
-  engine?: "google" | "google_maps";
+  engine?: "google" | "google_maps" | "google_maps_reviews";
+  data_id?: string;
 }) {
   const r = await fetch("/api/serp", {
     method: "POST",
@@ -340,7 +354,15 @@ export async function callSerp(opts: {
     const err = await r.json().catch(() => ({ error: "SerpAPI request failed" }));
     throw new Error(err.error || `SerpAPI failed (${r.status})`);
   }
-  return r.json();
+  const data = await r.json();
+  if (data?._meta) {
+    emitSpend({
+      source: "serpapi",
+      cost: data._meta.cost || 0,
+      searches: data._meta.searches || 1,
+    });
+  }
+  return data;
 }
 
 export async function callAI(opts: {
@@ -358,5 +380,95 @@ export async function callAI(opts: {
     const err = await r.json().catch(() => ({ error: "Request failed" }));
     throw new Error(err.error || `Request failed (${r.status})`);
   }
-  return r.json();
+  const data = await r.json();
+  if (data?._meta) {
+    emitSpend({
+      source: "anthropic",
+      cost: data._meta.cost || 0,
+      inputTokens: data._meta.input_tokens || 0,
+      outputTokens: data._meta.output_tokens || 0,
+      webSearches: data._meta.web_searches || 0,
+    });
+  }
+  return data;
+}
+
+interface SpendState {
+  anthropicCost: number;
+  serpCost: number;
+  anthropicCalls: number;
+  serpCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  webSearches: number;
+  totalSearches: number;
+}
+
+const EMPTY_SPEND: SpendState = {
+  anthropicCost: 0,
+  serpCost: 0,
+  anthropicCalls: 0,
+  serpCalls: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  webSearches: 0,
+  totalSearches: 0,
+};
+
+const SPEND_KEY = "cres-session-spend";
+
+export function useSessionSpend() {
+  const [spend, setSpend] = useState<SpendState>(EMPTY_SPEND);
+
+  useEffect(() => {
+    // Restore from sessionStorage on mount
+    try {
+      const raw = sessionStorage.getItem(SPEND_KEY);
+      if (raw) setSpend(JSON.parse(raw));
+    } catch {
+      /* ignore */
+    }
+
+    const handler = (e: Event) => {
+      const ev = e as CustomEvent;
+      const d = ev.detail || {};
+      setSpend((prev) => {
+        const next: SpendState =
+          d.source === "anthropic"
+            ? {
+                ...prev,
+                anthropicCost: prev.anthropicCost + (d.cost || 0),
+                anthropicCalls: prev.anthropicCalls + 1,
+                inputTokens: prev.inputTokens + (d.inputTokens || 0),
+                outputTokens: prev.outputTokens + (d.outputTokens || 0),
+                webSearches: prev.webSearches + (d.webSearches || 0),
+              }
+            : {
+                ...prev,
+                serpCost: prev.serpCost + (d.cost || 0),
+                serpCalls: prev.serpCalls + 1,
+                totalSearches: prev.totalSearches + (d.searches || 1),
+              };
+        try {
+          sessionStorage.setItem(SPEND_KEY, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+    };
+    window.addEventListener("cres-spend", handler);
+    return () => window.removeEventListener("cres-spend", handler);
+  }, []);
+
+  const reset = useCallback(() => {
+    setSpend(EMPTY_SPEND);
+    try {
+      sessionStorage.removeItem(SPEND_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  return { spend, reset };
 }

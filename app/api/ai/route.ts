@@ -68,5 +68,32 @@ export async function POST(req: NextRequest) {
       { status: r.status }
     );
   }
-  return NextResponse.json(data);
+
+  // Attach cost estimate. Sonnet 4.5/4.6/4.7 pricing: $3/M input, $15/M output, $10/1000 web searches.
+  const usage = data?.usage || {};
+  const inputTokens =
+    (usage.input_tokens || 0) +
+    (usage.cache_creation_input_tokens || 0) +
+    (usage.cache_read_input_tokens || 0) * 0.1;
+  const outputTokens = usage.output_tokens || 0;
+  const webSearches =
+    usage.server_tool_use?.web_search_requests ||
+    (Array.isArray(data?.content)
+      ? data.content.filter((b: any) => b?.type === "server_tool_use" && b?.name === "web_search").length
+      : 0);
+  const cost =
+    (inputTokens / 1_000_000) * 3 +
+    (outputTokens / 1_000_000) * 15 +
+    (webSearches / 1000) * 10;
+
+  return NextResponse.json({
+    ...data,
+    _meta: {
+      cost,
+      input_tokens: usage.input_tokens || 0,
+      output_tokens: outputTokens,
+      web_searches: webSearches,
+      source: "anthropic",
+    },
+  });
 }
