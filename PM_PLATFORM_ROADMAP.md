@@ -205,13 +205,58 @@ PORTING WORK (the platform integration)
 🔴 Audit recommendations flow into platform task list
 
 NEW FEATURES (not in standalone tool)
-🔴 Lead Attribution module
+🔴 Lead Attribution module — the North Star
+
+   This is the flagship differentiator. CRES platform is uniquely positioned
+   to do best-in-class multifamily marketing attribution because it owns all
+   three funnel layers natively: Marketing Hub (lead capture) + Resident
+   Lifecycle (applications) + Living Ledger (lease). Every existing competitor
+   owns only one layer and is blind to the other two.
+
+   Capture layer (some pieces ship from standalone tool):
    · leads table in Supabase
    · /api/leads/capture with referrer detection
-   · CallRail webhook integration
-   · ILS email forwarding parser
-   · Dedicated LLM landing pages (/from-claude, /from-chatgpt, /from-perplexity)
-   · Cookie-based 30-day attribution window
+   · Universal first-party tracking pixel on property websites
+   · UTM enforcement + link builder UI
+   · Dynamic Number Insertion (DNI) via Twilio number pool — phone numbers
+     swap based on traffic source; calls become attributable
+   · CallRail webhook integration (backup / supplement to DNI)
+   · ILS email forwarding parser — Apartments.com, Zillow, Rent.com, Zumper,
+     HotPads, Apartment List, Trulia, Rentable; Claude extracts prospect +
+     ILS source from forwarded emails
+   · Dedicated LLM landing pages (/from-claude, /from-chatgpt,
+     /from-perplexity, /from-gemini, /from-grok)
+   · QR codes per offline campaign (signage, direct mail, print)
+   · Cookie-based 60-day return-visit detection
+
+   Identity resolution:
+   · Fuzzy match on phone + email + name across sources
+   · Manual merge UI for ambiguous cases
+   · Cross-touchpoint stitching (web pixel + DNI call + ILS form → one lead)
+
+   Funnel stages (joins with Phase 5 data):
+   · Lead → Contacted → Qualified → Tour scheduled → Tour completed →
+     Application started → Application submitted → Approved → Lease signed
+     → Moved in
+   · Each stage timestamped in Supabase; funnel becomes a SQL query
+
+   Reporting:
+   · CPL by source (cost per lead)
+   · CPT by source (cost per tour)
+   · CPA by source (cost per application)
+   · CPLease by source — the only number that matters
+   · Lead→Tour and Tour→Application conversion rates by source AND by agent
+     (FLAIR scorecards plug in here)
+   · Time-from-first-touch-to-lease distribution
+   · Per-property, per-portfolio, per-market views
+
+   Recommendation engine:
+   · Claude reads full funnel + property + market data monthly
+   · Outputs dollar-level reallocation recs: "Cut Apartments.com spend
+     at Vangard Lofts ($850/mo, 0 leases). Reallocate to Google Ads
+     and FLAIR Connect."
+   · This is the artifact owners actually want — the answer to the
+     question the industry has been asking for 30 years
 
 🔴 Google Search Console API integration
    · OAuth flow per property

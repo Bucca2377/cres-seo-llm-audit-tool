@@ -16,6 +16,96 @@ Standalone roadmap for the SEO / LLM Audit Tool. This tool lives at `C:\Users\Br
 
 ---
 
+## The North Star — Full-Funnel Lead Attribution
+
+The audit tool is the foundation. The end-state product is the **best-in-class multifamily marketing attribution platform** — the tool that finally answers the question every owner, asset manager, and operator has been asking for 30 years and never gotten a real number for:
+
+> **"Where are our legit leads actually coming from, and where should we be allocating marketing dollars?"**
+
+Nobody in the industry does this well. The reason is structural — the funnel has three layers and every existing tool owns only one:
+
+| Layer | Existing players | What they're blind to |
+|---|---|---|
+| Lead capture | Apartments.com, Zillow, FLAIR, CallRail | What happened after the lead — tour? application? lease? |
+| Tour / CRM | FLAIR, Knock, Funnel CRM, RentCafe CRM | True acquisition cost — source data is anonymized by the ILS |
+| Application + Lease | AppFolio, Yardi, RealPage | Where the lead actually came from — they get a tenant, not a source |
+
+CRES is in the rare position to own all three layers natively (Marketing Hub + Resident Lifecycle + Living Ledger by Phase 5 of the PM Platform). That structural advantage is the moat. Building this means CRES can answer questions no one else can.
+
+### What "best in class" requires (six components)
+
+**1. Lead Capture**
+- Universal first-party tracking pixel on every CRES-managed property website
+- UTM enforcement library — every CRES outbound link auto-tagged before it ships
+- **Dynamic Number Insertion (DNI)** via Twilio number pool — phone number on the page swaps based on traffic source (Google Ads gets one, Apartments.com listing another, organic a third). Phone calls become attributable.
+- **ILS email forwarding parser** — Apartments.com, Zillow, Rent.com, Zumper, HotPads, Apartment List, Trulia, Rentable all forward leads through generic emails. Claude extracts the actual prospect contact + identifies which ILS forwarded.
+- **LLM-specific landing pages** — `/from-claude`, `/from-chatgpt`, `/from-perplexity`, `/from-gemini`, `/from-grok`. When an AI model cites a property, the link goes to a tagged landing page → source captured deterministically.
+- QR codes per offline campaign (signage, direct mail, print ads, drive-by capture)
+- CallRail-style click-to-call tracking for phone events
+
+**2. Source Detection**
+- Referrer parsing (Google organic vs Google Ads vs Apartments.com vs direct)
+- Click ID capture (gclid, fbclid, msclkid)
+- **LLM detection** — referrer in (`chat.openai.com`, `claude.ai`, `perplexity.ai`, `gemini.google.com`, `grok.com`) → tagged as "AI search"
+- Branded vs cold query classification
+- First-touch + last-touch + linear attribution models all stored
+
+**3. Identity Resolution**
+- Fuzzy match on phone + email + name across every touchpoint
+- Cookie-based return-visit detection (60-day window)
+- Manual merge UI for ambiguous cases
+- This is the part competitors get wrong because they don't own the data — we will
+
+**4. Funnel Stages (timestamped rows in Supabase)**
+```
+Lead (any inbound)
+  → Contacted (FLAIR call connected or email reply)
+  → Qualified (meets income/credit/timing criteria)
+  → Tour scheduled
+  → Tour completed
+  → Application started
+  → Application submitted
+  → Approved
+  → Lease signed
+  → Moved in
+```
+
+**5. Reporting (the actual answer)**
+- **CPL** (cost per lead) by source
+- **CPT** (cost per tour) by source
+- **CPA** (cost per application) by source
+- **CPLease** (cost per lease) by source — *the only number that actually matters*
+- Lead→Tour conversion rate by source (some sources send junk, some send buyers)
+- Tour→Application by source + by leasing agent (FLAIR scorecards plug in here)
+- Time-from-first-touch-to-lease distribution per source
+- Per-property, per-portfolio, per-market views
+
+**6. Recommendation Engine (the AI layer)**
+- Claude reads funnel data + property context + market conditions monthly
+- Outputs: *"Cut spend at Apartments.com for Vangard Lofts ($850/mo, 12 leads, 0 leases). Reallocate to Google Ads ($1.4 CPL, 38% lead→tour rate) and FLAIR Connect."*
+- Per-property monthly allocation recommendation, dollarized
+- This is the artifact owners actually want
+
+### What this kills (the questions that go away)
+
+- *"Is Apartments.com worth $850/mo?"* → now an actual number
+- *"Should we put more into Google Ads or SEO?"* → CPLease by source tells you
+- *"Did that Meta campaign work?"* → linked through to lease signings
+- *"The agent says they were busy — were they?"* → calls timestamped, tied to leads, scored by FLAIR
+- *"How much leasing comes from drive-bys?"* → QR codes on signage capture it
+- *"Are LLM citations actually driving leads?"* → `/from-claude` page traffic and conversions answer it
+
+### Where this lives in the build
+
+This tool, as a standalone product, can ship pieces 1, 2, and 5 (lead capture, source detection, reporting) on top of the existing roster + audit infrastructure. Pieces 3 and 4 (identity resolution + funnel stages) require Resident Lifecycle data (applications, tours, leases) — that lives in the PM Platform's Phase 5. So:
+
+- **Standalone tool (this repo)**: lead capture + source attribution + CPL reporting per channel
+- **Platform integration (Phase 3 of PM Platform Roadmap)**: full funnel through to lease + recommendation engine
+
+The two converge when this tool ports into the platform's Marketing module. Until then the standalone tool gets us to "where leads come from" — the platform gets us to "where leases come from."
+
+---
+
 ## Part 1: What's Live Today (May 2026)
 
 ### Property Management
@@ -186,6 +276,46 @@ Currently shows the last audit. Persist a history of audits with timestamps to s
 🔴 **Differential PDF**
 "What changed since last audit?" — useful when re-auditing the same property quarterly.
 
+### Attribution (the North Star buildout)
+
+These items advance the tool toward the full-funnel attribution platform described in the North Star section. Roughly ordered by dependency and ROI.
+
+🔴 **`leads` table + capture API** *(~1 day)*
+Supabase (or sqlite-on-disk for standalone) schema: `id, property_id, source, source_detail, referrer, utm_*, gclid, fbclid, phone, email, name, raw_payload, created_at`. Endpoint `POST /api/leads/capture` accepts web form payloads and stores normalized lead rows. Foundation everything else hangs off.
+
+🔴 **Universal tracking pixel** *(~1 day)*
+JS snippet drops on every CRES-managed property website. Captures: page URL, referrer, UTM params, click IDs, viewport, session ID. POSTs to `/api/leads/pageview`. First-party cookie for return-visit detection.
+
+🔴 **UTM enforcement library + link builder UI** *(~4 hours)*
+Internal tool: paste destination URL + select source/medium/campaign → outputs tagged link. Prevents the "untagged link in the wild" problem that breaks attribution.
+
+🔴 **LLM landing pages** *(~3 hours)*
+Build `/from-claude`, `/from-chatgpt`, `/from-perplexity`, `/from-gemini`, `/from-grok` as deterministic source-tagged entry points. Each redirects to the property page but logs an `ai_search` lead row with the specific model. Pair with prompting Claude/ChatGPT-output content to link to these URLs.
+
+🔴 **Dynamic Number Insertion (DNI) via Twilio** *(~2-3 days)*
+Number pool per property. JS swaps the displayed phone number based on traffic source. Twilio webhook on inbound call → log `phone_call` lead with source = the swapped number's tag. Eliminates the "phone call from unknown source" blind spot.
+
+🔴 **ILS email forwarding parser** *(~1-2 days)*
+Per-property aliases: `vangard-leads@cres-leads.com`, etc. PMs configure each ILS account to forward there. Claude reads incoming email, extracts prospect name/phone/email + identifies ILS (Apartments.com, Zillow, etc), stores as lead row. Solves the largest blind spot — ILSs are 40-60% of multifamily lead volume and totally anonymized today.
+
+🔴 **CallRail-style click-to-call tracking** *(~4 hours, complements DNI)*
+Phone clicks on website logged before the call even fires; matched to the inbound call when it arrives via DNI.
+
+🔴 **Lead source dashboard (v1 — pre-funnel)** *(~1-2 days)*
+Per-property: leads by source over time, with absolute counts and trend. Doesn't yet show conversion to tour/lease (that requires PM Platform integration), but answers "where leads come from" deterministically.
+
+🔴 **Identity resolution v1** *(~2 days)*
+Fuzzy match leads on phone + email + first/last name across sources. Manual merge UI for ambiguous cases. Cookie-based return visit detection.
+
+🔴 **CPL reporting (cost ingestion)** *(~1 day)*
+Manual + automated cost ingestion (Google Ads API, Meta Ads API, ILS subscription costs entered per property). Combined with leads-by-source → CPL per channel per property.
+
+🔴 **Funnel stages (requires PM Platform integration)** *(deferred to Phase 3 of PM Platform)*
+Tour scheduled / completed / application / lease records come from Resident Lifecycle module. Once joined to leads, full CPT / CPA / CPLease becomes available. This is where the tool transitions from "lead attribution" to "marketing attribution platform."
+
+🔴 **Recommendation engine** *(deferred — needs funnel data first)*
+Claude reads the full funnel per property and outputs monthly dollar-level reallocation recommendations. The flagship artifact.
+
 ---
 
 ## Part 3: Architecture
@@ -241,16 +371,34 @@ Until then: this tool ships standalone, costs ~$0.25-$0.45 per property audit, a
 
 ## Part 5: Build Priority Order
 
-If picking what to build next on the tool alone:
+If picking what to build next on the tool alone, optimized for **fastest path to the North Star** (full-funnel attribution) while keeping audit accuracy improvements in flight:
 
+**Quick wins first (1-2 days total)**
 1. **Spend meter UI wire-up** (~1 hr) — finishes a half-built feature, gives real-time cost visibility
-2. **Manual GBP URL field** (~2 hr) — eliminates the biggest source of audit accuracy errors (name-matching failures)
-3. **Property website URL field** (~1 hr) — same idea, helps Schema/FAQ checks
-4. **GSC CSV import** (~3 hr) — biggest data quality jump available, no API integration needed
-5. **Hard spending guardrail** (~2 hr) — prevents future cost surprises
-6. **Bulk PDF export** (~4 hr) — useful for portfolio reviews
-7. **Top 10 Market Queries** (~1 day) — competitive intel, defer until SerpAPI volume is acceptable
-8. **Comparative report** (~1 day) — portfolio meetings
-9. **GSC OAuth integration** (~2 days) — turns CSV import into live data flow
+2. **Manual GBP URL field** (~2 hr) — eliminates the biggest source of audit accuracy errors
+3. **Property website URL field** (~1 hr) — same idea, helps Schema/FAQ checks + needed before the tracking pixel ships
+4. **Hard spending guardrail** (~2 hr) — prevents future cost surprises
+
+**Attribution foundation (the North Star, ~2 weeks)**
+5. **`leads` table + capture API** (~1 day) — the schema everything hangs off
+6. **Universal tracking pixel** (~1 day) — first-party data starts flowing
+7. **UTM enforcement library + link builder** (~4 hr) — kills the untagged-link problem
+8. **LLM landing pages** (~3 hr) — first deterministic source attribution for AI traffic
+9. **Lead source dashboard v1** (~1-2 days) — answers "where leads come from" for the first time
+10. **ILS email forwarding parser** (~1-2 days) — captures the 40-60% of leads that ILSs currently hide
+11. **Dynamic Number Insertion (Twilio)** (~2-3 days) — phone calls become attributable
+12. **Identity resolution v1** (~2 days) — same prospect across email/phone/web stitches into one record
+13. **CPL reporting (cost ingestion)** (~1 day) — first real cost-per-lead numbers per channel
+
+**Audit + reporting depth (in parallel as bandwidth allows)**
+14. **GSC CSV import** (~3 hr) — biggest data quality jump available, no API needed
+15. **Bulk PDF export** (~4 hr) — useful for portfolio reviews
+16. **Comparative report** (~1 day) — portfolio meetings
+17. **GSC OAuth integration** (~2 days) — live keyword data
+18. **Top 10 Market Queries** (~1 day) — defer until SerpAPI volume is acceptable
+
+**Deferred to PM Platform integration**
+19. **Funnel stages join** — requires tours + applications + leases from Resident Lifecycle module
+20. **CPLease + recommendation engine** — needs funnel data, then becomes the flagship artifact
 
 Everything else is nice-to-have and can be deferred indefinitely.
