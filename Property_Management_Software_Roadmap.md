@@ -1,7 +1,7 @@
 # CRES Property Management Platform — Roadmap
 **Updated May 2026** · Full PM Platform plan including all native modules: PM Core, Living Ledger, Marketing Hub (with the SEO / LLM Audit Tool live today), FLAIR Secret Shopper, and the platform path forward.
 
-> This document supersedes the May 2025 baseline (`CRES_Platform_Roadmap.md`) and the interim Unified Roadmap. For the SEO / LLM Audit Tool's own granular backlog, see `cres-marketing-hub/ROADMAP.md` in the project repo.
+> This document supersedes the May 2025 baseline (`CRES_Platform_Roadmap.md`) and the interim Unified Roadmap. For the SEO / LLM Audit Tool's own granular backlog, see `cres-marketing-hub/SEO_LLM_Audit_Tool_Roadmap.md` in the project repo.
 
 ---
 
@@ -778,17 +778,18 @@ If building from scratch today, optimized for fastest ROI per build week:
 
 ```
 PLATFORM DOCS (this folder)
-  CRES_PM_Platform_Roadmap.md            ← THIS document (May 2026)
-  CRES_Platform_Roadmap.md               ← May 2025 baseline (historical)
-  CRES_Platform_Build_Brief.md           ← Technical spec (schema, API routes)
-  cres-marketing-hub.jsx                 ← Marketing Hub prototype (superseded by live tool)
-  cres-pm-v2.jsx                         ← PM Platform v2 prototype (still pending build)
-  PROJECT_LOCATION.md                    ← Pointer to live audit tool repo
+  Property_Management_Software_Roadmap.md  ← THIS document (May 2026)
+  CRES_Platform_Roadmap.md                 ← May 2025 baseline (historical)
+  CRES_Platform_Build_Brief.md             ← Technical spec (schema, API routes)
+  cres-marketing-hub.jsx                   ← Marketing Hub prototype (superseded by live tool)
+  cres-pm-v2.jsx                           ← PM Platform v2 prototype (still pending build)
+  PROJECT_LOCATION.md                      ← Pointer to live audit tool repo
 
 SEO / LLM AUDIT TOOL (live, separate repo)
   C:\Users\BrendanVanDeventer\Projects\cres-marketing-hub\
-    ROADMAP.md                           ← Tool-specific backlog
-    README.md                            ← Setup + run
+    SEO_LLM_Audit_Tool_Roadmap.md          ← Tool-specific backlog
+    Property_Management_Software_Roadmap.md ← Mirror of THIS document for in-repo reference
+    README.md                              ← Setup + run
     git: github.com/Bucca2377/cres-seo-llm-audit-tool
 
 FLAIR (existing third-party reports)

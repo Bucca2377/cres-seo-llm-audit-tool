@@ -3,7 +3,7 @@
 
 Standalone roadmap for the SEO / LLM Audit Tool. This tool lives at `C:\Users\BrendanVanDeventer\Projects\cres-marketing-hub` and ships to https://github.com/Bucca2377/cres-seo-llm-audit-tool.
 
-> For how this tool fits into the broader CRES PM Platform, see `CRES_PM_Platform_Roadmap.md` in the OneDrive CRES Property Mgmt Software folder. This document focuses only on the tool itself.
+> For how this tool fits into the broader CRES PM Platform, see `Property_Management_Software_Roadmap.md` (in this repo root, mirrored from the OneDrive CRES Property Mgmt Software folder). This document focuses only on the tool itself.
 
 ---
 
@@ -357,7 +357,7 @@ scripts/                         xlsx → JSON conversion + roster build utiliti
 
 ## Part 4: Path to Platform Integration
 
-This tool's eventual home is the CRES PM Platform's **Marketing Intelligence module**. See `CRES_PM_Platform_Roadmap.md` Part 7 for the integration plan.
+This tool's eventual home is the CRES PM Platform's **Marketing Intelligence module**. See `Property_Management_Software_Roadmap.md` Part 7 for the integration plan.
 
 In short:
 - Tool code ports into platform's `/marketing` module largely unchanged
