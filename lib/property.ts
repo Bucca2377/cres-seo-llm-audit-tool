@@ -16,6 +16,20 @@ export interface Property {
   nearBy: string;
   description: string;
   managerName: string;
+  /**
+   * The property's primary website (e.g. "villageatsnowfield.com" or
+   * "https://www.villageatsnowfield.com"). When set, rank checks and
+   * GBP detection match by domain — far more reliable than fuzzy name
+   * matching. Highly recommended for accurate audits.
+   */
+  website?: string;
+  /**
+   * The property's Google Business Profile / Google Maps URL. Pasted
+   * from the address bar after searching on Google Maps. Locks GBP
+   * identity to avoid name-matching ambiguity (e.g. "Village Pizzeria"
+   * vs. "Village at Snowfield").
+   */
+  gbpUrl?: string;
   checklistStatuses?: Record<string, ChecklistStatus>;
   checklistEvidence?: Record<string, string>;
   llmAuditRecommendations?: string;
@@ -84,6 +98,8 @@ export const blankProperty: Omit<Property, "id"> = {
   nearBy: "",
   description: "",
   managerName: "",
+  website: "",
+  gbpUrl: "",
 };
 
 export function makeDefaultProperty(): Property {
@@ -183,6 +199,24 @@ export function useRoster() {
       });
     },
     [persist, roster, activeProperty.id]
+  );
+
+  /**
+   * Apply a partial update to a property by id. Used by batch enrichment
+   * and audit-time auto-capture. Patches are shallow-merged — existing
+   * fields not present in the patch are preserved.
+   */
+  const updatePropertyById = useCallback(
+    (id: string, patch: Partial<Property>) => {
+      const target = roster.properties.find((p) => p.id === id);
+      if (!target) return;
+      const merged: Property = { ...target, ...patch, id: target.id };
+      persist({
+        ...roster,
+        properties: roster.properties.map((x) => (x.id === id ? merged : x)),
+      });
+    },
+    [persist, roster]
   );
 
   const addProperty = useCallback(
@@ -316,6 +350,7 @@ export function useRoster() {
     property: activeProperty,
     setActive,
     updateActive,
+    updatePropertyById,
     addProperty,
     deleteProperty,
     clearRoster,

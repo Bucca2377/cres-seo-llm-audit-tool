@@ -13,6 +13,7 @@ const B = {
 interface Props {
   open: boolean;
   property: Property;
+  properties: Property[];
   canDelete: boolean;
   rosterSize: number;
   onSave: (p: Property) => void;
@@ -24,12 +25,22 @@ interface Props {
     json: string,
     opts?: { mode?: "append" | "merge" | "replace" }
   ) => { added: number; updated: number; removed: number; first: Property };
+  /** Apply a partial update to a specific property by id. Used by batch enrichment. */
+  onUpdateProperty: (id: string, patch: Partial<Property>) => void;
+  /** Look up a property's website + GBP URL via SerpAPI. */
+  onEnrich: (
+    property: Property
+  ) => Promise<
+    | { patch: Partial<Pick<Property, "website" | "gbpUrl">>; gbp: unknown }
+    | null
+  >;
   onClose: () => void;
 }
 
 export default function PropertySettings({
   open,
   property,
+  properties,
   canDelete,
   rosterSize,
   onSave,
@@ -38,11 +49,24 @@ export default function PropertySettings({
   onClearAll,
   onExport,
   onImport,
+  onUpdateProperty,
+  onEnrich,
   onClose,
 }: Props) {
   const [draft, setDraft] = useState<Property>(property);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [importMode, setImportMode] = useState<"append" | "merge" | "replace">("append");
+  const [enrichProgress, setEnrichProgress] = useState<{
+    running: boolean;
+    current: number;
+    total: number;
+    label: string;
+    enrichedWebsite: number;
+    enrichedGbp: number;
+    skipped: number;
+    failed: number;
+  } | null>(null);
+  const enrichCancelRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -122,6 +146,79 @@ export default function PropertySettings({
     if (!ok) return;
     onClearAll();
     setNotice({ kind: "ok", text: `Cleared roster. Now showing 1 fresh property.` });
+  };
+
+  const handleEnrichAll = async () => {
+    const candidates = properties.filter(
+      (p) => !p.website || !p.gbpUrl
+    );
+    if (candidates.length === 0) {
+      setNotice({
+        kind: "ok",
+        text: "All properties already have website + GBP URL set. Nothing to enrich.",
+      });
+      return;
+    }
+    const ok = window.confirm(
+      `Auto-fill website + Google Business Profile URL for ${candidates.length} of ${properties.length} properties? This runs 1 SerpAPI call per property (free under 250/mo). Properties that already have BOTH fields set are skipped. Existing values are never overwritten.`
+    );
+    if (!ok) return;
+
+    enrichCancelRef.current = false;
+    setEnrichProgress({
+      running: true,
+      current: 0,
+      total: candidates.length,
+      label: candidates[0].name,
+      enrichedWebsite: 0,
+      enrichedGbp: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    setNotice(null);
+
+    let enrichedWebsite = 0;
+    let enrichedGbp = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (let i = 0; i < candidates.length; i++) {
+      if (enrichCancelRef.current) break;
+      const target = candidates[i];
+      setEnrichProgress((prev) =>
+        prev ? { ...prev, current: i + 1, label: target.name } : prev
+      );
+      try {
+        const result = await onEnrich(target);
+        if (!result) {
+          failed++;
+        } else if (
+          Object.keys(result.patch).length === 0
+        ) {
+          skipped++;
+        } else {
+          onUpdateProperty(target.id, result.patch);
+          if (result.patch.website) enrichedWebsite++;
+          if (result.patch.gbpUrl) enrichedGbp++;
+        }
+      } catch {
+        failed++;
+      }
+      // Small delay between requests to be polite to SerpAPI
+      await new Promise((res) => setTimeout(res, 300));
+    }
+
+    setEnrichProgress(null);
+    setNotice({
+      kind: "ok",
+      text: `Enrichment complete. Website set on ${enrichedWebsite}, GBP URL set on ${enrichedGbp}. ${skipped} already populated. ${failed} not found via SerpAPI.${
+        enrichCancelRef.current ? " (Cancelled before finishing.)" : ""
+      }`,
+    });
+  };
+
+  const handleCancelEnrich = () => {
+    enrichCancelRef.current = true;
   };
 
   const field = (label: string, child: React.ReactNode, hint?: string) => (
@@ -270,6 +367,28 @@ export default function PropertySettings({
             onChange={(e) => setDraft({ ...draft, address: e.target.value })}
             style={inputStyle}
           />
+        )}
+
+        {field(
+          "Website URL",
+          <input
+            value={draft.website ?? ""}
+            onChange={(e) => setDraft({ ...draft, website: e.target.value })}
+            style={inputStyle}
+            placeholder="https://www.villageatsnowfield.com"
+          />,
+          "Used as the primary match for SEO rank checks (much more reliable than name matching). Highly recommended."
+        )}
+
+        {field(
+          "Google Business Profile URL",
+          <input
+            value={draft.gbpUrl ?? ""}
+            onChange={(e) => setDraft({ ...draft, gbpUrl: e.target.value })}
+            style={inputStyle}
+            placeholder="https://www.google.com/maps/place/..."
+          />,
+          "Search the property on Google Maps and copy the URL. Locks GBP identity for audits and review checks."
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
@@ -513,6 +632,24 @@ export default function PropertySettings({
               🗑 Delete property
             </button>
             <button
+              onClick={handleEnrichAll}
+              disabled={!!enrichProgress?.running}
+              style={{
+                background: enrichProgress?.running ? "#ddd" : B.caribbean,
+                border: "none",
+                borderRadius: 6,
+                padding: "7px 14px",
+                color: "white",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 12,
+                cursor: enrichProgress?.running ? "not-allowed" : "pointer",
+                fontWeight: 600,
+              }}
+              title="Auto-fill Website + GBP URL for every property in your roster (1 SerpAPI call each, free under 250/mo). Skips properties that already have both fields set. Never overwrites existing values."
+            >
+              ✨ Enrich all ({properties.filter((p) => !p.website || !p.gbpUrl).length} missing)
+            </button>
+            <button
               onClick={handleClearAll}
               style={{
                 background: B.tangelo,
@@ -530,6 +667,62 @@ export default function PropertySettings({
               🧹 Clear all ({rosterSize})
             </button>
           </div>
+
+          {enrichProgress?.running && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                borderRadius: 6,
+                background: "#f5fbfb",
+                border: "1px solid #cce7e7",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 12,
+                color: "#333",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontWeight: 600 }}>
+                  Enriching {enrichProgress.current} / {enrichProgress.total}
+                </span>
+                <button
+                  onClick={handleCancelEnrich}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: B.tangelo,
+                    fontFamily: "'Josefin Sans',sans-serif",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <div
+                style={{
+                  height: 6,
+                  background: "#e0eded",
+                  borderRadius: 3,
+                  overflow: "hidden",
+                  marginBottom: 6,
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${(enrichProgress.current / enrichProgress.total) * 100}%`,
+                    background: B.caribbean,
+                    transition: "width 0.2s",
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: "#666", fontStyle: "italic" }}>
+                {enrichProgress.label}
+              </div>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             <div
               style={{

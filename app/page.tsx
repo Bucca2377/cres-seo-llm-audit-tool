@@ -185,7 +185,16 @@ Return ONLY a JSON object:
           query: serpQuery,
           location: extractLocation(property.address),
         });
-        gbpGround = extractGBP(serpData, property.name);
+        gbpGround = extractGBP(serpData, property);
+        // Auto-capture: if GBP detection succeeded and the property is
+        // missing website / gbpUrl, persist what we found so future audits
+        // match deterministically by domain + GBP id instead of fuzzy name.
+        if (gbpGround) {
+          const patch = computeEnrichment(property, gbpGround);
+          if (Object.keys(patch).length > 0) {
+            onUpdateProperty({ ...property, ...patch });
+          }
+        }
       } catch {
         /* OK to proceed without ground truth */
       }
@@ -576,15 +585,108 @@ const EMPTY_RANK: GoogleRankResult = {
   diagnosis: "",
 };
 
+/**
+ * Extract "City, ST, United States" from any of these address shapes:
+ *   "1096 N Khione Loop, Salisbury, MD 21804"   (two commas, ideal)
+ *   "1096 N Khione Loop Salisbury, MD 21804"    (one comma, common typo)
+ *   "Salisbury, MD"                              (city + state only)
+ *   "Salisbury MD 21804"                         (no commas at all)
+ *
+ * The previous implementation only handled the two-comma form correctly;
+ * a single-comma address would send "1096 N Khione Loop Salisbury, MD"
+ * to SerpAPI as the location, which SerpAPI rejects (not in its location
+ * DB) and falls back to a non-localized search — producing wrong results.
+ */
 function extractLocation(address: string): string {
-  const parts = address.split(",").map((s) => s.trim()).filter(Boolean);
-  if (parts.length >= 2) {
-    const city = parts[parts.length - 2];
-    const stateZip = parts[parts.length - 1];
-    const state = stateZip.split(/\s+/)[0];
+  if (!address || typeof address !== "string") return "";
+  // Last segment after the final comma is expected to contain "ST" + optional ZIP.
+  // The segment(s) before it contain the city (and possibly the street).
+  const stateZipMatch = address.match(/,?\s*([A-Z]{2})\s*\d{0,5}\s*$/);
+  if (!stateZipMatch) return address;
+  const state = stateZipMatch[1];
+  const beforeState = address.slice(0, stateZipMatch.index).replace(/,\s*$/, "").trim();
+  if (!beforeState) return `${state}, United States`;
+
+  // If the remainder still has commas, the last comma-segment is the city.
+  if (beforeState.includes(",")) {
+    const parts = beforeState.split(",").map((s) => s.trim()).filter(Boolean);
+    const city = parts[parts.length - 1];
     return `${city}, ${state}, United States`;
   }
-  return address;
+
+  // Otherwise we have "Street Number Street Name CityWord(s)" all jammed together.
+  // Heuristic: the city is the trailing word(s) that aren't a street-type token.
+  // Pull the last 1-3 tokens and treat them as the city, skipping common street suffixes.
+  const tokens = beforeState.split(/\s+/);
+  const STREET_TOKENS = new Set([
+    "st", "street", "rd", "road", "ave", "avenue", "blvd", "boulevard",
+    "ln", "lane", "dr", "drive", "loop", "ct", "court", "cir", "circle",
+    "pkwy", "parkway", "way", "ter", "terrace", "pl", "place", "hwy", "highway",
+    "n", "s", "e", "w", "north", "south", "east", "west", "ne", "nw", "se", "sw",
+  ]);
+  // Walk backwards collecting up to 3 trailing non-street tokens.
+  const cityTokens: string[] = [];
+  for (let i = tokens.length - 1; i >= 0 && cityTokens.length < 3; i--) {
+    const t = tokens[i];
+    const tl = t.toLowerCase().replace(/[.,]/g, "");
+    if (STREET_TOKENS.has(tl) || /^\d/.test(t)) break;
+    cityTokens.unshift(t);
+  }
+  const city = cityTokens.join(" ") || tokens[tokens.length - 1] || "";
+  return city ? `${city}, ${state}, United States` : `${state}, United States`;
+}
+
+/**
+ * Normalize any URL or domain-ish string into a bare lowercase hostname.
+ * "https://www.villageatsnowfield.com/floor-plans" → "villageatsnowfield.com"
+ * "www.VillageAtSnowfield.com" → "villageatsnowfield.com"
+ * "villageatsnowfield.com" → "villageatsnowfield.com"
+ * Returns empty string if it can't extract anything useful.
+ */
+function normalizeDomain(input: string | undefined | null): string {
+  if (!input || typeof input !== "string") return "";
+  let s = input.trim().toLowerCase();
+  if (!s) return "";
+  // Strip protocol
+  s = s.replace(/^https?:\/\//, "");
+  // Strip everything from the first slash, query, or hash onward
+  s = s.split(/[/?#]/)[0];
+  // Strip leading www.
+  s = s.replace(/^www\./, "");
+  // Strip trailing dots, ports
+  s = s.replace(/:\d+$/, "").replace(/\.+$/, "");
+  // Must contain at least one dot to be a real domain
+  if (!s.includes(".")) return "";
+  return s;
+}
+
+/**
+ * Try to pull the GBP "data_id" (the long hex CID) out of a Google Maps URL.
+ * Used to lock GBP identity when a property record has a gbpUrl set.
+ * Example URL fragments to handle:
+ *   /maps/place/.../data=!4m...!3m...!1s0x89c4595d...   (data_id after !1s)
+ *   /maps?cid=12345678901234567890                       (cid → data_id is "0x0:0xABC..." form)
+ *   /maps/place/.../@lat,lon,zoom/...
+ * We only need a STABLE identifier we can compare against SerpAPI's
+ * `place_id` / `data_id` / `cid` fields. Returns lowercase string or "".
+ */
+function extractGbpIdFromUrl(url: string | undefined | null): string {
+  if (!url || typeof url !== "string") return "";
+  const u = url.trim().toLowerCase();
+  if (!u) return "";
+  // !1s0x... form (most stable — this is the data_id SerpAPI also returns)
+  const dataIdMatch = u.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/);
+  if (dataIdMatch) return dataIdMatch[1];
+  // ?cid= form
+  const cidMatch = u.match(/[?&]cid=(\d+)/);
+  if (cidMatch) return `cid:${cidMatch[1]}`;
+  // /place/<name>/ form — extract the slug as a last-resort identifier
+  const slugMatch = u.match(/\/place\/([^/]+)/);
+  if (slugMatch) {
+    const slug = decodeURIComponent(slugMatch[1]).toLowerCase();
+    return `slug:${slug}`;
+  }
+  return "";
 }
 
 function nameMatches(haystack: string, needle: string): boolean {
@@ -613,31 +715,101 @@ interface GBPGroundTruth {
   phone: string;
   website: string;
   hasHours: boolean;
+  // Deterministic identifiers — used to build a gbpUrl for auto-capture
+  // and to lock property identity on subsequent audits.
+  dataId: string;
+  placeId: string;
 }
 
-function extractGBP(data: any, propertyName: string): GBPGroundTruth | null {
+/**
+ * Pull the property's GBP from a SerpAPI response. Match strategy (in order):
+ *   1. property.gbpUrl matches the result's data_id / place_id / slug → DEFINITIVE
+ *   2. property.website matches the result's website domain → STRONG
+ *   3. Property name fuzzy-matches the result's title + address → FALLBACK
+ *
+ * The first two are deterministic. Falling all the way through to name
+ * matching is how you get "Village Pizzeria" mis-identified as
+ * "Village at Snowfield". Setting website + gbpUrl on the Property record
+ * eliminates that class of failure.
+ */
+function extractGBP(data: any, property: Property): GBPGroundTruth | null {
+  const propertyName = property.name;
+  const targetDomain = normalizeDomain(property.website);
+  const targetGbpId = extractGbpIdFromUrl(property.gbpUrl);
+
+  const matchesProperty = (
+    candidateName: string,
+    candidateAddress: string,
+    candidateWebsite: string | undefined,
+    candidateDataId: string | undefined,
+    candidatePlaceId: string | undefined
+  ): "gbp" | "website" | "name" | null => {
+    // 1. GBP-id match (most reliable)
+    if (targetGbpId) {
+      const candId = (candidateDataId || candidatePlaceId || "").toLowerCase();
+      if (candId && targetGbpId === candId) return "gbp";
+      // Slug-form fallback: if user pasted a /place/<slug>/ URL and SerpAPI
+      // returned no data_id, the candidateName likely contains the same slug.
+      if (targetGbpId.startsWith("slug:")) {
+        const slug = targetGbpId.slice(5).replace(/[-_+]/g, " ");
+        if (slug && candidateName.toLowerCase().includes(slug)) return "gbp";
+      }
+    }
+    // 2. Website-domain match (very reliable for branded properties)
+    if (targetDomain) {
+      const candDomain = normalizeDomain(candidateWebsite);
+      if (candDomain && (candDomain === targetDomain || candDomain.endsWith("." + targetDomain) || targetDomain.endsWith("." + candDomain))) {
+        return "website";
+      }
+    }
+    // 3. Name fuzzy match (last resort)
+    if (nameMatches(`${candidateName} ${candidateAddress}`, propertyName)) return "name";
+    return null;
+  };
+
   const kg = data?.knowledge_graph;
-  if (kg && kg.title && nameMatches(`${kg.title} ${kg.address || ""}`, propertyName)) {
-    return {
-      source: "knowledge_graph",
-      name: kg.title,
-      address: kg.address || "",
-      rating: typeof kg.rating === "number" ? kg.rating : null,
-      reviewCount: typeof kg.review_count === "number" ? kg.review_count : null,
-      unclaimed: kg.unclaimed_listing === true,
-      phone: kg.phone || "",
-      website: kg.website || "",
-      hasHours: !!kg.hours,
-    };
+  if (kg && kg.title) {
+    const m = matchesProperty(
+      kg.title,
+      kg.address || "",
+      kg.website,
+      kg.data_id,
+      kg.place_id
+    );
+    if (m) {
+      return {
+        source: "knowledge_graph",
+        name: kg.title,
+        address: kg.address || "",
+        rating: typeof kg.rating === "number" ? kg.rating : null,
+        reviewCount: typeof kg.review_count === "number" ? kg.review_count : null,
+        unclaimed: kg.unclaimed_listing === true,
+        phone: kg.phone || "",
+        website: kg.website || "",
+        hasHours: !!kg.hours,
+        dataId: kg.data_id || "",
+        placeId: kg.place_id || "",
+      };
+    }
   }
+
   const local = Array.isArray(data?.local_results)
     ? data.local_results
     : Array.isArray(data?.local_results?.places)
     ? data.local_results.places
     : [];
-  for (let i = 0; i < Math.min(3, local.length); i++) {
+  // When we have a deterministic identifier, scan all local results, not just top 3
+  const scanLimit = targetGbpId || targetDomain ? local.length : Math.min(3, local.length);
+  for (let i = 0; i < scanLimit; i++) {
     const b = local[i];
-    if (nameMatches(`${b.title || b.name || ""} ${b.address || ""}`, propertyName)) {
+    const m = matchesProperty(
+      b.title || b.name || "",
+      b.address || "",
+      b.website,
+      b.data_id,
+      b.place_id
+    );
+    if (m) {
       return {
         source: "local_results",
         name: b.title || b.name,
@@ -653,10 +825,82 @@ function extractGBP(data: any, propertyName: string): GBPGroundTruth | null {
         phone: b.phone || "",
         website: b.website || "",
         hasHours: !!b.hours,
+        dataId: b.data_id || "",
+        placeId: b.place_id || "",
       };
     }
   }
   return null;
+}
+
+/**
+ * Compute a website + gbpUrl patch for a property based on what we found
+ * via GBP detection. Only suggests values for fields that aren't already
+ * set on the property — never overwrites user-set values.
+ *
+ * Returns an empty object if there's nothing to enrich.
+ */
+function computeEnrichment(
+  property: Property,
+  gbp: GBPGroundTruth
+): Partial<Pick<Property, "website" | "gbpUrl">> {
+  const patch: Partial<Pick<Property, "website" | "gbpUrl">> = {};
+
+  // Website: only fill if unset and SerpAPI gave us one
+  if (!normalizeDomain(property.website) && gbp.website) {
+    patch.website = gbp.website;
+  }
+
+  // GBP URL: only fill if unset and we have a stable identifier to build one
+  if (!extractGbpIdFromUrl(property.gbpUrl)) {
+    if (gbp.dataId) {
+      // SerpAPI's data_id is the canonical Google Maps identifier; we use
+      // a query URL form because we don't always have the slug.
+      // Format: https://www.google.com/maps?q=place_id:<PLACE_ID> works
+      // for place_id; for data_id we encode it directly.
+      patch.gbpUrl = `https://www.google.com/maps/place/?q=place_id:${gbp.placeId || gbp.dataId}`;
+    } else if (gbp.placeId) {
+      patch.gbpUrl = `https://www.google.com/maps/place/?q=place_id:${gbp.placeId}`;
+    }
+  }
+
+  return patch;
+}
+
+/**
+ * Run a single-shot SerpAPI search for a property, extract GBP, and return
+ * the recommended enrichment patch (website + gbpUrl). Used by the batch
+ * enrichment flow. Returns null on failure or if no GBP found.
+ */
+async function enrichPropertyFromSerp(
+  property: Property
+): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl">>; gbp: GBPGroundTruth } | null> {
+  try {
+    const city = extractCity(property.address);
+    const query = `${property.name}${city ? " " + city : ""}`;
+    const data = await callSerp({
+      query,
+      location: extractLocation(property.address),
+    });
+    const gbp = extractGBP(data, property);
+    if (!gbp) return null;
+    const patch = computeEnrichment(property, gbp);
+    return { patch, gbp };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pull just the "City" segment out of an address using the same robust
+ * parser as extractLocation. Used for forming SerpAPI search queries.
+ */
+function extractCity(address: string): string {
+  const loc = extractLocation(address);
+  if (!loc) return "";
+  // extractLocation returns "City, ST, United States"; pull just the city.
+  const parts = loc.split(",").map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts[0] : "";
 }
 
 const AGGREGATOR_DOMAINS = [
@@ -731,6 +975,53 @@ function diagnose(
   return "Not ranking and no Map Pack rendered — Google deemed this query not local-intent.";
 }
 
+/**
+ * Match a SerpAPI result (organic or local) against the property using
+ * the most reliable identifier available. Order of preference:
+ *   1. gbpUrl → data_id / place_id / slug         (local results only)
+ *   2. website → result link / result website     (domain comparison)
+ *   3. property name fuzzy match                  (last resort)
+ * Returns the match type or null.
+ */
+function matchPropertyToResult(
+  property: Property,
+  opts: {
+    title?: string;
+    link?: string;          // organic result URL
+    website?: string;       // local result's website field
+    address?: string;
+    dataId?: string;
+    placeId?: string;
+  }
+): "gbp" | "website" | "name" | null {
+  const targetDomain = normalizeDomain(property.website);
+  const targetGbpId = extractGbpIdFromUrl(property.gbpUrl);
+
+  if (targetGbpId) {
+    const candId = (opts.dataId || opts.placeId || "").toLowerCase();
+    if (candId && candId === targetGbpId) return "gbp";
+    if (targetGbpId.startsWith("slug:")) {
+      const slug = targetGbpId.slice(5).replace(/[-_+]/g, " ");
+      if (slug && (opts.title || "").toLowerCase().includes(slug)) return "gbp";
+    }
+  }
+
+  if (targetDomain) {
+    const fromLink = normalizeDomain(opts.link);
+    const fromWebsite = normalizeDomain(opts.website);
+    const cand = fromLink || fromWebsite;
+    if (cand) {
+      if (cand === targetDomain) return "website";
+      // Sub/super domain (e.g. property.com vs apply.property.com)
+      if (cand.endsWith("." + targetDomain) || targetDomain.endsWith("." + cand)) return "website";
+    }
+  }
+
+  const haystack = `${opts.title || ""} ${opts.link || ""} ${opts.address || ""} ${opts.website || ""}`;
+  if (nameMatches(haystack, property.name)) return "name";
+  return null;
+}
+
 async function fetchGoogleRank(property: Property, query: string): Promise<GoogleRankResult> {
   try {
     const location = extractLocation(property.address);
@@ -744,31 +1035,53 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
     const organic: any[] = Array.isArray(data?.organic_results) ? data.organic_results : [];
     const kg = data?.knowledge_graph;
 
-    // Map Pack matching: check knowledge_graph first (branded queries), then local_results (3-pack queries)
+    // -- Map Pack matching ------------------------------------------------
+    // Check knowledge_graph first (branded queries), then local_results 3-pack.
     const top3 = localResults.slice(0, 3);
     let mapPackRank: number | null = null;
     let topMapPack: string[] = [];
 
-    if (kg?.title && nameMatches(`${kg.title} ${kg.address || ""}`, property.name)) {
-      // Knowledge graph match = property is the dominant local result for this query
-      mapPackRank = 1;
-      topMapPack = [kg.title];
-    } else {
+    if (kg?.title) {
+      const m = matchPropertyToResult(property, {
+        title: kg.title,
+        link: kg.website,
+        website: kg.website,
+        address: kg.address,
+        dataId: kg.data_id,
+        placeId: kg.place_id,
+      });
+      if (m) {
+        mapPackRank = 1;
+        topMapPack = [kg.title];
+      }
+    }
+    if (mapPackRank === null) {
       top3.forEach((biz: any, idx: number) => {
-        const candidate = `${biz.title || biz.name || ""} ${biz.address || ""}`;
-        if (mapPackRank === null && nameMatches(candidate, property.name)) {
-          mapPackRank = idx + 1;
-        }
+        if (mapPackRank !== null) return;
+        const m = matchPropertyToResult(property, {
+          title: biz.title || biz.name,
+          link: biz.website,
+          website: biz.website,
+          address: biz.address,
+          dataId: biz.data_id,
+          placeId: biz.place_id,
+        });
+        if (m) mapPackRank = idx + 1;
       });
       topMapPack = top3.map((b: any) => b.title || b.name).filter(Boolean);
       if (kg?.title && topMapPack.length === 0) topMapPack = [kg.title];
     }
 
-    // Match in organic results
+    // -- Organic matching -------------------------------------------------
     let organicRank: number | null = null;
     for (const o of organic) {
-      const candidate = `${o.title || ""} ${o.link || ""} ${o.snippet || ""}`;
-      if (nameMatches(candidate, property.name)) {
+      const m = matchPropertyToResult(property, {
+        title: o.title,
+        link: o.link,
+        address: "",
+        // organic doesn't have data_id/place_id
+      });
+      if (m) {
         organicRank = typeof o.position === "number" ? o.position : organic.indexOf(o) + 1;
         break;
       }
@@ -784,7 +1097,7 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
       return { name: o.title || "", domain };
     });
 
-    // Stage 2: if NOT in inline Map Pack top 3, fetch expanded Maps view (~20 results)
+    // -- Expanded Map Pack (stage 2) -------------------------------------
     let expandedMapPackRank: number | null = null;
     if (mapPackRank === null) {
       try {
@@ -795,8 +1108,15 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
         const top20 = mapsResults.slice(0, 20);
         for (let idx = 0; idx < top20.length; idx++) {
           const biz = top20[idx];
-          const candidate = `${biz.title || biz.name || ""} ${biz.address || ""}`;
-          if (nameMatches(candidate, property.name)) {
+          const m = matchPropertyToResult(property, {
+            title: biz.title || biz.name,
+            link: biz.website,
+            website: biz.website,
+            address: biz.address,
+            dataId: biz.data_id,
+            placeId: biz.place_id,
+          });
+          if (m) {
             expandedMapPackRank = idx + 1;
             break;
           }
@@ -804,6 +1124,29 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
       } catch {
         /* expanded lookup failed; proceed without */
       }
+    }
+
+    // -- Diagnostic logging for no-match cases ---------------------------
+    // When BOTH Map Pack and organic miss, log what SerpAPI actually
+    // returned so a no-match audit can be debugged from devtools in 30s.
+    if (mapPackRank === null && expandedMapPackRank === null && organicRank === null) {
+      // Keep payload small — top 5 organic + top 3 local + kg summary.
+      // eslint-disable-next-line no-console
+      console.warn("[fetchGoogleRank] No match found", {
+        property: {
+          name: property.name,
+          website: property.website || "(unset)",
+          gbpUrl: property.gbpUrl || "(unset)",
+          parsedDomain: normalizeDomain(property.website) || "(none)",
+          parsedGbpId: extractGbpIdFromUrl(property.gbpUrl) || "(none)",
+        },
+        query,
+        location,
+        kg: kg ? { title: kg.title, website: kg.website, address: kg.address, data_id: kg.data_id } : null,
+        top_local: top3.map((b: any) => ({ title: b.title || b.name, website: b.website, address: b.address, data_id: b.data_id })),
+        top_organic: organic.slice(0, 5).map((o: any) => ({ title: o.title, link: o.link })),
+        hint: "If the property IS in this result list, set website + gbpUrl on the property record for deterministic matching.",
+      });
     }
 
     return {
@@ -1182,16 +1525,40 @@ function SEOAudit({
     setError(null);
     setResults(null);
 
+    // Track an evolving property reference so an enrichment pre-flight
+    // can lock in website/gbpUrl that subsequent rank checks rely on
+    // for deterministic matching.
+    let currentProperty: Property = property;
+
     try {
+      // Stage 0 (silent): auto-capture website + gbpUrl if missing. This
+      // makes the parallel rank-checks below match by domain instead of
+      // fuzzy name, eliminating the "Village Pizzeria misidentified as
+      // Village at Snowfield" class of error. Costs 1 extra SerpAPI call
+      // only when enrichment is needed.
+      if (!currentProperty.website || !currentProperty.gbpUrl) {
+        setStage("queries");
+        setProgress("Locking property identity (1 SerpAPI lookup)…");
+        try {
+          const result = await enrichPropertyFromSerp(currentProperty);
+          if (result && Object.keys(result.patch).length > 0) {
+            currentProperty = { ...currentProperty, ...result.patch };
+            onUpdateProperty(currentProperty);
+          }
+        } catch {
+          /* enrichment is best-effort; continue without it */
+        }
+      }
+
       // Stage 1: generate queries
       setStage("queries");
       setProgress("Generating relevant search queries...");
 
-      const amenitiesStr = property.amenities.slice(0, 8).join(", ") || "(none specified)";
-      const queriesPrompt = `Generate exactly 6 highly relevant Google search queries that prospective renters would use to find apartments like ${property.name}.
+      const amenitiesStr = currentProperty.amenities.slice(0, 8).join(", ") || "(none specified)";
+      const queriesPrompt = `Generate exactly 6 highly relevant Google search queries that prospective renters would use to find apartments like ${currentProperty.name}.
 
-Property: ${property.name}
-Address: ${property.address}
+Property: ${currentProperty.name}
+Address: ${currentProperty.address}
 Amenities: ${amenitiesStr}
 
 Mix the 6 queries as follows:
@@ -1217,7 +1584,7 @@ Return ONLY a JSON array of 6 strings, no prose:
       let completed = 0;
       setProgress(`Checking rankings: 0 of ${queries.length} complete`);
       const rankPromises = queries.map((q) =>
-        fetchGoogleRank(property, q).then((r) => {
+        fetchGoogleRank(currentProperty, q).then((r) => {
           completed += 1;
           setProgress(`Checking rankings: ${completed} of ${queries.length} complete`);
           return r;
@@ -1250,11 +1617,11 @@ Return ONLY a JSON array of 6 strings, no prose:
         })
         .join("\n\n");
 
-      const recsPrompt = `SEO audit results for ${property.name} at ${property.address}:
+      const recsPrompt = `SEO audit results for ${currentProperty.name} at ${currentProperty.address}:
 
 ${queryRankSummary}
 
-Based on the actual rank data above, provide 5 ranked recommendations to improve ${property.name}'s search visibility. Each recommendation MUST:
+Based on the actual rank data above, provide 5 ranked recommendations to improve ${currentProperty.name}'s search visibility. Each recommendation MUST:
 - Cite specific queries and ranks from the audit above (use exact numbers)
 - Be concrete and actionable, not generic SEO advice
 - Specify whether it's a Map Pack fix or organic fix
@@ -1265,7 +1632,7 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
 
       const rResp = await callAI({
         prompt: recsPrompt,
-        system: buildSystemPrompt(property),
+        system: buildSystemPrompt(currentProperty),
         maxTokens: 1500,
       });
 
@@ -1276,7 +1643,7 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
         timestamp: new Date().toISOString(),
       };
       setResults(finalResults);
-      onUpdateProperty({ ...property, seoAudit: finalResults });
+      onUpdateProperty({ ...currentProperty, seoAudit: finalResults });
       setStage("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Audit failed.");
@@ -2244,6 +2611,7 @@ export default function MarketingHub() {
     properties,
     setActive,
     updateActive,
+    updatePropertyById,
     addProperty,
     deleteProperty,
     clearRoster,
@@ -2508,6 +2876,7 @@ export default function MarketingHub() {
       <PropertySettings
         open={settingsOpen}
         property={property}
+        properties={properties}
         canDelete={properties.length > 1}
         rosterSize={properties.length}
         onSave={updateActive}
@@ -2516,6 +2885,8 @@ export default function MarketingHub() {
         onClearAll={clearRoster}
         onExport={() => exportProperty()}
         onImport={(json, opts) => importProperty(json, opts)}
+        onUpdateProperty={updatePropertyById}
+        onEnrich={enrichPropertyFromSerp}
         onClose={() => setSettingsOpen(false)}
       />
     </div>
