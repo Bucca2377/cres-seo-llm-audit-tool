@@ -221,6 +221,59 @@ export default function PropertySettings({
     enrichCancelRef.current = true;
   };
 
+  const [redetecting, setRedetecting] = useState(false);
+
+  const handleRedetect = async () => {
+    setRedetecting(true);
+    setNotice(null);
+    try {
+      // Use the current DRAFT (so address edits in the form are honored
+      // immediately, without requiring a save first). We pass it as a
+      // Property; onEnrich only reads name + address + website + gbpUrl.
+      const result = await onEnrich(draft);
+      if (!result) {
+        setNotice({
+          kind: "error",
+          text: "Google didn't return a confident match. Check the property name + address, or paste the Google Maps URL into the GBP field manually.",
+        });
+        return;
+      }
+      // computeEnrichment only returns fields that aren't already set, so
+      // for re-detect we need to overwrite explicitly. Read .gbp instead.
+      const gbp = result.gbp as {
+        website?: string;
+        dataId?: string;
+        placeId?: string;
+        name?: string;
+        address?: string;
+      } | null;
+      if (!gbp) {
+        setNotice({
+          kind: "error",
+          text: "GBP found but data was incomplete. Try again or paste the values manually.",
+        });
+        return;
+      }
+      const newWebsite = gbp.website || draft.website || "";
+      const newGbpUrl =
+        gbp.placeId || gbp.dataId
+          ? `https://www.google.com/maps/place/?q=place_id:${gbp.placeId || gbp.dataId}`
+          : draft.gbpUrl || "";
+      setDraft({ ...draft, website: newWebsite, gbpUrl: newGbpUrl });
+      setNotice({
+        kind: "ok",
+        text: `Detected: ${gbp.name || "(unnamed)"} at ${gbp.address || "(no address)"}. Review the values below and click Save to commit.`,
+      });
+    } catch (e) {
+      setNotice({
+        kind: "error",
+        text: e instanceof Error ? e.message : "Re-detect failed.",
+      });
+    } finally {
+      setRedetecting(false);
+    }
+  };
+
   const field = (label: string, child: React.ReactNode, hint?: string) => (
     <div style={{ marginBottom: 14 }}>
       <div
@@ -371,13 +424,35 @@ export default function PropertySettings({
 
         {field(
           "Website URL",
-          <input
-            value={draft.website ?? ""}
-            onChange={(e) => setDraft({ ...draft, website: e.target.value })}
-            style={inputStyle}
-            placeholder="https://www.villageatsnowfield.com"
-          />,
-          "Used as the primary match for SEO rank checks (much more reliable than name matching). Highly recommended."
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={draft.website ?? ""}
+              onChange={(e) => setDraft({ ...draft, website: e.target.value })}
+              style={{ ...inputStyle, flex: 1 }}
+              placeholder="https://www.villageatsnowfield.com"
+            />
+            <button
+              onClick={handleRedetect}
+              disabled={redetecting}
+              style={{
+                background: redetecting ? "#ddd" : "white",
+                border: `1px solid ${B.caribbean}`,
+                borderRadius: 6,
+                padding: "6px 12px",
+                color: redetecting ? "#999" : B.caribbean,
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: redetecting ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+                letterSpacing: "0.04em",
+              }}
+              title="Run a fresh SerpAPI lookup using the current property name + address to detect website + GBP URL. Overwrites the values below; you still need to click Save to commit."
+            >
+              {redetecting ? "Detecting…" : "🔄 Re-detect"}
+            </button>
+          </div>,
+          "Used as the primary match for SEO rank checks (much more reliable than name matching). Use Re-detect to refresh from Google if the value looks wrong."
         )}
 
         {field(
@@ -388,7 +463,7 @@ export default function PropertySettings({
             style={inputStyle}
             placeholder="https://www.google.com/maps/place/..."
           />,
-          "Search the property on Google Maps and copy the URL. Locks GBP identity for audits and review checks."
+          "Search the property on Google Maps and copy the URL. Locks GBP identity for audits and review checks. Filled automatically by Re-detect."
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>

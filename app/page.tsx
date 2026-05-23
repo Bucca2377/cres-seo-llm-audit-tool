@@ -180,7 +180,10 @@ Return ONLY a JSON object:
       // SerpAPI pre-flight: get Google Business Profile ground truth
       let gbpGround: GBPGroundTruth | null = null;
       try {
-        const serpQuery = `${property.name}${city ? " " + city : ""}`;
+        // buildGbpSearchQuery appends "apartments" when the property name
+        // doesn't already include an apartment-type token, which fixes
+        // GBP detection for generic-name properties like "Cambridge".
+        const serpQuery = buildGbpSearchQuery(property);
         const serpData = await callSerp({
           query: serpQuery,
           location: extractLocation(property.address),
@@ -207,7 +210,7 @@ Return ONLY a JSON object:
         try {
           const location = extractLocation(property.address);
           const mapsResp = await callSerp({
-            query: `${property.name}${city ? " " + city : ""}`,
+            query: buildGbpSearchQuery(property),
             engine: "google_maps",
             location,
           });
@@ -259,11 +262,17 @@ For items 1, 3, 4, and 10 BELOW, use the ground truth above — do not search th
 
 In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 stars; 8 of 10 top reviews have owner responses").
 `
-        : `(No GBP ground truth from SerpAPI — fall back to web_search for items 1, 3, 4.)`;
+        : `GROUND TRUTH UNAVAILABLE: SerpAPI did not return a matching Google Business Profile for this property (possibly due to a generic property name, an incorrect address, or a brand-new listing not yet in Google's index).
+
+IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the GBP is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual knowledge panel, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the GBP, mark each of those items as PARTIAL with evidence "Ground-truth detection failed and manual verification recommended — set the Google Business Profile URL in Property Settings to lock identity." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of ground truth alone.`;
+
+      const costControl = gbpGround
+        ? `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.`
+        : `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item. Because ground truth is UNAVAILABLE for this run, items 1, 3, 4, and 10 each require one web search to verify the GBP/reviews state. Do NOT skip those searches — but cap them at one each.`;
 
       const prompt = `${groundTruthBlock}
 
-Audit ${property.name} at ${property.address} for LLM search visibility. IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.
+Audit ${property.name} at ${property.address} for LLM search visibility. ${costControl}
 
 PROPERTY FACTS:
 - Name in our system: ${property.name}
@@ -287,7 +296,7 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
    - COMPLETE also if you find direct google.com/maps/place/ URLs in results pointing to this property.
    - PARTIAL: GBP isn't directly visible in search snippets BUT you found strong indirect evidence the business is established online — any of: a Yelp listing with hours/phone, a working official website (e.g., edge26.trionliving.com), a phone number that responds to searches, an active social presence. Established apartment communities almost always have a GBP — if there's clear evidence the business exists, lean PARTIAL rather than MISSING. Note in the evidence: "GBP likely exists but not directly visible in search results — manual verification recommended."
    - MISSING: only if you find NO web presence for the property at all (no website, no Yelp, no listings anywhere). This should be rare for established apartment communities.
-   - Note: ground truth above is authoritative for this item. Do NOT search the web for GBP — use the ground truth data only.
+   - Note: ${gbpGround ? "ground truth above is authoritative for this item. Do NOT search the web for GBP — use the ground truth data only." : "ground truth was UNAVAILABLE this run. Web-search this item once to verify; lean PARTIAL with the manual-verification note if the search is inconclusive."}
 
 2. Apartment Schema Markup — Check the property's official website (visit the homepage if found). COMPLETE only if you can confirm JSON-LD/RentalApartment schema. PARTIAL if the website exists and is well-structured but schema can't be confirmed from snippets. MISSING if no official website found.
 
@@ -303,7 +312,7 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 
 9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
 
-10. Owner Response to Reviews — See ground truth above (owner response rate from actual review data). Do NOT web-search for this item.
+10. Owner Response to Reviews — ${gbpGround ? "See ground truth above (owner response rate from actual review data). Do NOT web-search for this item." : "Ground truth was unavailable. Web-search the property's reviews once to estimate owner response presence. If inconclusive, mark PARTIAL with the manual-verification note."}
 
 Return ONLY a JSON object, no prose before or after:
 {
@@ -762,8 +771,15 @@ function extractGBP(data: any, property: Property): GBPGroundTruth | null {
         return "website";
       }
     }
-    // 3. Name fuzzy match (last resort)
-    if (nameMatches(`${candidateName} ${candidateAddress}`, propertyName)) return "name";
+    // 3. Name fuzzy match (last resort), gated on address sanity check.
+    // Without this gate, "Cambridge Health & Wellness" gets accepted as
+    // "Cambridge Apartments" because both contain the word "Cambridge".
+    if (nameMatches(`${candidateName} ${candidateAddress}`, propertyName)) {
+      if (candidateAddress && !addressShallowMatch(property.address, candidateAddress)) {
+        return null;
+      }
+      return "name";
+    }
     return null;
   };
 
@@ -868,6 +884,44 @@ function computeEnrichment(
 }
 
 /**
+ * Tokens that, when present in a property name, indicate the name already
+ * scopes itself to a multifamily property. When NONE of these appear,
+ * appending "apartments" to the SerpAPI query dramatically improves
+ * GBP detection for generic-name properties like "Cambridge", "Reserve",
+ * "The Edge", etc.
+ */
+const APARTMENT_TYPE_TOKENS = [
+  "apartments", "apartment", "apts", "apt",
+  "lofts", "loft",
+  "townhomes", "townhome", "townhouses", "townhouse",
+  "residences", "residence",
+  "flats", "suites", "studios",
+];
+
+function hasApartmentToken(name: string): boolean {
+  const lower = name.toLowerCase();
+  return APARTMENT_TYPE_TOKENS.some((t) => new RegExp(`\\b${t}\\b`).test(lower));
+}
+
+/**
+ * Build the SerpAPI search query used to find a property's GBP. If the
+ * property name already contains an apartment-type token, the query is
+ * just `{name} {city}`. Otherwise we inject " apartments" so Google
+ * disambiguates the search from same-name businesses in other categories.
+ *
+ * Examples:
+ *   "Cambridge"            in Clarksville → "Cambridge apartments Clarksville"
+ *   "Cambridge Apartments" in Clarksville → "Cambridge Apartments Clarksville"
+ *   "Vangard Lofts"        in Milford     → "Vangard Lofts Milford"
+ *   "Reserve at Sawmill"   in Columbus    → "Reserve at Sawmill apartments Columbus"
+ */
+function buildGbpSearchQuery(property: Property): string {
+  const city = extractCity(property.address);
+  const suffix = hasApartmentToken(property.name) ? "" : " apartments";
+  return `${property.name}${suffix}${city ? " " + city : ""}`.trim();
+}
+
+/**
  * Run a single-shot SerpAPI search for a property, extract GBP, and return
  * the recommended enrichment patch (website + gbpUrl). Used by the batch
  * enrichment flow. Returns null on failure or if no GBP found.
@@ -876,8 +930,7 @@ async function enrichPropertyFromSerp(
   property: Property
 ): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl">>; gbp: GBPGroundTruth } | null> {
   try {
-    const city = extractCity(property.address);
-    const query = `${property.name}${city ? " " + city : ""}`;
+    const query = buildGbpSearchQuery(property);
     const data = await callSerp({
       query,
       location: extractLocation(property.address),
@@ -976,11 +1029,50 @@ function diagnose(
 }
 
 /**
+ * Sanity check that two addresses refer to roughly the same physical place.
+ * Used to reject name-only matches where the candidate is in a different
+ * city / different state (e.g. "Cambridge" the property in Clarksville, IN
+ * vs. "Cambridge" the unrelated business in Cambridge, MA).
+ *
+ * Returns true if:
+ *   - Same leading street number (very strong signal), OR
+ *   - Same parsed "City, ST" location, OR
+ *   - Same city alone (fallback for SerpAPI results that omit state)
+ *
+ * Returns false only when both addresses are usable AND none of the above
+ * match. When the candidate address is empty (organic results, knowledge
+ * panels without an address), returns true — we can't verify, so we don't
+ * reject.
+ */
+function addressShallowMatch(propertyAddress: string, candidateAddress: string): boolean {
+  if (!candidateAddress) return true; // can't verify, don't reject
+  const propStreetNum = (propertyAddress.match(/\b(\d{2,6})\b/) || [])[1];
+  const candStreetNum = (candidateAddress.match(/\b(\d{2,6})\b/) || [])[1];
+  if (propStreetNum && candStreetNum && propStreetNum === candStreetNum) return true;
+
+  const propLoc = extractLocation(propertyAddress).toLowerCase();
+  const candLoc = extractLocation(candidateAddress).toLowerCase();
+  if (propLoc && candLoc && propLoc === candLoc) return true;
+
+  const propCity = extractCity(propertyAddress).toLowerCase();
+  const candCity = extractCity(candidateAddress).toLowerCase();
+  if (propCity && candCity && propCity === candCity) return true;
+
+  return false;
+}
+
+/**
  * Match a SerpAPI result (organic or local) against the property using
  * the most reliable identifier available. Order of preference:
  *   1. gbpUrl → data_id / place_id / slug         (local results only)
  *   2. website → result link / result website     (domain comparison)
- *   3. property name fuzzy match                  (last resort)
+ *   3. property name fuzzy match + address sanity (last resort)
+ *
+ * Address sanity gating on (3) prevents the "Cambridge Health & Wellness
+ * accepted as Cambridge Apartments" failure: name fuzzy matching alone
+ * was the root cause of bad GBP identification for properties with
+ * generic single-word names.
+ *
  * Returns the match type or null.
  */
 function matchPropertyToResult(
@@ -1018,7 +1110,17 @@ function matchPropertyToResult(
   }
 
   const haystack = `${opts.title || ""} ${opts.link || ""} ${opts.address || ""} ${opts.website || ""}`;
-  if (nameMatches(haystack, property.name)) return "name";
+  if (nameMatches(haystack, property.name)) {
+    // Gate the fuzzy-name fallback on address sanity. If the candidate has
+    // an address and it lives in a different city/state from the property,
+    // it's almost certainly the wrong entity even when the name matches.
+    // Skipped when the candidate has no address (organic results) — those
+    // are validated by domain-matching upstream when website is set.
+    if (opts.address && !addressShallowMatch(property.address, opts.address)) {
+      return null;
+    }
+    return "name";
+  }
   return null;
 }
 
