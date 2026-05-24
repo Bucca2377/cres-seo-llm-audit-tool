@@ -208,34 +208,102 @@ Return ONLY a JSON object:
       let responsesWith = 0;
       if (gbpGround) {
         try {
-          const location = extractLocation(property.address);
-          const mapsResp = await callSerp({
-            query: buildGbpSearchQuery(property),
-            engine: "google_maps",
-            location,
-          });
-          const mapsResults = Array.isArray(mapsResp?.local_results)
-            ? mapsResp.local_results
-            : [];
-          const match = mapsResults.find((r: any) =>
-            nameMatches(`${r.title || r.name || ""} ${r.address || ""}`, property.name)
-          );
-          const dataId = match?.data_id;
+          // Prefer the data_id we already captured during GBP detection.
+          // It's the same identifier google_maps_reviews needs, and it
+          // bypasses the noisy google_maps lookup that previously failed
+          // to find the right entity for generic-name properties.
+          let dataId = gbpGround.dataId || "";
+
+          // Fallback: if GBP detection didn't capture a data_id (rare —
+          // happens when SerpAPI returned a knowledge_graph without one),
+          // do the google_maps lookup but use the FULL matcher with
+          // address verification, not raw name matching.
+          if (!dataId) {
+            const location = extractLocation(property.address);
+            const mapsResp = await callSerp({
+              query: buildGbpSearchQuery(property),
+              engine: "google_maps",
+              location,
+            });
+            const mapsResults: any[] = Array.isArray(mapsResp?.local_results)
+              ? mapsResp.local_results
+              : [];
+            const match = mapsResults.find((r: any) =>
+              matchPropertyToResult(property, {
+                title: r.title || r.name,
+                website: r.website,
+                address: r.address,
+                dataId: r.data_id,
+                placeId: r.place_id,
+              })
+            );
+            dataId = match?.data_id || "";
+          }
+
           if (dataId) {
             const reviewsResp = await callSerp({
               engine: "google_maps_reviews",
               data_id: dataId,
             });
-            const reviews = Array.isArray(reviewsResp?.reviews) ? reviewsResp.reviews : [];
+            const reviews: any[] = Array.isArray(reviewsResp?.reviews)
+              ? reviewsResp.reviews
+              : [];
             responsesChecked = reviews.length;
-            responsesWith = reviews.filter((r: any) => r?.response).length;
+            // SerpAPI returns owner responses under multiple possible
+            // shapes depending on engine version. Check all of them and
+            // require at least a non-empty snippet/text to count as a
+            // real response.
+            const hasResponse = (r: any): boolean => {
+              const candidates = [r?.response, r?.owner_response];
+              for (const c of candidates) {
+                if (!c) continue;
+                if (typeof c === "string" && c.trim().length > 0) return true;
+                if (typeof c === "object") {
+                  if (typeof c.snippet === "string" && c.snippet.trim().length > 0) return true;
+                  if (typeof c.text === "string" && c.text.trim().length > 0) return true;
+                  // Some shapes use just { date: "..." } — count those too
+                  if (Object.keys(c).length > 0) return true;
+                }
+              }
+              if (typeof r?.owner_response_snippet === "string" && r.owner_response_snippet.trim().length > 0) {
+                return true;
+              }
+              return false;
+            };
+            responsesWith = reviews.filter(hasResponse).length;
             responseRate =
               responsesChecked > 0
                 ? Math.round((responsesWith / responsesChecked) * 100)
                 : null;
+
+            // Diagnostic: if reviews came back but 0 responses detected,
+            // log a sample so we can verify the SerpAPI shape matches our
+            // hasResponse() checks. Triggered on the Cambridge-style case
+            // where the user can clearly see responses on Google but the
+            // tool says "0%".
+            if (responsesChecked > 0 && responsesWith === 0) {
+              // eslint-disable-next-line no-console
+              console.warn("[runAudit] reviews fetched but no owner responses detected", {
+                property: property.name,
+                dataId,
+                reviewSampleKeys: reviews.slice(0, 3).map((r: any) => Object.keys(r || {})),
+                reviewSample: reviews.slice(0, 2),
+              });
+            }
+          } else {
+            // eslint-disable-next-line no-console
+            console.warn("[runAudit] no data_id available for reviews pre-flight", {
+              property: property.name,
+              gbpGroundName: gbpGround.name,
+              hint: "Property may need a Re-detect in property settings to capture a stable GBP identifier.",
+            });
           }
-        } catch {
-          /* skip — Item 10 falls back to manual verification */
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn("[runAudit] reviews pre-flight threw", {
+            property: property.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       }
 
@@ -258,7 +326,11 @@ For items 1, 3, 4, and 10 BELOW, use the ground truth above — do not search th
 - Item 1 (Google Business Profile): Focus on whether the listing is LIVE and ACTIVELY MANAGED. COMPLETE if the listing exists with rating, reviews, hours, and address all present (signs of an active, used profile). PARTIAL if the listing exists but shows signs of neglect — missing hours, missing website link, no phone, or zero reviews despite the property being established. MISSING is not valid here since the listing exists. In evidence, cite signs of active management ("hours present, X reviews, rating Y") and flag any gaps ("phone not listed" / "website link missing"). Do NOT mention "claimed" or "unclaimed" — that status is unreliable and the real signal is whether the profile is live and being maintained.
 - Item 3 (Review Volume): COMPLETE if Google review count ≥30. PARTIAL if 10–29. MISSING if <10. (You may add Apartments.com/Yelp counts if helpful, but Google count is the floor.)
 - Item 4 (Review Quality): COMPLETE if rating ≥4.0. PARTIAL if 3.0–3.9. MISSING if <3.0 or no rating.
-- Item 10 (Owner Response to Reviews): Use the owner response rate from ground truth. COMPLETE if rate ≥ 50%. PARTIAL if rate is 1-49%. MISSING if rate is exactly 0%. If "unable to verify automatically", default to PARTIAL with evidence "manual verification recommended".
+- Item 10 (Owner Response to Reviews): ${
+            responseRate !== null
+              ? `Use the owner response rate from ground truth (${responseRate}%). COMPLETE if ≥ 50%. PARTIAL if 1-49%. MISSING if exactly 0%.`
+              : `Ground truth couldn't capture a response rate this run, but reviews EXIST on Google. DO NOT default to "manual verification" — web-search the property's Google reviews directly (1 search). Look for any sample of owner/management replies. If you see ANY owner responses in the search snippets → mark COMPLETE with evidence "owner responses visible in Google review search". If review search returns no signal at all → mark PARTIAL with evidence "owner response activity not visible in search snippets; manual verification recommended". Do not mark MISSING unless you can confirm zero owner responses across the visible review sample.`
+          }
 
 In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 stars; 8 of 10 top reviews have owner responses").
 `
@@ -266,8 +338,13 @@ In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 s
 
 IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the GBP is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual knowledge panel, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the GBP, mark each of those items as PARTIAL with evidence "Ground-truth detection failed and manual verification recommended — set the Google Business Profile URL in Property Settings to lock identity." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of ground truth alone.`;
 
+      const item10NeedsWebSearch = responseRate === null;
       const costControl = gbpGround
-        ? `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.`
+        ? `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.${
+            item10NeedsWebSearch
+              ? " For item 10 (Owner Response to Reviews), one web search IS required because the response rate couldn't be captured automatically."
+              : " For item 10 the ground truth above is authoritative — do NOT search the web."
+          }`
         : `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item. Because ground truth is UNAVAILABLE for this run, items 1, 3, 4, and 10 each require one web search to verify the GBP/reviews state. Do NOT skip those searches — but cap them at one each.`;
 
       const prompt = `${groundTruthBlock}
@@ -312,7 +389,11 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 
 9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
 
-10. Owner Response to Reviews — ${gbpGround ? "See ground truth above (owner response rate from actual review data). Do NOT web-search for this item." : "Ground truth was unavailable. Web-search the property's reviews once to estimate owner response presence. If inconclusive, mark PARTIAL with the manual-verification note."}
+10. Owner Response to Reviews — ${
+            responseRate !== null
+              ? `See ground truth above (owner response rate ${responseRate}% from actual review data). Do NOT web-search for this item.`
+              : "Ground truth couldn't capture a response rate. Web-search the property's Google reviews ONCE for visible owner/management replies. Grade per the rubric above — do NOT default to 'manual verification' when reviews clearly exist on Google."
+          }
 
 Return ONLY a JSON object, no prose before or after:
 {
