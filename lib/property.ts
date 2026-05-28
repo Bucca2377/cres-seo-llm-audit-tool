@@ -4,6 +4,52 @@ import { useCallback, useEffect, useState } from "react";
 
 export type ChecklistStatus = "missing" | "partial" | "complete";
 
+/**
+ * Six standardized priority tags for audit recommendations. Used as the
+ * colored chip on each card and to group recommendations when rendered.
+ *
+ * QUICK WIN     — low effort, immediate / near-term impact
+ * FOUNDATIONAL  — hygiene that everything else depends on (must-have)
+ * MAP PACK      — local 3-pack / GBP-driven visibility (SEO-specific)
+ * STRATEGIC     — multi-month positioning work, higher effort
+ * CONTENT       — requires writing or producing content
+ * LONG-TAIL     — niche / low-competition queries
+ */
+export type RecommendationPriority =
+  | "QUICK WIN"
+  | "FOUNDATIONAL"
+  | "MAP PACK"
+  | "STRATEGIC"
+  | "CONTENT"
+  | "LONG-TAIL";
+
+/**
+ * Structured audit recommendation — the format produced by both the LLM
+ * Visibility audit and the SEO audit. Renders as a scannable card with a
+ * colored priority chip, an imperative title, and five labeled fields.
+ */
+export interface RecommendationCard {
+  priority: RecommendationPriority;
+  title: string;   // Imperative, ≤ 12 words. e.g. "Add JSON-LD schema to homepage"
+  what: string;    // The specific concrete action (1-3 sentences)
+  why: string;     // Rationale with metrics from the audit (1-2 sentences)
+  effort: string;  // "~30 min · web developer" / "~4 hrs · marketing manager"
+  success: string; // Measurable outcome / how to know it worked
+  source: string;  // Which audit finding triggered this (e.g. "LLM Audit item #2 (0/15 → 15/15)")
+}
+
+/** Legacy string format (numbered list) or new structured array. */
+export type AuditRecommendations = string | RecommendationCard[];
+
+/**
+ * Type guard — true when recommendations are in the new structured format,
+ * false when they are the legacy plain-text format. Used by all renderers
+ * to switch between card layout and the old numbered-list fallback.
+ */
+export function isStructuredRecs(r: AuditRecommendations | undefined | null): r is RecommendationCard[] {
+  return Array.isArray(r) && r.length > 0 && typeof (r[0] as RecommendationCard).title === "string";
+}
+
 export interface Property {
   id: string;
   name: string;
@@ -32,7 +78,7 @@ export interface Property {
   gbpUrl?: string;
   checklistStatuses?: Record<string, ChecklistStatus>;
   checklistEvidence?: Record<string, string>;
-  llmAuditRecommendations?: string;
+  llmAuditRecommendations?: AuditRecommendations;
   llmAuditTimestamp?: string;
   seoAudit?: {
     queries: string[];
@@ -46,7 +92,7 @@ export interface Property {
       top_organic: Array<{ name: string; domain: string }>;
       diagnosis: string;
     }>;
-    recommendations: string;
+    recommendations: AuditRecommendations;
     timestamp: string;
   };
 }

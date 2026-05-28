@@ -7,8 +7,12 @@ import {
   buildPropContext,
   callAI,
   callSerp,
+  isStructuredRecs,
   type Property,
   type ChecklistStatus,
+  type AuditRecommendations,
+  type RecommendationCard,
+  type RecommendationPriority,
 } from "@/lib/property";
 import PropertySettings from "./property-settings";
 
@@ -38,6 +42,150 @@ const LLM_ITEMS: { id: number; label: string; pts: number; description: string }
 
 function statusOf(p: Property, itemId: number): ChecklistStatus {
   return p.checklistStatuses?.[String(itemId)] ?? "missing";
+}
+
+/* -- RECOMMENDATION CARD RENDERER ----------------------------------- */
+/**
+ * Visual styling for each priority tag. Background tint is intentionally
+ * light so the cards stay readable when printed in greyscale.
+ */
+const PRIORITY_STYLES: Record<RecommendationPriority, { bg: string; fg: string; border: string }> = {
+  "QUICK WIN":    { bg: "#e7f6ec", fg: "#0f7b3a", border: "#bce5c9" },
+  "FOUNDATIONAL": { bg: "#feeee7", fg: "#b1410f", border: "#fcd5c4" },
+  "MAP PACK":     { bg: "#e6f1f8", fg: "#1c5b8a", border: "#bcd6e8" },
+  "STRATEGIC":    { bg: "#efeaf7", fg: "#4d2f8f", border: "#d3c4ee" },
+  "CONTENT":      { bg: "#fff6e0", fg: "#9b6a08", border: "#f5deaa" },
+  "LONG-TAIL":    { bg: "#eef0f3", fg: "#3d4a5c", border: "#c6cdda" },
+};
+
+function PriorityChip({ priority }: { priority: RecommendationPriority }) {
+  const s = PRIORITY_STYLES[priority] || PRIORITY_STYLES["STRATEGIC"];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "3px 9px",
+        borderRadius: 4,
+        background: s.bg,
+        color: s.fg,
+        border: `1px solid ${s.border}`,
+        fontFamily: "'Barlow Condensed',sans-serif",
+        fontWeight: 700,
+        fontSize: 10,
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {priority}
+    </span>
+  );
+}
+
+function RecCard({ card }: { card: RecommendationCard }) {
+  const labelStyle: React.CSSProperties = {
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 10,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    color: "#7a8089",
+    width: 64,
+    flexShrink: 0,
+    paddingTop: 2,
+  };
+  const valueStyle: React.CSSProperties = {
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 13,
+    color: "#2a2a2a",
+    lineHeight: 1.55,
+    flex: 1,
+  };
+  const rowStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 14,
+    alignItems: "flex-start",
+    marginTop: 8,
+  };
+  return (
+    <div
+      style={{
+        background: "white",
+        border: "1px solid #e6e9ec",
+        borderRadius: 8,
+        padding: "14px 18px",
+        marginBottom: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <PriorityChip priority={card.priority} />
+        <div
+          style={{
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 16,
+            color: B.oxford,
+            letterSpacing: "0.02em",
+            flex: 1,
+          }}
+        >
+          {card.title}
+        </div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>What</div>
+        <div style={valueStyle}>{card.what}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Why</div>
+        <div style={valueStyle}>{card.why}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Effort</div>
+        <div style={{ ...valueStyle, color: B.caribbean, fontWeight: 600 }}>{card.effort}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Success</div>
+        <div style={valueStyle}>{card.success}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Source</div>
+        <div style={{ ...valueStyle, color: "#7a8089", fontSize: 12, fontStyle: "italic" }}>{card.source}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders an audit's recommendations. Accepts the new structured array
+ * format OR the legacy plain-text fallback. The legacy fallback renders
+ * exactly as the old UI did, so existing persisted audits keep working.
+ */
+function RecommendationsBlock({ recs }: { recs: AuditRecommendations | null | undefined }) {
+  if (!recs) return null;
+  if (isStructuredRecs(recs)) {
+    return (
+      <div>
+        {recs.map((card, i) => (
+          <RecCard key={i} card={card} />
+        ))}
+      </div>
+    );
+  }
+  // Legacy string format — render with whitespace preserved.
+  return (
+    <div
+      style={{
+        fontFamily: "'Josefin Sans',sans-serif",
+        fontSize: 13,
+        lineHeight: 1.75,
+        color: "#2a2a2a",
+        whiteSpace: "pre-wrap",
+      }}
+    >
+      {recs}
+    </div>
+  );
 }
 
 function earnedPoints(pts: number, status: ChecklistStatus): number {
@@ -111,7 +259,7 @@ function LLMTab({
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<any>(null);
   const [testing, setTesting] = useState(false);
-  const [aiRec, setAiRec] = useState<string | null>(null);
+  const [aiRec, setAiRec] = useState<AuditRecommendations | null>(null);
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
 
@@ -401,10 +549,37 @@ Return ONLY a JSON object, no prose before or after:
     {"id": 1, "status": "complete" | "partial" | "missing", "evidence": "one specific sentence citing what you found, including names/numbers"},
     ... (entries for ALL 10 items, in id order)
   ],
-  "recommendations": "1. First action\\n2. Second action\\n3. Third action\\n4. Fourth action\\n5. Fifth action"
+  "recommendations": [
+    {
+      "priority": "QUICK WIN" | "FOUNDATIONAL" | "MAP PACK" | "STRATEGIC" | "CONTENT" | "LONG-TAIL",
+      "title": "Imperative phrase, max 12 words, no period",
+      "what": "1-3 sentences. Exactly what to do. Name the URL / page / system / vendor when relevant. No hedging.",
+      "why": "1-2 sentences. The audit finding that triggered this + the business impact in concrete terms. Cite numbers when available.",
+      "effort": "Format: '~<time> · <who>'. Examples: '~30 min · web developer', '~2 hrs · marketing manager', '~1 week · vendor + PM review'.",
+      "success": "Measurable outcome. Example: 'Schema validates at schema.org/validator within 1 week' or 'Google review count reaches 30+ within 90 days'.",
+      "source": "Which audit finding this addresses. Example: 'Item 2 (0/15 → target 15/15)' or 'Items 3 & 4 (review volume + quality both MISSING)'."
+    },
+    ... 5 cards total
+  ]
 }
 
-Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartments by Trion Living' at 10701 N Pecos St with 312 Google reviews at 3.8 stars, hours and photos present" — NOT generic statements like "GBP exists"). Recommendations must be specific to ${property.name}'s actual gaps and reference the audit findings. Order by highest impact first.`;
+Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartments by Trion Living' at 10701 N Pecos St with 312 Google reviews at 3.8 stars, hours and photos present" — NOT generic statements like "GBP exists").
+
+Recommendation rules (STRICT):
+1. EXACTLY 5 recommendations. Order by highest impact first.
+2. Each "title" is imperative and scannable — start with a verb (Add, Build, Claim, Launch, Audit, Publish, Fix).
+3. "what" must be concrete: name the specific page/URL, vendor, plugin, or platform. Forbid generic verbs without an object ("improve SEO" is unacceptable; "Add JSON-LD ApartmentComplex schema to {property website URL}/floor-plans" is correct).
+4. "why" must reference an actual audit finding (the status + score for one or more items) AND state the impact. Forbid generic statements ("important for SEO" is unacceptable; "Audit found 0/15 on Item 2 (schema); AI assistants like ChatGPT need structured data to cite specific facts" is correct).
+5. "effort" must include time + role.
+6. "success" must be measurable and time-boxed when possible.
+7. "source" must reference specific item IDs from the audit above.
+8. Priority assignment guide:
+   - QUICK WIN: ≤ 4 hours, near-term measurable impact
+   - FOUNDATIONAL: GBP, schema, NAP, website hygiene — must-have before others can compound
+   - CONTENT: requires writing pages, FAQs, blog posts, social
+   - STRATEGIC: > 1 week, multi-stakeholder, ongoing program (review campaigns, backlink outreach)
+   - LONG-TAIL: niche query optimization with lower competition
+   - MAP PACK: not used for LLM audit (SEO-only) — never apply to LLM recs.`;
 
       const data = await callAI({ prompt, maxTokens: 4000, useWebSearch: true });
       const text = (data.content || [])
@@ -416,7 +591,7 @@ Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartment
 
       const parsed = JSON.parse(match[0]) as {
         audit: { id: number; status: ChecklistStatus; evidence: string }[];
-        recommendations: string;
+        recommendations: AuditRecommendations;
       };
       if (!Array.isArray(parsed.audit)) throw new Error("Audit data malformed.");
 
@@ -428,15 +603,26 @@ Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartment
           newEvidence[String(a.id)] = a.evidence || "";
         }
       }
+
+      // Recommendations: prefer the new structured array. If Claude
+      // returned legacy string form (rare regression), keep it as-is —
+      // the renderer falls back gracefully.
+      const recs = parsed.recommendations;
+      const normalizedRecs: AuditRecommendations = isStructuredRecs(recs)
+        ? recs
+        : typeof recs === "string"
+        ? recs
+        : "";
+
       const now = new Date().toISOString();
       onUpdateProperty({
         ...property,
         checklistStatuses: newStatuses,
         checklistEvidence: newEvidence,
-        llmAuditRecommendations: parsed.recommendations || "",
+        llmAuditRecommendations: normalizedRecs,
         llmAuditTimestamp: now,
       });
-      setAiRec(parsed.recommendations || null);
+      setAiRec(normalizedRecs);
     } catch (e) {
       setAuditError(e instanceof Error ? e.message : "Audit failed. Please try again.");
     }
@@ -586,7 +772,7 @@ Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartment
 
       {aiRec && (
         <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px", marginBottom: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ color: B.caribbean }}>✦</span>
               <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>Recommendations (ranked by impact)</span>
@@ -597,7 +783,7 @@ Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartment
               </span>
             )}
           </div>
-          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, lineHeight: 1.75, color: "#2a2a2a", whiteSpace: "pre-wrap" }}>{aiRec}</div>
+          <RecommendationsBlock recs={aiRec} />
         </div>
       )}
 
@@ -1673,7 +1859,7 @@ type AuditStage = "idle" | "queries" | "checking" | "analyzing" | "done";
 interface SEOAuditResults {
   queries: string[];
   ranks: GoogleRankResult[];
-  recommendations: string;
+  recommendations: AuditRecommendations;
   timestamp: string;
 }
 
@@ -1804,25 +1990,65 @@ Return ONLY a JSON array of 6 strings, no prose:
 
 ${queryRankSummary}
 
-Based on the actual rank data above, provide 5 ranked recommendations to improve ${currentProperty.name}'s search visibility. Each recommendation MUST:
-- Cite specific queries and ranks from the audit above (use exact numbers)
-- Be concrete and actionable, not generic SEO advice
-- Specify whether it's a Map Pack fix or organic fix
-- Reference the property's actual amenities or location where relevant
-- Start with one of these tags: [Quick win], [Map Pack], [Strategic], [Content], or [Long-tail]
+Based on the actual rank data above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s search visibility. Order by highest ROI first.
 
-Order by highest ROI first. Return as plain numbered text (1. through 5.), no JSON wrapper. Each recommendation 2-4 sentences.`;
+Return ONLY a JSON object, no prose before or after:
+{
+  "recommendations": [
+    {
+      "priority": "QUICK WIN" | "FOUNDATIONAL" | "MAP PACK" | "STRATEGIC" | "CONTENT" | "LONG-TAIL",
+      "title": "Imperative phrase, max 12 words, no period",
+      "what": "1-3 sentences. The concrete action. Name the page/URL, vendor, plugin, or platform. No hedging.",
+      "why": "1-2 sentences. Reference the specific query/rank data above + the business impact. Cite numbers.",
+      "effort": "Format: '~<time> · <who>'. Examples: '~4 hrs · marketing manager + web vendor', '~1 week · vendor work'.",
+      "success": "Measurable outcome with timeframe. Example: 'Reach first page organic within 90 days for {specific query}'.",
+      "source": "Reference the specific query name + audit finding. Example: 'Query 4: \\\"apartments with washer dryer Salisbury MD\\\" — Map Pack appeared, organic absent'."
+    },
+    ... 5 cards total
+  ]
+}
+
+Recommendation rules (STRICT):
+1. EXACTLY 5 recommendations.
+2. Each "title" is imperative — start with a verb (Build, Optimize, Claim, Target, Audit, Publish, Outreach).
+3. "what" must be concrete: name a specific URL/page/platform/vendor/keyword. Forbid generic verbs without an object ("improve content" is unacceptable; "Build /apartments-with-washer-dryer-salisbury-md landing page on vangardlofts.com" is correct).
+4. "why" must cite at least ONE specific query and rank from the audit above. Forbid generic SEO platitudes ("important for SEO" is unacceptable; "Audit shows Query 4 has Map Pack visibility (winnable) but property absent from organic top 30; competitor The Flatts owns #1" is correct).
+5. "effort" must include time + role.
+6. "success" must be measurable and time-boxed.
+7. "source" must name the specific query that triggered this.
+8. Priority assignment guide:
+   - QUICK WIN: ≤ 4 hours, near-term measurable impact
+   - MAP PACK: local 3-pack / GBP-driven visibility (the most distinctive SEO category)
+   - FOUNDATIONAL: hygiene that everything else depends on (NAP consistency, schema, GBP completeness)
+   - CONTENT: requires writing pages, FAQs, blog posts
+   - STRATEGIC: > 1 week, multi-month positioning (backlink outreach, review campaigns)
+   - LONG-TAIL: niche query optimization with lower competition`;
 
       const rResp = await callAI({
         prompt: recsPrompt,
         system: buildSystemPrompt(currentProperty),
-        maxTokens: 1500,
+        maxTokens: 2500,
       });
+
+      // Parse the structured JSON; fall back to raw text if Claude regresses.
+      const rawText = rResp.content?.[0]?.text || "";
+      let recommendations: AuditRecommendations = rawText;
+      const recsMatch = rawText.match(/\{[\s\S]*\}/);
+      if (recsMatch) {
+        try {
+          const parsed = JSON.parse(recsMatch[0]) as { recommendations?: unknown };
+          if (isStructuredRecs(parsed.recommendations as AuditRecommendations)) {
+            recommendations = parsed.recommendations as RecommendationCard[];
+          }
+        } catch {
+          /* fall through with raw text */
+        }
+      }
 
       const finalResults: SEOAuditResults = {
         queries,
         ranks,
-        recommendations: rResp.content?.[0]?.text || "",
+        recommendations,
         timestamp: new Date().toISOString(),
       };
       setResults(finalResults);
@@ -2082,15 +2308,13 @@ Order by highest ROI first. Return as plain numbered text (1. through 5.), no JS
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: B.caribbean }}>✦</span>
               <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>
                 Recommendations (ranked by ROI)
               </span>
             </div>
-            <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, lineHeight: 1.75, color: "#2a2a2a", whiteSpace: "pre-wrap" }}>
-              {results.recommendations}
-            </div>
+            <RecommendationsBlock recs={results.recommendations} />
           </div>
         </>
       )}
@@ -2286,6 +2510,103 @@ function PrintPriorityHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Print-friendly version of RecCard. Tighter padding + smaller text so
+ * 5-10 recommendations still fit cleanly across 2-3 pages with the
+ * margin boxes the @page rules establish.
+ */
+function PrintRecCard({ card }: { card: RecommendationCard }) {
+  const s = PRIORITY_STYLES[card.priority] || PRIORITY_STYLES["STRATEGIC"];
+  const labelStyle: React.CSSProperties = {
+    fontFamily: "'Barlow Condensed', sans-serif",
+    fontWeight: 700,
+    fontSize: 8.5,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    color: "#7a8089",
+    width: 50,
+    flexShrink: 0,
+    paddingTop: 1,
+  };
+  const valueStyle: React.CSSProperties = {
+    fontFamily: "'Josefin Sans', sans-serif",
+    fontSize: 10,
+    color: PRINT_BODY,
+    lineHeight: 1.5,
+    flex: 1,
+  };
+  const rowStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 10,
+    alignItems: "flex-start",
+    marginTop: 4,
+  };
+  return (
+    <div
+      style={{
+        border: `1px solid #e6e9ec`,
+        borderLeft: `3px solid ${s.fg}`,
+        borderRadius: 4,
+        padding: "8px 12px",
+        marginBottom: 8,
+        breakInside: "avoid" as const,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <span
+          style={{
+            display: "inline-block",
+            padding: "1px 6px",
+            background: s.bg,
+            color: s.fg,
+            border: `1px solid ${s.border}`,
+            borderRadius: 3,
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontWeight: 700,
+            fontSize: 8,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {card.priority}
+        </span>
+        <div
+          style={{
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontWeight: 700,
+            fontSize: 12,
+            color: PRINT_NAVY,
+            flex: 1,
+          }}
+        >
+          {card.title}
+        </div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>What</div>
+        <div style={valueStyle}>{card.what}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Why</div>
+        <div style={valueStyle}>{card.why}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Effort</div>
+        <div style={{ ...valueStyle, color: PRINT_TEAL, fontWeight: 600 }}>{card.effort}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Success</div>
+        <div style={valueStyle}>{card.success}</div>
+      </div>
+      <div style={rowStyle}>
+        <div style={labelStyle}>Source</div>
+        <div style={{ ...valueStyle, color: "#7a8089", fontSize: 9, fontStyle: "italic" }}>{card.source}</div>
+      </div>
+    </div>
+  );
+}
+
 interface ParsedRec {
   category: "immediate" | "high" | "ongoing" | "other";
   text: string;
@@ -2410,8 +2731,36 @@ function PrintableReport({ property }: { property: Property }) {
           .join("; ")}. Detailed findings and prioritized actions follow.`
       : "Detailed findings and prioritized actions follow.";
 
-  const llmRecLines = splitRecommendations(llmRecs || "");
-  const seoRecLines = splitRecommendations(seo?.recommendations || "");
+  // -- Recommendations: prefer the new structured cards; fall back to
+  // legacy text + categorizer for older persisted audits.
+  const structuredLlmRecs = isStructuredRecs(llmRecs) ? llmRecs : null;
+  const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
+
+  const allStructuredCards: RecommendationCard[] = [
+    ...(structuredLlmRecs || []),
+    ...(structuredSeoRecs || []),
+  ];
+
+  // Group cards into priority bands for the printed report. The order
+  // is intentional: foundational and quick wins come before strategic
+  // multi-month work.
+  const printBandOrder: { label: string; priorities: RecommendationPriority[] }[] = [
+    { label: "Immediate Priority — This Week",      priorities: ["QUICK WIN"] },
+    { label: "High Priority — Within 2 Weeks",      priorities: ["FOUNDATIONAL", "MAP PACK"] },
+    { label: "Content & Strategy — Within 30 Days", priorities: ["CONTENT", "STRATEGIC"] },
+    { label: "Long-Tail — Ongoing",                 priorities: ["LONG-TAIL"] },
+  ];
+  const printBands = printBandOrder
+    .map((b) => ({
+      label: b.label,
+      cards: allStructuredCards.filter((c) => b.priorities.includes(c.priority)),
+    }))
+    .filter((b) => b.cards.length > 0);
+
+  // Legacy fallback (only used when both audits are still in text form)
+  const useLegacyTextRecs = !structuredLlmRecs && !structuredSeoRecs && (llmRecs || seo?.recommendations);
+  const llmRecLines = useLegacyTextRecs ? splitRecommendations(typeof llmRecs === "string" ? llmRecs : "") : [];
+  const seoRecLines = useLegacyTextRecs ? splitRecommendations(typeof seo?.recommendations === "string" ? seo!.recommendations : "") : [];
   const allRecs: ParsedRec[] = [
     ...llmRecLines.map(categorizeRecommendation),
     ...seoRecLines.map(categorizeRecommendation),
@@ -2723,49 +3072,44 @@ function PrintableReport({ property }: { property: Property }) {
           <section className="pb-before">
             <PrintSectionHeader>Recommendations to Drive Visibility</PrintSectionHeader>
 
-            {recImmediate.length > 0 && (
+            {/* Preferred path: structured cards grouped by priority band */}
+            {printBands.length > 0 && printBands.map((band, i) => (
+              <div key={i}>
+                <PrintPriorityHeader>{band.label}</PrintPriorityHeader>
+                {band.cards.map((card, j) => (
+                  <PrintRecCard key={j} card={card} />
+                ))}
+              </div>
+            ))}
+
+            {/* Legacy fallback: render the old categorized text lists when
+                no structured cards are available (older persisted audits) */}
+            {printBands.length === 0 && recImmediate.length > 0 && (
               <>
                 <PrintPriorityHeader>Immediate Priority (This Week)</PrintPriorityHeader>
                 <ul style={{ paddingLeft: 18, margin: "0 0 12px 0" }}>
                   {recImmediate.map((r, i) => (
-                    <li
-                      key={i}
-                      style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}
-                    >
-                      {r.text}
-                    </li>
+                    <li key={i} style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}>{r.text}</li>
                   ))}
                 </ul>
               </>
             )}
-
-            {recHigh.length > 0 && (
+            {printBands.length === 0 && recHigh.length > 0 && (
               <>
                 <PrintPriorityHeader>High Priority (Within 2 Weeks)</PrintPriorityHeader>
                 <ul style={{ paddingLeft: 18, margin: "0 0 12px 0" }}>
                   {recHigh.map((r, i) => (
-                    <li
-                      key={i}
-                      style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}
-                    >
-                      {r.text}
-                    </li>
+                    <li key={i} style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}>{r.text}</li>
                   ))}
                 </ul>
               </>
             )}
-
-            {recOngoing.length > 0 && (
+            {printBands.length === 0 && recOngoing.length > 0 && (
               <>
                 <PrintPriorityHeader>Ongoing Optimization</PrintPriorityHeader>
                 <ul style={{ paddingLeft: 18, margin: "0 0 12px 0" }}>
                   {recOngoing.map((r, i) => (
-                    <li
-                      key={i}
-                      style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}
-                    >
-                      {r.text}
-                    </li>
+                    <li key={i} style={{ ...bodyP, marginBottom: 8, paddingLeft: 4 }}>{r.text}</li>
                   ))}
                 </ul>
               </>
