@@ -83,30 +83,10 @@ function PriorityChip({ priority }: { priority: RecommendationPriority }) {
 }
 
 function RecCard({ card }: { card: RecommendationCard }) {
-  const labelStyle: React.CSSProperties = {
-    fontFamily: "'Barlow Condensed',sans-serif",
-    fontWeight: 700,
-    fontSize: 10,
-    letterSpacing: "0.14em",
-    textTransform: "uppercase",
-    color: "#7a8089",
-    width: 64,
-    flexShrink: 0,
-    paddingTop: 2,
-  };
-  const valueStyle: React.CSSProperties = {
-    fontFamily: "'Josefin Sans',sans-serif",
-    fontSize: 13,
-    color: "#2a2a2a",
-    lineHeight: 1.55,
-    flex: 1,
-  };
-  const rowStyle: React.CSSProperties = {
-    display: "flex",
-    gap: 14,
-    alignItems: "flex-start",
-    marginTop: 8,
-  };
+  // Combine the action + rationale into one short paragraph. Keeps a space
+  // between them and avoids a doubled period when `what` already ends in one.
+  const body = [card.what?.trim(), card.why?.trim()].filter(Boolean).join(" ");
+  const footer = [card.effort?.trim(), card.success?.trim()].filter(Boolean).join("  ·  ");
   return (
     <div
       style={{
@@ -117,7 +97,7 @@ function RecCard({ card }: { card: RecommendationCard }) {
         marginBottom: 10,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7 }}>
         <PriorityChip priority={card.priority} />
         <div
           style={{
@@ -127,31 +107,36 @@ function RecCard({ card }: { card: RecommendationCard }) {
             color: B.oxford,
             letterSpacing: "0.02em",
             flex: 1,
+            lineHeight: 1.25,
           }}
         >
           {card.title}
         </div>
       </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>What</div>
-        <div style={valueStyle}>{card.what}</div>
+      <div
+        style={{
+          fontFamily: "'Josefin Sans',sans-serif",
+          fontSize: 13,
+          color: "#2a2a2a",
+          lineHeight: 1.6,
+        }}
+      >
+        {body}
       </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Why</div>
-        <div style={valueStyle}>{card.why}</div>
-      </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Effort</div>
-        <div style={{ ...valueStyle, color: B.caribbean, fontWeight: 600 }}>{card.effort}</div>
-      </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Success</div>
-        <div style={valueStyle}>{card.success}</div>
-      </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Source</div>
-        <div style={{ ...valueStyle, color: "#7a8089", fontSize: 12, fontStyle: "italic" }}>{card.source}</div>
-      </div>
+      {footer && (
+        <div
+          style={{
+            fontFamily: "'Josefin Sans',sans-serif",
+            fontSize: 11.5,
+            color: "#8a909a",
+            marginTop: 9,
+            paddingTop: 8,
+            borderTop: "1px solid #f0f2f4",
+          }}
+        >
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
@@ -2517,30 +2502,8 @@ function PrintPriorityHeader({ children }: { children: React.ReactNode }) {
  */
 function PrintRecCard({ card }: { card: RecommendationCard }) {
   const s = PRIORITY_STYLES[card.priority] || PRIORITY_STYLES["STRATEGIC"];
-  const labelStyle: React.CSSProperties = {
-    fontFamily: "'Barlow Condensed', sans-serif",
-    fontWeight: 700,
-    fontSize: 8.5,
-    letterSpacing: "0.14em",
-    textTransform: "uppercase",
-    color: "#7a8089",
-    width: 50,
-    flexShrink: 0,
-    paddingTop: 1,
-  };
-  const valueStyle: React.CSSProperties = {
-    fontFamily: "'Josefin Sans', sans-serif",
-    fontSize: 10,
-    color: PRINT_BODY,
-    lineHeight: 1.5,
-    flex: 1,
-  };
-  const rowStyle: React.CSSProperties = {
-    display: "flex",
-    gap: 10,
-    alignItems: "flex-start",
-    marginTop: 4,
-  };
+  const body = [card.what?.trim(), card.why?.trim()].filter(Boolean).join(" ");
+  const footer = [card.effort?.trim(), card.success?.trim()].filter(Boolean).join("  ·  ");
   return (
     <div
       style={{
@@ -2552,7 +2515,7 @@ function PrintRecCard({ card }: { card: RecommendationCard }) {
         breakInside: "avoid" as const,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
         <span
           style={{
             display: "inline-block",
@@ -2578,31 +2541,36 @@ function PrintRecCard({ card }: { card: RecommendationCard }) {
             fontSize: 12,
             color: PRINT_NAVY,
             flex: 1,
+            lineHeight: 1.2,
           }}
         >
           {card.title}
         </div>
       </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>What</div>
-        <div style={valueStyle}>{card.what}</div>
+      <div
+        style={{
+          fontFamily: "'Josefin Sans', sans-serif",
+          fontSize: 10,
+          color: PRINT_BODY,
+          lineHeight: 1.5,
+        }}
+      >
+        {body}
       </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Why</div>
-        <div style={valueStyle}>{card.why}</div>
-      </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Effort</div>
-        <div style={{ ...valueStyle, color: PRINT_TEAL, fontWeight: 600 }}>{card.effort}</div>
-      </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Success</div>
-        <div style={valueStyle}>{card.success}</div>
-      </div>
-      <div style={rowStyle}>
-        <div style={labelStyle}>Source</div>
-        <div style={{ ...valueStyle, color: "#7a8089", fontSize: 9, fontStyle: "italic" }}>{card.source}</div>
-      </div>
+      {footer && (
+        <div
+          style={{
+            fontFamily: "'Josefin Sans', sans-serif",
+            fontSize: 9,
+            color: "#8a909a",
+            marginTop: 5,
+            paddingTop: 4,
+            borderTop: "1px solid #eef0f2",
+          }}
+        >
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
