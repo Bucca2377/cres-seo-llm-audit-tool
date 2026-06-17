@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   useRoster,
   buildSystemPrompt,
@@ -28,16 +28,23 @@ const B = {
 };
 
 /* -- DEMO DATA ------------------------------------------------------ */
-const LLM_ITEMS: { id: number; label: string; pts: number; description: string }[] = [
-  { id: 1, label: "Google Business Profile", pts: 20, description: "Verified listing with photos, hours, and a full description" },
-  { id: 2, label: "Apartment Schema Markup", pts: 15, description: "JSON-LD RentalApartment structured data on the property website" },
-  { id: 3, label: "Review Volume (30+ target)", pts: 12, description: "30+ reviews across Google, Apartments.com, and Yelp" },
-  { id: 4, label: "Review Quality (4.0+ avg)", pts: 10, description: "Average rating of 4.0 stars or higher" },
-  { id: 5, label: "NAP Consistency Across ILS", pts: 10, description: "Name / Address / Phone exact-match across every listing platform" },
-  { id: 6, label: "Structured FAQ on Website", pts: 10, description: "Q&A page with schema markup, ideal for AI citation" },
-  { id: 8, label: "Amenities Structured Data", pts: 8, description: "All amenities tagged with standard taxonomy across platforms" },
-  { id: 9, label: "Perplexity / Web Citations", pts: 5, description: "Cited in third-party rental guides or local content lists" },
-  { id: 10, label: "Owner Response to Reviews", pts: 7, description: "Management responds to all reviews, recent and old" },
+type LLMGroupId = "profile" | "website";
+
+const LLM_GROUPS: { id: LLMGroupId; label: string; hint: string }[] = [
+  { id: "profile", label: "Google Profile & Reviews", hint: "How the property shows up on Google Maps and in its reviews" },
+  { id: "website", label: "Website & Structured Data", hint: "On-site signals AI assistants read to cite the property" },
+];
+
+const LLM_ITEMS: { id: number; label: string; pts: number; description: string; group: LLMGroupId }[] = [
+  { id: 1, label: "Google Business Profile", pts: 20, description: "Verified listing with photos, hours, and a full description", group: "profile" },
+  { id: 3, label: "Review Volume (30+ target)", pts: 12, description: "30+ reviews across Google, Apartments.com, and Yelp", group: "profile" },
+  { id: 4, label: "Review Quality (4.0+ avg)", pts: 10, description: "Average rating of 4.0 stars or higher", group: "profile" },
+  { id: 5, label: "Consistent Name, Address & Phone", pts: 10, description: "Name, address, and phone match across every listing site", group: "profile" },
+  { id: 10, label: "Owner Response to Reviews", pts: 7, description: "Management responds to all reviews, recent and old", group: "profile" },
+  { id: 2, label: "Apartment Schema Markup", pts: 15, description: "JSON-LD RentalApartment structured data on the property website", group: "website" },
+  { id: 6, label: "Structured FAQ on Website", pts: 10, description: "Q&A page with schema markup, ideal for AI citation", group: "website" },
+  { id: 8, label: "Amenities Structured Data", pts: 8, description: "All amenities tagged with standard taxonomy across platforms", group: "website" },
+  { id: 9, label: "Perplexity / Web Citations", pts: 5, description: "Cited in third-party rental guides or local content lists", group: "website" },
 ];
 
 function statusOf(p: Property, itemId: number): ChecklistStatus {
@@ -462,14 +469,14 @@ For items 1, 3, 4, and 10 BELOW, use the ground truth above — do not search th
 - Item 10 (Owner Response to Reviews): ${
             responseRate !== null
               ? `Use the owner response rate from ground truth (${responseRate}%). COMPLETE if ≥ 50%. PARTIAL if 1-49%. MISSING if exactly 0%.`
-              : `Ground truth couldn't capture a response rate this run, but reviews EXIST on Google. DO NOT default to "manual verification" — web-search the property's Google reviews directly (1 search). Look for any sample of owner/management replies. If you see ANY owner responses in the search snippets → mark COMPLETE with evidence "owner responses visible in Google review search". If review search returns no signal at all → mark PARTIAL with evidence "owner response activity not visible in search snippets; manual verification recommended". Do not mark MISSING unless you can confirm zero owner responses across the visible review sample.`
+              : `The automatic check couldn't read the response rate this run, but reviews EXIST on Google. Web-search the property's Google reviews directly (1 search). Look for any sample of owner/management replies. If you see ANY owner responses in the search snippets → mark COMPLETE with evidence "Owner replies are visible on the property's Google reviews." If review search returns no signal at all → mark PARTIAL with evidence "Couldn't confirm owner replies automatically — open the property's Google reviews to check." Do not mark MISSING unless you can confirm zero owner responses across the visible review sample.`
           }
 
 In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 stars; 8 of 10 top reviews have owner responses").
 `
         : `GROUND TRUTH UNAVAILABLE: SerpAPI did not return a matching Google Business Profile for this property (possibly due to a generic property name, an incorrect address, or a brand-new listing not yet in Google's index).
 
-IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the GBP is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual knowledge panel, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the GBP, mark each of those items as PARTIAL with evidence "Ground-truth detection failed and manual verification recommended — set the Google Business Profile URL in Property Settings to lock identity." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of ground truth alone.`;
+IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the Google listing is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual Google listing, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the listing, mark each of those items as PARTIAL with evidence "Couldn't auto-check this — paste the property's Google listing link in Property Settings, then re-run the audit." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of automatic data alone.`;
 
       const item10NeedsWebSearch = responseRate === null;
       const costControl = gbpGround
@@ -504,7 +511,7 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 1. Google Business Profile — Detecting GBP via general web search is unreliable; the actual GBP knowledge panel often doesn't appear in search result snippets even when the GBP exists. Calibrate accordingly:
    - COMPLETE: search results explicitly show a Google Business listing with star rating + review count + hours/address (the knowledge panel surfaced in search snippets).
    - COMPLETE also if you find direct google.com/maps/place/ URLs in results pointing to this property.
-   - PARTIAL: GBP isn't directly visible in search snippets BUT you found strong indirect evidence the business is established online — any of: a Yelp listing with hours/phone, a working official website (e.g., edge26.trionliving.com), a phone number that responds to searches, an active social presence. Established apartment communities almost always have a GBP — if there's clear evidence the business exists, lean PARTIAL rather than MISSING. Note in the evidence: "GBP likely exists but not directly visible in search results — manual verification recommended."
+   - PARTIAL: GBP isn't directly visible in search snippets BUT you found strong indirect evidence the business is established online — any of: a Yelp listing with hours/phone, a working official website (e.g., edge26.trionliving.com), a phone number that responds to searches, an active social presence. Established apartment communities almost always have a Google listing — if there's clear evidence the business exists, lean PARTIAL rather than MISSING. Note in the evidence: "Google listing likely exists but didn't show up in search — add its link in Property Settings to confirm."
    - MISSING: only if you find NO web presence for the property at all (no website, no Yelp, no listings anywhere). This should be rare for established apartment communities.
    - Note: ${gbpGround ? "ground truth above is authoritative for this item. Do NOT search the web for GBP — use the ground truth data only." : "ground truth was UNAVAILABLE this run. Web-search this item once to verify; lean PARTIAL with the manual-verification note if the search is inconclusive."}
 
@@ -514,7 +521,7 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 
 4. Review Quality — COMPLETE if average rating ≥4.0 on the primary platform (usually Google). PARTIAL if 3.0-3.9. MISSING if <3.0 or no reviews exist.
 
-5. NAP Consistency — Search for the property on Apartments.com, Zillow, Rent.com, Apartment Finder. COMPLETE if name + address + phone appear consistently across at least 3 platforms. PARTIAL if minor formatting differences (St./Street, Ave/Avenue) or missing from 1-2 platforms. MISSING if major inconsistencies or absent from most platforms.
+5. Consistent Name, Address & Phone — Search for the property on Apartments.com, Zillow, Rent.com, Apartment Finder. COMPLETE if name + address + phone appear consistently across at least 3 platforms. PARTIAL if minor formatting differences (St./Street, Ave/Avenue) or missing from 1-2 platforms. MISSING if major inconsistencies or absent from most platforms.
 
 6. Structured FAQ on Website — If you found the website in Phase 1, look for an /faq, /questions, or /resident-faq URL. COMPLETE if a dedicated FAQ page exists. PARTIAL if FAQ-style content exists but not on a dedicated page. MISSING if no FAQ content found OR no website found.
 
@@ -548,7 +555,9 @@ Return ONLY a JSON object, no prose before or after:
   ]
 }
 
-Evidence sentences must cite SPECIFIC findings (e.g., "Found GBP 'View Apartments by Trion Living' at 10701 N Pecos St with 312 Google reviews at 3.8 stars, hours and photos present" — NOT generic statements like "GBP exists").
+Evidence sentences must cite SPECIFIC findings (e.g., "Found the Google listing 'View Apartments by Trion Living' at 10701 N Pecos St with 312 Google reviews at 3.8 stars, hours and photos present" — NOT generic statements like "Google listing exists").
+
+PLAIN-ENGLISH RULE (applies to every evidence sentence — this is read by a property manager, not an SEO specialist): write the way you'd explain it to a busy property manager. NEVER use the jargon terms "NAP", "ground truth", "knowledge panel", "GBP", "ILS", "SERP", or "manual verification recommended" in evidence. Say "Google listing" not "GBP", "name/address/phone match" not "NAP", "listing sites" not "ILS". When something couldn't be checked automatically, say plainly "Couldn't verify automatically — paste the property's Google listing link in Property Settings, then re-run." — never "manual verification recommended."
 
 Recommendation rules (STRICT):
 1. EXACTLY 5 recommendations. Order by highest impact first.
@@ -642,94 +651,144 @@ Recommendation rules (STRICT):
                 gap: 6,
                 opacity: loadingAudit ? 0.7 : 1,
               }}
-              title="Web-search audit: checks Google Business Profile, reviews, NAP, website FAQ, Bing, citations. Writes statuses + evidence to this property."
+              title="Web-search audit: checks the Google listing, reviews, name/address/phone consistency, website FAQ, Bing, and citations. Writes statuses + evidence to this property."
             >
               <span>✦</span>
               {loadingAudit ? "Auditing (web search, ~30-60s)..." : "Run AI Audit"}
             </button>
           </div>
           <div style={{ maxHeight: 320, overflowY: "auto" }}>
-            {LLM_ITEMS.map((item, i) => {
-              const status = statusOf(property, item.id);
-              const earned = earnedPoints(item.pts, status);
+            {LLM_GROUPS.map((group) => {
+              const items = LLM_ITEMS.filter((it) => it.group === group.id);
+              const groupEarned = items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0);
+              const groupTotal = items.reduce((s, it) => s + it.pts, 0);
               return (
-                <div
-                  key={item.id}
-                  onClick={() => cycleStatus(item.id)}
-                  title="Click to cycle: missing → partial → complete"
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 12,
-                    padding: "10px 18px",
-                    borderBottom: i < LLM_ITEMS.length - 1 ? "1px solid #fafafa" : "none",
-                    cursor: "pointer",
-                    transition: "background 0.1s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#fafafa")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
+                <div key={group.id}>
                   <div
                     style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: "50%",
-                      background: status === "complete" ? "#22c55e" : status === "partial" ? "#f59e0b" : "#f0f0f0",
                       display: "flex",
+                      justifyContent: "space-between",
                       alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      marginTop: 1,
+                      padding: "7px 18px",
+                      background: "#f7f9fa",
+                      borderTop: "1px solid #eef1f3",
+                      borderBottom: "1px solid #eef1f3",
                     }}
                   >
-                    <span style={{ color: "white", fontSize: 10, fontWeight: 700 }}>
-                      {status === "complete" ? "✓" : status === "partial" ? "~" : "✗"}
-                    </span>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span
-                        style={{
-                          fontFamily: "'Josefin Sans',sans-serif",
-                          fontSize: 13,
-                          color: "#333",
-                          fontWeight: status === "missing" ? 300 : 400,
-                        }}
-                      >
-                        {item.label}
-                      </span>
-                      <span
-                        style={{
-                          fontFamily: "'Barlow Condensed',sans-serif",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: status === "complete" ? "#22c55e" : status === "partial" ? "#f59e0b" : "#ccc",
-                        }}
-                      >
-                        {earned}/{item.pts}
-                      </span>
-                    </div>
-                    <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#bbb", marginTop: 2 }}>
-                      {item.description}
-                    </div>
-                    {property.checklistEvidence?.[String(item.id)] && (
+                    <div>
                       <div
                         style={{
-                          marginTop: 4,
-                          padding: "4px 8px",
-                          background: status === "complete" ? "#f0fdf4" : status === "partial" ? "#fef9e6" : "#fdf2f0",
-                          borderRadius: 4,
-                          fontFamily: "'Josefin Sans',sans-serif",
-                          fontSize: 11,
-                          color: status === "complete" ? "#15803d" : status === "partial" ? "#9a7200" : B.tangelo,
-                          lineHeight: 1.5,
+                          fontFamily: "'Barlow Condensed',sans-serif",
+                          fontWeight: 700,
+                          fontSize: 12,
+                          letterSpacing: "0.09em",
+                          textTransform: "uppercase",
+                          color: B.oxford,
                         }}
                       >
-                        <span style={{ fontWeight: 600 }}>Audit: </span>
-                        {property.checklistEvidence[String(item.id)]}
+                        {group.label}
                       </div>
-                    )}
+                      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#aaa", marginTop: 1 }}>
+                        {group.hint}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontFamily: "'Barlow Condensed',sans-serif",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        color: "#8a909a",
+                        flexShrink: 0,
+                        marginLeft: 10,
+                      }}
+                    >
+                      {groupEarned}/{groupTotal}
+                    </span>
                   </div>
+                  {items.map((item, i) => {
+                    const status = statusOf(property, item.id);
+                    const earned = earnedPoints(item.pts, status);
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => cycleStatus(item.id)}
+                        title="Click to cycle: missing → partial → complete"
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 12,
+                          padding: "10px 18px",
+                          borderBottom: i < items.length - 1 ? "1px solid #fafafa" : "none",
+                          cursor: "pointer",
+                          transition: "background 0.1s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#fafafa")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <div
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            background: status === "complete" ? "#22c55e" : status === "partial" ? "#f59e0b" : "#f0f0f0",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                            marginTop: 1,
+                          }}
+                        >
+                          <span style={{ color: "white", fontSize: 10, fontWeight: 700 }}>
+                            {status === "complete" ? "✓" : status === "partial" ? "~" : "✗"}
+                          </span>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span
+                              style={{
+                                fontFamily: "'Josefin Sans',sans-serif",
+                                fontSize: 13,
+                                color: "#333",
+                                fontWeight: status === "missing" ? 300 : 400,
+                              }}
+                            >
+                              {item.label}
+                            </span>
+                            <span
+                              style={{
+                                fontFamily: "'Barlow Condensed',sans-serif",
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: status === "complete" ? "#22c55e" : status === "partial" ? "#f59e0b" : "#ccc",
+                              }}
+                            >
+                              {earned}/{item.pts}
+                            </span>
+                          </div>
+                          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#bbb", marginTop: 2 }}>
+                            {item.description}
+                          </div>
+                          {property.checklistEvidence?.[String(item.id)] && (
+                            <div
+                              style={{
+                                marginTop: 4,
+                                padding: "4px 8px",
+                                background: status === "complete" ? "#f0fdf4" : status === "partial" ? "#fef9e6" : "#fdf2f0",
+                                borderRadius: 4,
+                                fontFamily: "'Josefin Sans',sans-serif",
+                                fontSize: 11,
+                                color: status === "complete" ? "#15803d" : status === "partial" ? "#9a7200" : B.tangelo,
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              <span style={{ fontWeight: 600 }}>Audit: </span>
+                              {property.checklistEvidence[String(item.id)]}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -1256,11 +1315,11 @@ function diagnose(
         : aggDominated
         ? `Organic aggregator-dominated (${aggList}).`
         : "Property's own URL not in organic top 30."
-    } To reach the 3-pack, prioritize Google Business Profile completeness, review velocity, and NAP consistency.`;
+    } To reach the 3-pack, prioritize a complete Google listing, a steady flow of new reviews, and matching name/address/phone across listing sites.`;
   }
   // Not in Map Pack at all but has organic
   if (organicRank && organicRank <= 10) {
-    return `Page 1 organic (#${organicRank}) but missing from Map Pack entirely — likely a Google Business Profile or NAP-consistency issue suppressing local visibility.`;
+    return `Page 1 organic (#${organicRank}) but missing from Map Pack entirely — likely a Google listing gap or mismatched name/address/phone across listing sites suppressing local visibility.`;
   }
   if (organicRank && organicRank <= 30) {
     return `Page ${Math.ceil(organicRank / 10)} organic, not in Map Pack — needs both content depth and stronger local signals.`;
@@ -2001,10 +2060,11 @@ Recommendation rules (STRICT):
 5. "effort" must include time + role.
 6. "success" must be measurable and time-boxed.
 7. "source" must name the specific query that triggered this.
-8. Priority assignment guide:
+8. PLAIN ENGLISH: titles, "what", and "why" are read by a property manager, not an SEO specialist. Never use the jargon "NAP", "GBP", "SERP", or "ILS" in card text — say "name/address/phone", "Google listing", "search results", "listing sites" instead. (You may keep "Map Pack" and "organic" — those are clear in context.)
+9. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
-   - MAP PACK: local 3-pack / GBP-driven visibility (the most distinctive SEO category)
-   - FOUNDATIONAL: hygiene that everything else depends on (NAP consistency, schema, GBP completeness)
+   - MAP PACK: local 3-pack / Google-listing-driven visibility (the most distinctive SEO category)
+   - FOUNDATIONAL: hygiene that everything else depends on (name/address/phone consistency, schema, complete Google listing)
    - CONTENT: requires writing pages, FAQs, blog posts
    - STRATEGIC: > 1 week, multi-month positioning (backlink outreach, review campaigns)
    - LONG-TAIL: niche query optimization with lower competition`;
@@ -2854,51 +2914,79 @@ function PrintableReport({ property }: { property: Property }) {
                 </tr>
               </thead>
               <tbody>
-                {LLM_ITEMS.map((item) => {
-                  const status = statusOf(property, item.id);
-                  const earned = earnedPoints(item.pts, status);
-                  const ev = property.checklistEvidence?.[String(item.id)];
+                {LLM_GROUPS.map((group) => {
+                  const items = LLM_ITEMS.filter((it) => it.group === group.id);
+                  const gEarned = items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0);
+                  const gTotal = items.reduce((s, it) => s + it.pts, 0);
                   return (
-                    <tr key={item.id} className="pb-avoid">
-                      <td
-                        style={{
-                          ...findingsTd,
-                          fontFamily: "'Josefin Sans', sans-serif",
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: PRINT_NAVY,
-                          width: 170,
-                        }}
-                      >
-                        {item.label}
-                      </td>
-                      <td
-                        style={{
-                          ...findingsTd,
-                          background: STATUS_BG[status],
-                          color: STATUS_TEXT[status],
-                          fontWeight: 700,
-                          fontSize: 10,
-                          textAlign: "center",
-                          letterSpacing: "0.04em",
-                        }}
-                      >
-                        {STATUS_LABEL[status]}
-                        <div
+                    <Fragment key={group.id}>
+                      <tr className="pb-avoid">
+                        <td
+                          colSpan={3}
                           style={{
-                            fontSize: 9,
-                            color: STATUS_TEXT[status],
-                            fontWeight: 500,
-                            marginTop: 2,
+                            background: "#eef2f5",
+                            padding: "5px 10px",
+                            fontFamily: "'Barlow Condensed', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 10.5,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: PRINT_NAVY,
+                            borderTop: "1px solid #d8dee4",
                           }}
                         >
-                          {earned}/{item.pts} pts
-                        </div>
-                      </td>
-                      <td style={findingsTd}>
-                        {ev || `No audit evidence captured. ${item.description}`}
-                      </td>
-                    </tr>
+                          {group.label}{" "}
+                          <span style={{ color: "#888", fontWeight: 500 }}>· {gEarned}/{gTotal} pts</span>
+                        </td>
+                      </tr>
+                      {items.map((item) => {
+                        const status = statusOf(property, item.id);
+                        const earned = earnedPoints(item.pts, status);
+                        const ev = property.checklistEvidence?.[String(item.id)];
+                        return (
+                          <tr key={item.id} className="pb-avoid">
+                            <td
+                              style={{
+                                ...findingsTd,
+                                fontFamily: "'Josefin Sans', sans-serif",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: PRINT_NAVY,
+                                width: 170,
+                              }}
+                            >
+                              {item.label}
+                            </td>
+                            <td
+                              style={{
+                                ...findingsTd,
+                                background: STATUS_BG[status],
+                                color: STATUS_TEXT[status],
+                                fontWeight: 700,
+                                fontSize: 10,
+                                textAlign: "center",
+                                letterSpacing: "0.04em",
+                              }}
+                            >
+                              {STATUS_LABEL[status]}
+                              <div
+                                style={{
+                                  fontSize: 9,
+                                  color: STATUS_TEXT[status],
+                                  fontWeight: 500,
+                                  marginTop: 2,
+                                }}
+                              >
+                                {earned}/{item.pts} pts
+                              </div>
+                            </td>
+                            <td style={findingsTd}>
+                              {ev || `No audit evidence captured. ${item.description}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
                   );
                 })}
               </tbody>
