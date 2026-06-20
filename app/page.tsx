@@ -47,6 +47,26 @@ const LLM_ITEMS: { id: number; label: string; pts: number; description: string; 
   { id: 9, label: "Perplexity / Web Citations", pts: 5, description: "Cited in third-party rental guides or local content lists", group: "website" },
 ];
 
+/**
+ * Condensed CRES company playbooks (Resident Reviews P&P, Leasing Lead
+ * Nurturing, Sales Process Best Practices). Injected into audit prompts so
+ * that recommendations touching reviews, lead follow-up, or the tour/sales
+ * process cite the ACTUAL CRES tactic by name instead of generic advice.
+ */
+const CRES_PLAYBOOK = `CRES COMPANY PLAYBOOK — when a recommendation concerns RESIDENT REVIEWS, LEAD NURTURING, or the TOUR / SALES PROCESS, ground it in these real CRES policies and name the specific tactic. Do not invent generic advice when a CRES policy already covers it.
+
+RESIDENT REVIEWS (CRES Resident Reviews P&P):
+- Ask at peak-satisfaction moments: 3–5 days after move-in, right after a work order is resolved, at application/lease signing, at renewal, after resident events, and during "Hug a Building" visits. Never ask during unresolved issues, delinquency, or move-out.
+- TEXT MESSAGE is the preferred channel — send a direct Google review link by text after a positive interaction (one tap, under 60 seconds).
+- Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
+- "Hug a Building" (≈twice/year per building): power-wash + touch-up + resident gift baskets; use the face-to-face moment to gather feedback and solicit reviews with the QR code in hand.
+- Respond to EVERY review. Never ask specifically for 5 stars — ask for honest feedback. Follow up only once.
+- Employee incentives: $25 per 4-/5-star review that names a team member; $200/month (split among the team) for a month with ZERO 1–2 star reviews; $500/month (split) for 10+ four-/five-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle).
+
+LEAD NURTURING (CRES Leasing Lead Nurturing): Speed to lead is key. Days 1–7: call + text + email DAILY until a tour is booked or they opt out (call first, then text with a booking link, then a follow-up email). Days 8–30: all three channels every Monday. Post-tour: thank-you text + email within 1 hour; days 1–3 daily; days 4–14 every 3 days; days 15–30 weekly. Always learn where a lost lead leased and why, and log it in the CRM.
+
+SALES PROCESS (CRES Sales Process Best Practices) — the 5-step tour close: (1) Meet at the door, (2) Collect ID, (3) Build the relationship, (4) Tour the community leading with their hot buttons, (5) Close at the desk with 2–3 options and a direct ask. Post-tour checklist: update CRM, thank-you within 1 hour, follow-up within 24 hours.`;
+
 function statusOf(p: Property, itemId: number): ChecklistStatus {
   return p.checklistStatuses?.[String(itemId)] ?? "missing";
 }
@@ -455,6 +475,29 @@ Return ONLY a JSON object:
         }
       }
 
+      // Listings ground truth: which ILS / aggregator platforms actually
+      // list this property. Authoritative — replaces the LLM's unreliable
+      // web search for items 5 (consistency) and 8 (amenities), which was
+      // falsely reporting "no presence" for clearly-listed properties.
+      let confirmedPlatforms: string[] = [];
+      try {
+        const listingData = await callSerp({
+          query: `${property.name} ${city}`.trim(),
+          engine: "google",
+          location: extractLocation(property.address),
+        });
+        confirmedPlatforms = extractListingPlatforms(listingData, property);
+      } catch {
+        /* OK to proceed without listings ground truth */
+      }
+
+      const listingsBlock = confirmedPlatforms.length
+        ? `LISTINGS GROUND TRUTH (verified via Google search — authoritative, the property IS listed on these): ${confirmedPlatforms.join(", ")}.
+For Item 5 (Consistent Name, Address & Phone) and Item 8 (Amenities Structured Data), use this. Do NOT claim the property has "no presence on rental platforms" — it is demonstrably listed on ${confirmedPlatforms.length} platform(s). Do NOT web-search for items 5 or 8.
+- Item 5: COMPLETE if confirmed on ≥3 platforms; PARTIAL if 1–2. (Confirmed here: ${confirmedPlatforms.length}.)
+- Item 8: if Apartments.com is in the confirmed list, the listing exists — grade amenities completeness on that listing, never "no listing found".`
+        : `LISTINGS: the automatic check did not confirm aggregator listings this run. Web-search to verify presence on Apartments.com / Zillow / Rent.com before claiming the property is absent; if you find listings, grade items 5 and 8 against them.`;
+
       const groundTruthBlock = gbpGround
         ? `GOOGLE BUSINESS PROFILE GROUND TRUTH (verified via SerpAPI — Google's actual data):
 - Listing exists as: "${gbpGround.name}"
@@ -487,15 +530,20 @@ In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 s
 IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the Google listing is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual Google listing, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the listing, mark each of those items as PARTIAL with evidence "Couldn't auto-check this — paste the property's Google listing link in Property Settings, then re-run the audit." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of automatic data alone.`;
 
       const item10NeedsWebSearch = responseRate === null;
+      const listingsCovered = confirmedPlatforms.length > 0
+        ? " Items 5 and 8 are covered by the LISTINGS GROUND TRUTH above — do NOT search the web for those either."
+        : "";
       const costControl = gbpGround
         ? `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.${
             item10NeedsWebSearch
               ? " For item 10 (Owner Response to Reviews), one web search IS required because the response rate couldn't be captured automatically."
               : " For item 10 the ground truth above is authoritative — do NOT search the web."
-          }`
-        : `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item. Because ground truth is UNAVAILABLE for this run, items 1, 3, 4, and 10 each require one web search to verify the GBP/reviews state. Do NOT skip those searches — but cap them at one each.`;
+          }${listingsCovered}`
+        : `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item. Because ground truth is UNAVAILABLE for this run, items 1, 3, 4, and 10 each require one web search to verify the GBP/reviews state. Do NOT skip those searches — but cap them at one each.${listingsCovered}`;
 
       const prompt = `${groundTruthBlock}
+
+${listingsBlock}
 
 Audit ${property.name} at ${property.address} for LLM search visibility. ${costControl}
 
@@ -529,11 +577,11 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 
 4. Review Quality — COMPLETE if average rating ≥4.0 on the primary platform (usually Google). PARTIAL if 3.0-3.9. MISSING if <3.0 or no reviews exist.
 
-5. Consistent Name, Address & Phone — Search for the property on Apartments.com, Zillow, Rent.com, Apartment Finder. COMPLETE if name + address + phone appear consistently across at least 3 platforms. PARTIAL if minor formatting differences (St./Street, Ave/Avenue) or missing from 1-2 platforms. MISSING if major inconsistencies or absent from most platforms.
+5. Consistent Name, Address & Phone — FIRST consult the LISTINGS GROUND TRUTH block above; it lists the platforms where this property is confirmed present. COMPLETE if confirmed on ≥3 platforms; PARTIAL if 1–2; only consider MISSING if zero platforms are confirmed AND a web search also finds none. Never claim "no presence on rental platforms" when the ground truth lists any. (If platforms are confirmed, do not web-search this item.)
 
 6. Structured FAQ on Website — If you found the website in Phase 1, look for an /faq, /questions, or /resident-faq URL. COMPLETE if a dedicated FAQ page exists. PARTIAL if FAQ-style content exists but not on a dedicated page. MISSING if no FAQ content found OR no website found.
 
-8. Amenities Structured Data — Check the property's Apartments.com listing. COMPLETE if the listing has a fully populated amenities section (10+ amenities tagged). PARTIAL if some amenities listed but sparse (<10). MISSING if no Apartments.com listing or no amenities listed.
+8. Amenities Structured Data — If Apartments.com is in the LISTINGS GROUND TRUTH block above, the listing EXISTS; grade the amenities section's completeness, never "no listing found". COMPLETE if the listing has a fully populated amenities section (10+ amenities tagged). PARTIAL if some amenities listed but sparse (<10), or if the listing exists but amenity depth can't be confirmed from snippets. MISSING only if Apartments.com is genuinely absent from the confirmed listings AND a web search finds no listing.
 
 9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
 
@@ -567,6 +615,8 @@ Evidence sentences must cite SPECIFIC findings (e.g., "Found the Google listing 
 
 PLAIN-ENGLISH RULE (applies to every evidence sentence — this is read by a property manager, not an SEO specialist): write the way you'd explain it to a busy property manager. NEVER use the jargon terms "NAP", "ground truth", "knowledge panel", "GBP", "ILS", "SERP", or "manual verification recommended" in evidence. Say "Google listing" not "GBP", "name/address/phone match" not "NAP", "listing sites" not "ILS". When something couldn't be checked automatically, say plainly "Couldn't verify automatically — paste the property's Google listing link in Property Settings, then re-run." — never "manual verification recommended."
 
+${CRES_PLAYBOOK}
+
 Recommendation rules (STRICT):
 1. EXACTLY 5 recommendations. Order by highest impact first.
 2. Each "title" is imperative and scannable — start with a verb (Add, Build, Claim, Launch, Audit, Publish, Fix).
@@ -575,7 +625,8 @@ Recommendation rules (STRICT):
 5. "effort" must include time + role.
 6. "success" must be measurable and time-boxed when possible.
 7. "source" must reference specific item IDs from the audit above.
-8. Priority assignment guide:
+8. CRES PLAYBOOK GROUNDING: any recommendation about reviews, lead follow-up, or the tour/sales process MUST use the specific CRES tactic from the playbook above, named explicitly in "what" — e.g. "text-first Google review link", "QR code on work-order-complete notices", "Hug a Building visits", "the $25/$200/$500 review incentive structure", "the Days 1–7 daily call+text+email cadence". Do NOT give generic review/lead advice when the CRES playbook covers it.
+9. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - FOUNDATIONAL: GBP, schema, NAP, website hygiene — must-have before others can compound
    - CONTENT: requires writing pages, FAQs, blog posts, social
@@ -1203,6 +1254,56 @@ function extractGBP(data: any, property: Property): GBPGroundTruth | null {
     }
   }
   return null;
+}
+
+/**
+ * The ILS / aggregator platforms that matter for apartment listing presence.
+ * `domain` is matched against organic result hostnames; `label` is shown to
+ * the property manager.
+ */
+const ILS_PLATFORMS: { domain: string; label: string }[] = [
+  { domain: "apartments.com", label: "Apartments.com" },
+  { domain: "zillow.com", label: "Zillow" },
+  { domain: "rent.com", label: "Rent.com" },
+  { domain: "apartmentfinder.com", label: "Apartment Finder" },
+  { domain: "apartmentguide.com", label: "ApartmentGuide" },
+  { domain: "apartmentratings.com", label: "ApartmentRatings" },
+  { domain: "realtor.com", label: "Realtor.com" },
+  { domain: "redfin.com", label: "Redfin" },
+  { domain: "trulia.com", label: "Trulia" },
+  { domain: "hotpads.com", label: "HotPads" },
+  { domain: "rentcafe.com", label: "RentCafe" },
+  { domain: "forrent.com", label: "ForRent" },
+];
+
+/**
+ * Scan a `google` engine SerpAPI response's organic results for ILS /
+ * aggregator listings that actually reference THIS property. Returns the
+ * de-duplicated platform labels found.
+ *
+ * This is the authoritative answer to "is the property listed on the major
+ * rental platforms?" — the LLM's own web search is unreliable for it (it
+ * reported "no presence" for a property listed on six platforms), but the
+ * SerpAPI organic results show every listing plainly.
+ */
+function extractListingPlatforms(data: any, property: Property): string[] {
+  const org: any[] = Array.isArray(data?.organic_results) ? data.organic_results : [];
+  const found: string[] = [];
+  for (const r of org) {
+    const dom = normalizeDomain(r.link || "");
+    if (!dom) continue;
+    const platform = ILS_PLATFORMS.find(
+      (p) => dom === p.domain || dom.endsWith("." + p.domain)
+    );
+    if (!platform || found.includes(platform.label)) continue;
+    // Verify the result is about THIS property, not just any listing on the
+    // platform — the property name must appear in the title/snippet/link.
+    const hay = `${r.title || ""} ${r.snippet || ""} ${r.link || ""}`;
+    if (nameMatches(hay, property.name)) {
+      found.push(platform.label);
+    }
+  }
+  return found;
 }
 
 /**
@@ -2124,6 +2225,8 @@ Return ONLY a JSON object, no prose before or after:
   ]
 }
 
+${CRES_PLAYBOOK}
+
 Recommendation rules (STRICT):
 1. EXACTLY 5 recommendations.
 2. Each "title" is imperative — start with a verb (Build, Optimize, Claim, Target, Audit, Publish, Outreach).
@@ -2133,7 +2236,8 @@ Recommendation rules (STRICT):
 6. "success" must be measurable and time-boxed.
 7. "source" must name the specific query that triggered this.
 8. PLAIN ENGLISH: titles, "what", and "why" are read by a property manager, not an SEO specialist. Never use the jargon "NAP", "GBP", "SERP", or "ILS" in card text — say "name/address/phone", "Google listing", "search results", "listing sites" instead. (You may keep "Map Pack" and "organic" — those are clear in context.)
-9. Priority assignment guide:
+9. CRES PLAYBOOK GROUNDING: if a recommendation touches reviews, lead follow-up, or the tour/sales process, name the specific CRES tactic from the playbook above (e.g. "text-first Google review link", "Hug a Building visits", "the Days 1–7 daily call+text+email cadence") rather than generic advice.
+10. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - MAP PACK: local 3-pack / Google-listing-driven visibility (the most distinctive SEO category)
    - FOUNDATIONAL: hygiene that everything else depends on (name/address/phone consistency, schema, complete Google listing)
