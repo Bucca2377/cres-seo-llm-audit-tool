@@ -2113,17 +2113,20 @@ function SEOTab({
 function isBrandedQuery(query: string, property: Property): boolean {
   const q = query.toLowerCase();
   if (nameMatches(query, property.name)) return true;
-  // Street-name match: take the street line, drop the house number,
-  // directionals, and street-type suffixes, then look for any distinctive
-  // remaining word (e.g. "khione" from "1096 N Khione Loop").
+  // Street-name match: ONLY when the address's first segment is a real street
+  // line (has a house number). Otherwise the first segment is the city, and
+  // since every local query contains the city, everything would read as
+  // branded. Also exclude the city/state so they can never be a street token.
   const streetLine = (property.address.split(",")[0] || "").toLowerCase();
+  if (!/\d/.test(streetLine)) return false; // no house number → not a usable street line
+  const city = extractCity(property.address).toLowerCase();
   const streetTokens = streetLine
     .replace(/^\s*\d+\s*/, "")
     .replace(/\b(n|s|e|w|ne|nw|se|sw|north|south|east|west)\b/g, " ")
     .replace(/\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|loop|ct|court|way|pl|place|cir|circle|ter|terrace|pkwy|parkway|hwy|highway|trl|trail)\b/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length >= 4);
-  return streetTokens.some((tok) => q.includes(tok));
+    .filter((w) => w.length >= 4 && w !== city);
+  return streetTokens.length > 0 && streetTokens.some((tok) => q.includes(tok));
 }
 
 /* -- SEO AUDIT (parallel rank check across 6 queries) --------------- */
@@ -2428,22 +2431,10 @@ Recommendation rules (STRICT):
       }
     });
 
-    // Branded checks — each branded/navigational query with its ranks, so the
-    // user can confirm the property does come up #1 for its own name/street.
-    const brandedChecks = ranks
-      .map((r, i) => ({ r, i }))
-      .filter(({ i }) => branded[i])
-      .map(({ r, i }) => ({
-        query: queries[i],
-        mapPackRank: r.map_pack_rank ?? r.expanded_map_pack_rank ?? null,
-        organicRank: r.organic_rank ?? null,
-      }));
-
     return {
       total: queries.length,
       competitiveTotal: compRanks.length,
       brandedCount: ranks.length - compRanks.length,
-      brandedChecks,
       mapPackCount,
       mapPackPartial,
       bestPartialMP,
@@ -2744,69 +2735,11 @@ Recommendation rules (STRICT):
               <strong style={{ color: B.oxford }}>How to read this:</strong> the scorecard above counts only the{" "}
               <strong>{summary.competitiveTotal} competitive search{summary.competitiveTotal === 1 ? "" : "es"}</strong>{" "}
               — the ones a stranger would type. The {summary.brandedCount}{" "}
-              branded/navigational {summary.brandedCount === 1 ? "query" : "queries"} below (your own name or street) {summary.brandedCount === 1 ? "is" : "are"} shown separately — ranking #1 for those is expected and doesn&rsquo;t reflect competitive visibility.
+              branded/navigational {summary.brandedCount === 1 ? "query" : "queries"} (your own name or street, tagged{" "}
+              <span style={{ fontWeight: 700, color: "#7a8089" }}>Branded</span> in the table) {summary.brandedCount === 1 ? "is" : "are"} kept out of these numbers — ranking #1 for those is expected and doesn&rsquo;t reflect competitive visibility.
             </div>
           )}
 
-          {/* Branded checks — confirm the property does rank #1 for its own
-              name / street, kept out of the competitive scorecard. */}
-          {summary.brandedChecks.length > 0 && (
-            <div
-              style={{
-                padding: "12px 14px",
-                background: "#f0fdf4",
-                border: "1px solid #bbf7d0",
-                borderRadius: 8,
-                marginBottom: 18,
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: "'Barlow Condensed',sans-serif",
-                  fontWeight: 700,
-                  fontSize: 10,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  color: "#15803d",
-                  marginBottom: 8,
-                }}
-              >
-                Branded / navigational checks (your own name &amp; street)
-              </div>
-              {summary.brandedChecks.map((b) => {
-                const isTop = (b.mapPackRank != null && b.mapPackRank === 1) || b.organicRank === 1;
-                const parts = [
-                  b.mapPackRank != null ? `Map Pack #${b.mapPackRank}` : null,
-                  b.organicRank != null ? `Organic #${b.organicRank}` : null,
-                ].filter(Boolean);
-                return (
-                  <div
-                    key={b.query}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      padding: "3px 0",
-                      fontFamily: "'Josefin Sans',sans-serif",
-                      fontSize: 12,
-                      color: "#333",
-                    }}
-                  >
-                    <span>
-                      <span style={{ color: isTop ? "#15803d" : "#9a7200", fontWeight: 700, marginRight: 6 }}>
-                        {isTop ? "✓" : "•"}
-                      </span>
-                      &ldquo;{b.query}&rdquo;
-                    </span>
-                    <span style={{ color: parts.length ? "#15803d" : B.tangelo, fontWeight: 600, whiteSpace: "nowrap" }}>
-                      {parts.length ? parts.join(" · ") : "not ranking"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
 
           {/* Per-query results table */}
           <div style={{ border: "1px solid #e8e8e8", borderRadius: 8, overflow: "hidden", marginBottom: 18 }}>
