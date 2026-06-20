@@ -324,8 +324,13 @@ Return ONLY a JSON object:
         // doesn't already include an apartment-type token, which fixes
         // GBP detection for generic-name properties like "Cambridge".
         const serpQuery = buildGbpSearchQuery(property);
+        // Use the google_maps engine, not the default google engine. For
+        // apartment communities the google engine's knowledge_graph returns
+        // the wrong entity, blank review counts, and no data_id; google_maps
+        // returns the real listing with rating, review count, and data_id.
         const serpData = await callSerp({
           query: serpQuery,
+          engine: "google_maps",
           location: extractLocation(property.address),
         });
         gbpGround = extractGBP(serpData, property);
@@ -365,9 +370,12 @@ Return ONLY a JSON object:
               engine: "google_maps",
               location,
             });
-            const mapsResults: any[] = Array.isArray(mapsResp?.local_results)
-              ? mapsResp.local_results
-              : [];
+            // google_maps returns either a singular place_results (one exact
+            // match) or a local_results array (several). Check both.
+            const mapsResults: any[] = [
+              ...(mapsResp?.place_results ? [mapsResp.place_results] : []),
+              ...(Array.isArray(mapsResp?.local_results) ? mapsResp.local_results : []),
+            ];
             const match = mapsResults.find((r: any) =>
               matchPropertyToResult(property, {
                 title: r.title || r.name,
@@ -1026,7 +1034,7 @@ function nameMatches(haystack: string, needle: string): boolean {
 }
 
 interface GBPGroundTruth {
-  source: "knowledge_graph" | "local_results";
+  source: "knowledge_graph" | "local_results" | "place_results";
   name: string;
   address: string;
   rating: number | null;
@@ -1116,6 +1124,43 @@ function extractGBP(data: any, property: Property): GBPGroundTruth | null {
         hasHours: !!kg.hours,
         dataId: kg.data_id || "",
         placeId: kg.place_id || "",
+      };
+    }
+  }
+
+  // google_maps returns a singular `place_results` object (not a
+  // `local_results` array) when the query resolves to exactly one place —
+  // which is the common case for a precise property name. This is where the
+  // RELIABLE rating + review count + data_id live; the google engine's
+  // knowledge_graph often omits them. Missing this object is what made
+  // properties with hundreds of reviews report "0 reviews".
+  const place = data?.place_results;
+  if (place && (place.title || place.name)) {
+    const m = matchesProperty(
+      place.title || place.name || "",
+      place.address || "",
+      place.website,
+      place.data_id,
+      place.place_id
+    );
+    if (m) {
+      return {
+        source: "place_results",
+        name: place.title || place.name,
+        address: place.address || "",
+        rating: typeof place.rating === "number" ? place.rating : null,
+        reviewCount:
+          typeof place.reviews === "number"
+            ? place.reviews
+            : typeof place.review_count === "number"
+            ? place.review_count
+            : null,
+        unclaimed: place.unclaimed_listing === true,
+        phone: place.phone || "",
+        website: place.website || "",
+        hasHours: !!(place.hours || place.operating_hours),
+        dataId: place.data_id || "",
+        placeId: place.place_id || "",
       };
     }
   }
@@ -1242,8 +1287,12 @@ async function enrichPropertyFromSerp(
 ): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl">>; gbp: GBPGroundTruth } | null> {
   try {
     const query = buildGbpSearchQuery(property);
+    // google_maps engine — see the audit pre-flight note: it returns the
+    // real listing data (rating, review count, data_id) that the default
+    // google engine's knowledge_graph omits for apartment communities.
     const data = await callSerp({
       query,
+      engine: "google_maps",
       location: extractLocation(property.address),
     });
     const gbp = extractGBP(data, property);
@@ -1355,6 +1404,22 @@ function diagnose(
  * panels without an address), returns true — we can't verify, so we don't
  * reject.
  */
+/**
+ * Pull a US state code from an address. Prefers the two-letter code that sits
+ * immediately before a 5-digit ZIP ("Salisbury, MD 21804" → "MD"); falls back
+ * to a standalone two-letter token in the normalized location string.
+ */
+function parseStateCode(address: string): string {
+  const zipMatch = address.match(/\b([A-Za-z]{2})\s+\d{5}\b/);
+  if (zipMatch) return zipMatch[1].toUpperCase();
+  const loc = extractLocation(address);
+  const tok = loc
+    .split(",")
+    .map((s) => s.trim())
+    .find((s) => /^[A-Za-z]{2}$/.test(s));
+  return tok ? tok.toUpperCase() : "";
+}
+
 function addressShallowMatch(propertyAddress: string, candidateAddress: string): boolean {
   if (!candidateAddress) return true; // can't verify, don't reject
   const propStreetNum = (propertyAddress.match(/\b(\d{2,6})\b/) || [])[1];
@@ -1364,6 +1429,13 @@ function addressShallowMatch(propertyAddress: string, candidateAddress: string):
   const propLoc = extractLocation(propertyAddress).toLowerCase();
   const candLoc = extractLocation(candidateAddress).toLowerCase();
   if (propLoc && candLoc && propLoc === candLoc) return true;
+
+  // If both addresses name a state and the states differ, this is a
+  // same-name property in a different state (e.g. Clarksville TN vs
+  // Clarksville IN). Reject before the looser city-only check below.
+  const propState = parseStateCode(propertyAddress);
+  const candState = parseStateCode(candidateAddress);
+  if (propState && candState && propState !== candState) return false;
 
   const propCity = extractCity(propertyAddress).toLowerCase();
   const candCity = extractCity(candidateAddress).toLowerCase();
