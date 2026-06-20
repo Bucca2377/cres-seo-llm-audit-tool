@@ -2123,6 +2123,25 @@ function SEOAudit({
   const [progress, setProgress] = useState<string>("");
   const [results, setResults] = useState<SEOAuditResults | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [newQuery, setNewQuery] = useState("");
+
+  const pinnedQueries = property.pinnedQueries || [];
+  const addPinnedQuery = () => {
+    const q = newQuery.trim();
+    if (!q) return;
+    if (pinnedQueries.some((p) => p.toLowerCase() === q.toLowerCase())) {
+      setNewQuery("");
+      return;
+    }
+    onUpdateProperty({ ...property, pinnedQueries: [...pinnedQueries, q] });
+    setNewQuery("");
+  };
+  const removePinnedQuery = (q: string) => {
+    onUpdateProperty({
+      ...property,
+      pinnedQueries: pinnedQueries.filter((p) => p !== q),
+    });
+  };
 
   // Restore persisted audit when switching property
   useEffect(() => {
@@ -2192,9 +2211,24 @@ Return ONLY a JSON array of 6 strings, no prose:
       const qText = qResp.content?.[0]?.text || "";
       const qMatch = qText.match(/\[[\s\S]*\]/);
       if (!qMatch) throw new Error("Could not generate query candidates.");
-      const queries = JSON.parse(qMatch[0]) as string[];
-      if (!Array.isArray(queries) || queries.length === 0) {
+      const autoQueries = JSON.parse(qMatch[0]) as string[];
+      if (!Array.isArray(autoQueries) || autoQueries.length === 0) {
         throw new Error("No queries returned.");
+      }
+
+      // Always include the user's pinned "must-check" queries first, then the
+      // freshly auto-generated set. De-duped case-insensitively so a pinned
+      // query the AI also happened to produce isn't checked twice.
+      const pinned = (currentProperty.pinnedQueries || [])
+        .map((q) => q.trim())
+        .filter(Boolean);
+      const seenQ = new Set<string>();
+      const queries: string[] = [];
+      for (const q of [...pinned, ...autoQueries]) {
+        const key = q.trim().toLowerCase();
+        if (!key || seenQ.has(key)) continue;
+        seenQ.add(key);
+        queries.push(q.trim());
       }
 
       // Stage 2: parallel rank checks
@@ -2368,7 +2402,7 @@ Recommendation rules (STRICT):
             </div>
           </div>
           <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginTop: 3 }}>
-            Auto-generate 6 relevant queries, check Map Pack + organic rank in parallel, get ranked recommendations.
+            Auto-generates relevant queries (plus any you've pinned below), checks Map Pack + organic rank in parallel, returns ranked recommendations.
           </div>
           {results && results.timestamp && (
             <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: 4 }}>
@@ -2396,11 +2430,120 @@ Recommendation rules (STRICT):
             alignItems: "center",
             gap: 8,
           }}
-          title="Web-search audit across 6 auto-generated queries"
+          title="Web-search audit across the auto-generated queries plus any you've pinned"
         >
           <span>✦</span>
           {isRunning ? "Auditing..." : results ? "Re-run Audit" : "Run SEO Audit"}
         </button>
+      </div>
+
+      {/* Pinned "must-check" queries — always included alongside the
+          auto-generated set on every run. */}
+      <div
+        style={{
+          background: "white",
+          border: "1px solid #e6e9ec",
+          borderRadius: 8,
+          padding: "12px 16px",
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: "0.09em",
+            textTransform: "uppercase",
+            color: B.oxford,
+            marginBottom: 2,
+          }}
+        >
+          Must-check queries
+        </div>
+        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa", marginBottom: 10 }}>
+          Always checked every run, on top of the auto-generated queries. Add the searches you care about so they never disappear.
+        </div>
+        {pinnedQueries.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {pinnedQueries.map((q) => (
+              <span
+                key={q}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "#eef4f3",
+                  border: `1px solid ${B.cambridge}`,
+                  borderRadius: 16,
+                  padding: "3px 6px 3px 11px",
+                  fontFamily: "'Josefin Sans',sans-serif",
+                  fontSize: 12,
+                  color: "#2a4d49",
+                }}
+              >
+                {q}
+                <button
+                  onClick={() => removePinnedQuery(q)}
+                  title="Remove this query"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#7a8089",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    lineHeight: 1,
+                    padding: "0 2px",
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={newQuery}
+            onChange={(e) => setNewQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addPinnedQuery();
+              }
+            }}
+            placeholder="e.g. 3 bed apartments in Salisbury"
+            style={{
+              flex: 1,
+              border: "1px solid #d8dee4",
+              borderRadius: 6,
+              padding: "8px 11px",
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 13,
+              color: "#2a2a2a",
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={addPinnedQuery}
+            disabled={!newQuery.trim()}
+            style={{
+              background: newQuery.trim() ? B.caribbean : "#cfd6da",
+              border: "none",
+              borderRadius: 6,
+              padding: "8px 16px",
+              color: "white",
+              fontFamily: "'Barlow Condensed',sans-serif",
+              fontWeight: 700,
+              fontSize: 13,
+              letterSpacing: "0.06em",
+              cursor: newQuery.trim() ? "pointer" : "default",
+              whiteSpace: "nowrap",
+            }}
+          >
+            + Add
+          </button>
+        </div>
       </div>
 
       {isRunning && (
@@ -2574,7 +2717,7 @@ Recommendation rules (STRICT):
 
       {!results && !isRunning && !error && (
         <div style={{ padding: "20px 16px", background: "#fafafa", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
-          Runs ~30–60s. Generates 6 relevant queries, checks live Google rankings for each (Map Pack + organic), aggregates a scorecard, and outputs 5 ranked actions. ~$0.05–$0.10 in API cost per audit.
+          Runs ~30–60s. Generates relevant queries (plus any you've pinned above), checks live Google rankings for each (Map Pack + organic), aggregates a scorecard, and outputs 5 ranked actions. ~$0.05–$0.10 in API cost per audit.
         </div>
       )}
     </div>

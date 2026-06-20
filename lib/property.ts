@@ -76,6 +76,13 @@ export interface Property {
    * vs. "Village at Snowfield").
    */
   gbpUrl?: string;
+  /**
+   * "Must-check" SEO search queries the user has pinned for this property.
+   * These are always included in every SEO audit run alongside the freshly
+   * auto-generated queries, so a query the user cares about (e.g. "3 bed
+   * apartments in Salisbury") never disappears between runs.
+   */
+  pinnedQueries?: string[];
   checklistStatuses?: Record<string, ChecklistStatus>;
   checklistEvidence?: Record<string, string>;
   llmAuditRecommendations?: AuditRecommendations;
