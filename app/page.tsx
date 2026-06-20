@@ -2339,7 +2339,8 @@ Recommendation rules (STRICT):
 7. "source" must name the specific query that triggered this.
 8. PLAIN ENGLISH: titles, "what", and "why" are read by a property manager, not an SEO specialist. Never use the jargon "NAP", "GBP", "SERP", or "ILS" in card text — say "name/address/phone", "Google listing", "search results", "listing sites" instead. (You may keep "Map Pack" and "organic" — those are clear in context.)
 9. CRES PLAYBOOK GROUNDING: if a recommendation touches reviews, lead follow-up, or the tour/sales process, describe the specific CRES tactic from the playbook above plainly (e.g. "text residents a direct Google review link", "Hug a Building visits", "call + text + email daily for the first 7 days") rather than generic advice. Do NOT fabricate branded program names like "CRES text-message review protocol" — only "Hug a Building" is a named program.
-10. Priority assignment guide:
+10. KEY-PHRASE COPY: At least ONE recommendation MUST address putting the EXACT phrases the property fails to rank for (the queries above where it is absent or below the top 3) into its own copy — the page title, H1, and body of the most relevant page, the meta description, AND the Google Business Profile description/services. Name the specific phrases verbatim (e.g. 'weave "townhomes for rent in Salisbury" and "3 bedroom townhomes Salisbury MD" into the homepage title tag, H1, and the Google listing description'). This is the cheapest win when the property HAS the feature but never says the phrase. Only skip it if the property already ranks top-3 for every competitive query.
+11. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - MAP PACK: local 3-pack / Google-listing-driven visibility (the most distinctive SEO category)
    - FOUNDATIONAL: hygiene that everything else depends on (name/address/phone consistency, schema, complete Google listing)
