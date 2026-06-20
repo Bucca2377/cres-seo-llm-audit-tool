@@ -2102,6 +2102,28 @@ function SEOTab({
   );
 }
 
+/**
+ * A query is "branded / navigational" when it contains the property's own
+ * name or its street — searches a stranger would never type. Ranking #1 for
+ * your own name is expected and tells you nothing about competitive
+ * visibility, so these are split out of the headline scorecard.
+ */
+function isBrandedQuery(query: string, property: Property): boolean {
+  const q = query.toLowerCase();
+  if (nameMatches(query, property.name)) return true;
+  // Street-name match: take the street line, drop the house number,
+  // directionals, and street-type suffixes, then look for any distinctive
+  // remaining word (e.g. "khione" from "1096 N Khione Loop").
+  const streetLine = (property.address.split(",")[0] || "").toLowerCase();
+  const streetTokens = streetLine
+    .replace(/^\s*\d+\s*/, "")
+    .replace(/\b(n|s|e|w|ne|nw|se|sw|north|south|east|west)\b/g, " ")
+    .replace(/\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|loop|ct|court|way|pl|place|cir|circle|ter|terrace|pkwy|parkway|hwy|highway|trl|trail)\b/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4);
+  return streetTokens.some((tok) => q.includes(tok));
+}
+
 /* -- SEO AUDIT (parallel rank check across 6 queries) --------------- */
 type AuditStage = "idle" | "queries" | "checking" | "analyzing" | "done";
 
@@ -2351,18 +2373,29 @@ Recommendation rules (STRICT):
   const summary = (() => {
     if (!results) return null;
     const { queries, ranks } = results;
-    const mapPackCount = ranks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
-    const page1Count = ranks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
-    const validRanks = ranks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
-    const avgRank = validRanks.length
-      ? Math.round(validRanks.reduce((a, b) => a + b, 0) / validRanks.length)
+
+    // Split branded/navigational queries from competitive ones. The headline
+    // scorecard is built ONLY from competitive queries — ranking #1 for your
+    // own name or street is expected and would otherwise inflate the numbers.
+    const branded = ranks.map((_, i) => isBrandedQuery(queries[i], property));
+    const compIdx = ranks.map((_, i) => i).filter((i) => !branded[i]);
+    const compRanks = compIdx.map((i) => ranks[i]);
+
+    const mapPackCount = compRanks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
+    const page1Count = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
+    const compValid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
+    const avgRank = compValid.length
+      ? Math.round(compValid.reduce((a, b) => a + b, 0) / compValid.length)
       : null;
 
+    // Strongest / weakest are chosen among COMPETITIVE queries so the cards
+    // surface a real win and a real gap, not "you rank #1 for your own name".
     let strongestIdx = -1;
     let strongestScore = -1;
     let weakestIdx = -1;
     let weakestScore = Infinity;
-    ranks.forEach((r, i) => {
+    compIdx.forEach((i) => {
+      const r = ranks[i];
       const mpScore = r.map_pack_rank ? 100 - r.map_pack_rank * 10 : 0;
       const orgScore = r.organic_rank ? Math.max(0, 110 - r.organic_rank) : 0;
       const score = mpScore + orgScore;
@@ -2376,14 +2409,28 @@ Recommendation rules (STRICT):
       }
     });
 
+    // Branded queries the property actually ranks #1 for — shown as context,
+    // not credit.
+    const brandedTop = compIdx.length < ranks.length
+      ? ranks
+          .map((r, i) => ({ r, i }))
+          .filter(({ i }) => branded[i] && ranks[i].organic_rank)
+          .map(({ i }) => queries[i])
+      : [];
+
     return {
       total: queries.length,
+      competitiveTotal: compRanks.length,
+      brandedCount: ranks.length - compRanks.length,
+      brandedTop,
       mapPackCount,
       page1Count,
       avgRank,
-      rankingCount: validRanks.length,
-      strongestQuery: strongestIdx >= 0 ? queries[strongestIdx] : null,
-      strongestRank: strongestIdx >= 0 ? ranks[strongestIdx] : null,
+      rankingCount: compValid.length,
+      // Only call a competitive query "strongest" if it genuinely ranks
+      // somewhere — otherwise there's no real win to highlight.
+      strongestQuery: strongestIdx >= 0 && strongestScore > 0 ? queries[strongestIdx] : null,
+      strongestRank: strongestIdx >= 0 && strongestScore > 0 ? ranks[strongestIdx] : null,
       weakestQuery: weakestIdx >= 0 ? queries[weakestIdx] : null,
     };
   })();
@@ -2569,32 +2616,30 @@ Recommendation rules (STRICT):
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 18 }}>
             <KPI
               label="Map Pack hits"
-              value={`${summary.mapPackCount}/${summary.total}`}
-              sub="Goal: 3+ of 6"
+              value={`${summary.mapPackCount}/${summary.competitiveTotal}`}
+              sub="of competitive searches"
               accent={summary.mapPackCount >= 3 ? "#22c55e" : summary.mapPackCount >= 1 ? "#f59e0b" : B.tangelo}
             />
             <KPI
               label="Page 1 (organic)"
-              value={`${summary.page1Count}/${summary.total}`}
-              sub="Goal: 4+ of 6"
+              value={`${summary.page1Count}/${summary.competitiveTotal}`}
+              sub="of competitive searches"
               accent={summary.page1Count >= 4 ? "#22c55e" : summary.page1Count >= 2 ? "#f59e0b" : B.tangelo}
             />
             <KPI
-              label="Avg organic rank"
+              label="Avg rank (competitive)"
               value={summary.avgRank ? `#${summary.avgRank}` : "—"}
               sub={
                 summary.avgRank
-                  ? `Avg of the ${summary.rankingCount} of ${summary.total} ranking queries${
-                      summary.rankingCount < summary.total / 2 ? " (small sample)" : ""
-                    }`
-                  : "No queries ranking"
+                  ? `Avg of ${summary.rankingCount} of ${summary.competitiveTotal} ranking competitive queries`
+                  : "Not ranking for any competitive search"
               }
               accent={
-                summary.rankingCount < summary.total / 2
+                !summary.avgRank
                   ? B.tangelo
-                  : summary.avgRank && summary.avgRank <= 10
+                  : summary.avgRank <= 10
                   ? "#22c55e"
-                  : summary.avgRank && summary.avgRank <= 30
+                  : summary.avgRank <= 30
                   ? "#f59e0b"
                   : B.tangelo
               }
@@ -2602,7 +2647,11 @@ Recommendation rules (STRICT):
             <KPI
               label="Queries audited"
               value={summary.total}
-              sub="real-time Google search"
+              sub={
+                summary.brandedCount > 0
+                  ? `${summary.competitiveTotal} competitive · ${summary.brandedCount} branded`
+                  : "real-time Google search"
+              }
               accent={B.oxford}
             />
           </div>
@@ -2643,6 +2692,32 @@ Recommendation rules (STRICT):
             </div>
           )}
 
+          {/* Branded vs competitive callout — explains why the headline only
+              counts competitive searches. */}
+          {summary.brandedCount > 0 && (
+            <div
+              style={{
+                padding: "10px 14px",
+                background: "#f4f7f9",
+                border: "1px solid #e2e8ec",
+                borderRadius: 8,
+                marginBottom: 18,
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 12,
+                color: "#44505c",
+                lineHeight: 1.6,
+              }}
+            >
+              <strong style={{ color: B.oxford }}>How to read this:</strong> the scorecard above counts only the{" "}
+              <strong>{summary.competitiveTotal} competitive search{summary.competitiveTotal === 1 ? "" : "es"}</strong>{" "}
+              — the ones a stranger would type. The other {summary.brandedCount}{" "}
+              {summary.brandedCount === 1 ? "query is" : "queries are"} branded/navigational (your own name or street); ranking #1 for those is expected and doesn&rsquo;t reflect real visibility.
+              {summary.brandedTop.length > 0 && (
+                <> You rank for {summary.brandedTop.map((q) => `“${q}”`).join(", ")} — that&rsquo;s your own brand, not new-renter demand.</>
+              )}
+            </div>
+          )}
+
           {/* Per-query results table */}
           <div style={{ border: "1px solid #e8e8e8", borderRadius: 8, overflow: "hidden", marginBottom: 18 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12 }}>
@@ -2658,9 +2733,33 @@ Recommendation rules (STRICT):
               <tbody>
                 {results.queries.map((q, i) => {
                   const r = results.ranks[i];
+                  const branded = isBrandedQuery(q, property);
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
-                      <td style={{ padding: "10px 12px", color: "#333" }}>{q}</td>
+                      <td style={{ padding: "10px 12px", color: "#333" }}>
+                        {q}
+                        {branded && (
+                          <span
+                            title="Branded / navigational query (your own name or street) — not counted in the competitive scorecard"
+                            style={{
+                              marginLeft: 8,
+                              fontFamily: "'Barlow Condensed',sans-serif",
+                              fontWeight: 700,
+                              fontSize: 9,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                              color: "#7a8089",
+                              background: "#eef1f3",
+                              border: "1px solid #dfe4e8",
+                              borderRadius: 4,
+                              padding: "1px 5px",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Branded
+                          </span>
+                        )}
+                      </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span
                           style={{
@@ -3087,13 +3186,20 @@ function PrintableReport({ property }: { property: Property }) {
   const totalLLM = LLM_ITEMS.reduce((s, i) => s + i.pts, 0);
   const scorePct = totalLLM > 0 ? Math.round((earnedLLM / totalLLM) * 100) : 0;
 
+  // SEO scorecard counts only competitive (non-branded) queries, so ranking
+  // #1 for the property's own name/street doesn't inflate the numbers.
   let seoMP = 0;
   let seoP1 = 0;
   let seoAvg: number | null = null;
+  let seoCompTotal = 0;
+  let seoBrandedCount = 0;
   if (seo) {
-    seoMP = seo.ranks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
-    seoP1 = seo.ranks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
-    const valid = seo.ranks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
+    const compRanks = seo.ranks.filter((r, i) => !isBrandedQuery(seo.queries[i], property));
+    seoCompTotal = compRanks.length;
+    seoBrandedCount = seo.ranks.length - compRanks.length;
+    seoMP = compRanks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
+    seoP1 = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
+    const valid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
     seoAvg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
   }
 
@@ -3139,7 +3245,7 @@ function PrintableReport({ property }: { property: Property }) {
       : "An LLM Visibility audit has not yet been run for this property. Run it from the LLM Visibility tab to populate this section.";
 
   const seoSummaryLine = seo
-    ? `Across ${seo.queries.length} auto-generated search queries representative of in-market renter intent, the property appears in the Google Map Pack for ${seoMP} and on Page 1 organically for ${seoP1}${seoAvg ? ` (average organic rank #${seoAvg})` : ""}.`
+    ? `Across ${seoCompTotal} competitive search ${seoCompTotal === 1 ? "query" : "queries"} representative of in-market renter intent${seoBrandedCount > 0 ? ` (plus ${seoBrandedCount} branded/navigational ${seoBrandedCount === 1 ? "query" : "queries"} excluded from these figures)` : ""}, the property appears in the Google Map Pack for ${seoMP} and on Page 1 organically for ${seoP1}${seoAvg ? ` (average organic rank #${seoAvg} among the competitive queries it ranks for)` : ", and does not rank organically for any of them"}.`
     : "A SEO Audit has not yet been run for this property. Run it from the SEO & Rank Check tab to populate this section.";
 
   const gapLine =
@@ -3403,12 +3509,12 @@ function PrintableReport({ property }: { property: Property }) {
             >
               {(
                 [
-                  ["Map Pack Hits", `${seoMP}/${seo.queries.length}`, "Goal: 3+ of 6"],
-                  ["Page 1 Organic", `${seoP1}/${seo.queries.length}`, "Goal: 4+ of 6"],
+                  ["Map Pack Hits", `${seoMP}/${seoCompTotal}`, "Competitive searches"],
+                  ["Page 1 Organic", `${seoP1}/${seoCompTotal}`, "Competitive searches"],
                   [
                     "Avg Organic Rank",
                     seoAvg ? `#${seoAvg}` : "—",
-                    seoAvg ? `Page ${Math.ceil(seoAvg / 10)} average` : "Not ranking",
+                    seoAvg ? `Competitive queries that rank` : "Not ranking (competitive)",
                   ],
                 ] as [string, string, string][]
               ).map(([label, val, sub]) => (
