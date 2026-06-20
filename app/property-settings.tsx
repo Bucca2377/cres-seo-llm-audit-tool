@@ -422,6 +422,29 @@ export default function PropertySettings({
           />
         )}
 
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {field(
+            "Property type",
+            <input
+              value={draft.propertyType ?? ""}
+              onChange={(e) => setDraft({ ...draft, propertyType: e.target.value })}
+              style={inputStyle}
+              placeholder="e.g. Townhomes"
+            />,
+            "What it actually is — drives search queries"
+          )}
+          {field(
+            "Bedroom types",
+            <input
+              value={draft.bedroomTypes ?? ""}
+              onChange={(e) => setDraft({ ...draft, bedroomTypes: e.target.value })}
+              style={inputStyle}
+              placeholder="e.g. 2 & 3 bedroom"
+            />,
+            "Used for bedroom-specific queries"
+          )}
+        </div>
+
         {field(
           "Website URL",
           <div style={{ display: "flex", gap: 8 }}>

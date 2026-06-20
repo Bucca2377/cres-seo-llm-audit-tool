@@ -583,6 +583,8 @@ PROPERTY FACTS:
 - Name in our system: ${property.name}
 - Address: ${property.address}
 - City: ${city}
+${property.propertyType ? `- Property type: ${property.propertyType} (use this product word in recommendations, not a generic "apartments")` : ""}
+${property.bedroomTypes ? `- Bedroom types offered: ${property.bedroomTypes}` : ""}
 ${property.managerName ? `- Management company: ${property.managerName}` : ""}
 ${property.amenities.length ? `- Known amenities: ${property.amenities.slice(0, 6).join(", ")}` : ""}
 
@@ -2214,17 +2216,26 @@ function SEOAudit({
       setProgress("Generating relevant search queries...");
 
       const amenitiesStr = currentProperty.amenities.slice(0, 8).join(", ") || "(none specified)";
-      const queriesPrompt = `Generate exactly 6 highly relevant Google search queries that prospective renters would use to find apartments like ${currentProperty.name}.
+      const unitType = (currentProperty.propertyType || "apartments").trim();
+      const unitWord = unitType.toLowerCase();
+      const bedroomTypes = (currentProperty.bedroomTypes || "").trim();
+      const queriesPrompt = `Generate exactly 6 highly relevant Google search queries that prospective renters would use to find a home like ${currentProperty.name}.
 
 Property: ${currentProperty.name}
 Address: ${currentProperty.address}
+Property type: ${unitType}${bedroomTypes ? `\nBedroom types offered: ${bedroomTypes}` : ""}
 Amenities: ${amenitiesStr}
+
+CRITICAL: This is a "${unitType}" community. Use that product word ("${unitWord}") in the queries — do NOT default to the generic word "apartments" unless the type genuinely is apartments. Search the way a renter looking for THIS kind of home would.
 
 Mix the 6 queries as follows:
 - 1 brand query (just the property name or a slight variant)
-- 2 location-based queries combining the city/neighborhood with apartment type
+- 1 type + city query (e.g. "${unitWord} for rent in <city>")
+- ${bedroomTypes
+        ? `1 bedroom-specific query using a real bedroom count from "${bedroomTypes}" (e.g. "3 bedroom ${unitWord} for rent in <city>")`
+        : `1 bedroom-count query (e.g. "2 bedroom ${unitWord} in <city>")`}
 - 2 amenity-based queries combining a key amenity with the city
-- 1 high-volume head query for the local apartment market
+- 1 high-volume head query for the local rental market
 
 Return ONLY a JSON array of 6 strings, no prose:
 ["query 1", "query 2", "query 3", "query 4", "query 5", "query 6"]`;

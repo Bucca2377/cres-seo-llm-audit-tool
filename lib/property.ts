@@ -63,6 +63,20 @@ export interface Property {
   description: string;
   managerName: string;
   /**
+   * What kind of community this is in plain words — e.g. "Townhomes",
+   * "Apartments", "Townhomes & apartments", "Garden-style apartments".
+   * Google often categorizes everything as "Apartment complex", so this is
+   * the user's source of truth. Feeds query generation, the audit, and
+   * content so searches/recommendations match the real product.
+   */
+  propertyType?: string;
+  /**
+   * Bedroom / unit types offered, in plain words — e.g. "1, 2 & 3 bedroom"
+   * or "Studio–3BR". Used to generate bedroom-specific search queries
+   * (e.g. "3 bedroom townhomes for rent in Salisbury").
+   */
+  bedroomTypes?: string;
+  /**
    * The property's primary website (e.g. "villageatsnowfield.com" or
    * "https://www.villageatsnowfield.com"). When set, rank checks and
    * GBP detection match by domain — far more reliable than fuzzy name
