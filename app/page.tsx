@@ -2883,6 +2883,46 @@ function splitRecommendations(text: string): string[] {
   return parts.length > 0 ? parts : [text.trim()];
 }
 
+/**
+ * Classify a recommendation into a coarse topic so the printed report can
+ * drop near-duplicates when the LLM-audit and SEO-audit card sets are
+ * merged. Returns null for topics that are usually distinct (landing pages,
+ * Map Pack tactics, etc.) — those are never deduped. Note that responding
+ * to reviews and generating reviews are deliberately SEPARATE topics.
+ */
+function recTopicKey(card: RecommendationCard): string | null {
+  const t = `${card.title} ${card.what}`.toLowerCase();
+  if (/\breview/.test(t)) {
+    return /(respond|reply|repl ?y|response|owner reply|monitor reviews?)/.test(t)
+      ? "review-response"
+      : "review-generation";
+  }
+  if (/\bfaq\b|frequently asked|q&a page|q & a/.test(t)) return "faq";
+  if (/schema|json-?ld|structured data markup/.test(t)) return "schema";
+  if (/amenit/.test(t)) return "amenities";
+  if (/name.{0,12}address.{0,12}phone|listing consistency|consistent name/.test(t)) return "listings";
+  return null;
+}
+
+/**
+ * Merge two structured card sets (LLM audit first, then SEO audit) and drop
+ * cards that repeat a topic already covered. LLM-first ordering means the
+ * checklist-grounded card wins when both audits cover the same ground.
+ */
+function dedupeRecCards(cards: RecommendationCard[]): RecommendationCard[] {
+  const seen = new Set<string>();
+  const kept: RecommendationCard[] = [];
+  for (const c of cards) {
+    const topic = recTopicKey(c);
+    if (topic) {
+      if (seen.has(topic)) continue;
+      seen.add(topic);
+    }
+    kept.push(c);
+  }
+  return kept;
+}
+
 function PrintableReport({ property }: { property: Property }) {
   const llmRecs = property.llmAuditRecommendations;
   const llmTs = property.llmAuditTimestamp;
@@ -2972,10 +3012,13 @@ function PrintableReport({ property }: { property: Property }) {
   const structuredLlmRecs = isStructuredRecs(llmRecs) ? llmRecs : null;
   const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
 
-  const allStructuredCards: RecommendationCard[] = [
+  // Merge LLM-audit + SEO-audit cards, dropping topical duplicates (both
+  // audits independently cover reviews / FAQ / schema / amenities, so the
+  // raw concatenation showed each topic twice in the printed report).
+  const allStructuredCards: RecommendationCard[] = dedupeRecCards([
     ...(structuredLlmRecs || []),
     ...(structuredSeoRecs || []),
-  ];
+  ]);
 
   // Group cards into priority bands for the printed report. The order
   // is intentional: foundational and quick wins come before strategic
