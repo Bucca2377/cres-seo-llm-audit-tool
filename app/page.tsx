@@ -53,7 +53,9 @@ const LLM_ITEMS: { id: number; label: string; pts: number; description: string; 
  * that recommendations touching reviews, lead follow-up, or the tour/sales
  * process cite the ACTUAL CRES tactic by name instead of generic advice.
  */
-const CRES_PLAYBOOK = `CRES COMPANY PLAYBOOK — when a recommendation concerns RESIDENT REVIEWS, LEAD NURTURING, or the TOUR / SALES PROCESS, ground it in these real CRES policies and name the specific tactic. Do not invent generic advice when a CRES policy already covers it.
+const CRES_PLAYBOOK = `CRES COMPANY PLAYBOOK — when a recommendation concerns RESIDENT REVIEWS, LEAD NURTURING, or the TOUR / SALES PROCESS, ground it in these real CRES policies and describe the specific tactic. Do not invent generic advice when a CRES policy already covers it.
+
+CRITICAL — describe these as plain actions, NOT as branded programs. Do NOT fabricate official-sounding names like "CRES text-message review protocol", "the CRES review program", or "the CRES lead nurturing system" — those are not real. The ONLY proper-noun program below is "Hug a Building". Everything else is a practice you describe in plain words: write "text residents a direct Google review link after a positive interaction", NOT "deploy the CRES text-message review protocol".
 
 RESIDENT REVIEWS (CRES Resident Reviews P&P):
 - Ask at peak-satisfaction moments: 3–5 days after move-in, right after a work order is resolved, at application/lease signing, at renewal, after resident events, and during "Hug a Building" visits. Never ask during unresolved issues, delinquency, or move-out.
@@ -625,7 +627,7 @@ Recommendation rules (STRICT):
 5. "effort" must include time + role.
 6. "success" must be measurable and time-boxed when possible.
 7. "source" must reference specific item IDs from the audit above.
-8. CRES PLAYBOOK GROUNDING: any recommendation about reviews, lead follow-up, or the tour/sales process MUST use the specific CRES tactic from the playbook above, named explicitly in "what" — e.g. "text-first Google review link", "QR code on work-order-complete notices", "Hug a Building visits", "the $25/$200/$500 review incentive structure", "the Days 1–7 daily call+text+email cadence". Do NOT give generic review/lead advice when the CRES playbook covers it.
+8. CRES PLAYBOOK GROUNDING: any recommendation about reviews, lead follow-up, or the tour/sales process MUST use the specific CRES tactic from the playbook above, described plainly in "what" — e.g. "text residents a direct Google review link after positive interactions", "add a review-link QR code to work-order-complete notices", "Hug a Building visits", "the $25/$200/$500 review incentive", "call + text + email daily for the first 7 days". Do NOT give generic review/lead advice when the CRES playbook covers it, and do NOT fabricate branded program names (no "CRES text-message review protocol" — that is not a real thing; only "Hug a Building" is a named program).
 9. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - FOUNDATIONAL: GBP, schema, NAP, website hygiene — must-have before others can compound
@@ -2236,7 +2238,7 @@ Recommendation rules (STRICT):
 6. "success" must be measurable and time-boxed.
 7. "source" must name the specific query that triggered this.
 8. PLAIN ENGLISH: titles, "what", and "why" are read by a property manager, not an SEO specialist. Never use the jargon "NAP", "GBP", "SERP", or "ILS" in card text — say "name/address/phone", "Google listing", "search results", "listing sites" instead. (You may keep "Map Pack" and "organic" — those are clear in context.)
-9. CRES PLAYBOOK GROUNDING: if a recommendation touches reviews, lead follow-up, or the tour/sales process, name the specific CRES tactic from the playbook above (e.g. "text-first Google review link", "Hug a Building visits", "the Days 1–7 daily call+text+email cadence") rather than generic advice.
+9. CRES PLAYBOOK GROUNDING: if a recommendation touches reviews, lead follow-up, or the tour/sales process, describe the specific CRES tactic from the playbook above plainly (e.g. "text residents a direct Google review link", "Hug a Building visits", "call + text + email daily for the first 7 days") rather than generic advice. Do NOT fabricate branded program names like "CRES text-message review protocol" — only "Hug a Building" is a named program.
 10. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - MAP PACK: local 3-pack / Google-listing-driven visibility (the most distinctive SEO category)
