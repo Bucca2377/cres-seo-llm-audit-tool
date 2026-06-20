@@ -373,6 +373,7 @@ Return ONLY a JSON object:
       let responseRate: number | null = null;
       let responsesChecked = 0;
       let responsesWith = 0;
+      let reviewsCallRan = false;
       if (gbpGround) {
         try {
           // Prefer the data_id we already captured during GBP detection.
@@ -411,6 +412,7 @@ Return ONLY a JSON object:
           }
 
           if (dataId) {
+            reviewsCallRan = true;
             const reviewsResp = await callSerp({
               engine: "google_maps_reviews",
               data_id: dataId,
@@ -477,6 +479,20 @@ Return ONLY a JSON object:
         }
       }
 
+      // Effective Google review count. Prefer the total Google shows; else
+      // fall back to how many reviews the reviews pre-flight actually
+      // returned (a lower bound — 0 means we checked and found none). null
+      // only when we genuinely couldn't check (no listing / no data_id).
+      const effectiveReviewCount: number | null =
+        typeof gbpGround?.reviewCount === "number"
+          ? gbpGround.reviewCount
+          : reviewsCallRan
+          ? responsesChecked
+          : null;
+      // A property with almost no reviews can't be told to "respond to" or
+      // "pin" reviews — the priority is generating the first ones.
+      const noReviews = effectiveReviewCount !== null && effectiveReviewCount < 5;
+
       // Listings ground truth: which ILS / aggregator platforms actually
       // list this property. Authoritative — replaces the LLM's unreliable
       // web search for items 5 (consistency) and 8 (amenities), which was
@@ -500,12 +516,26 @@ For Item 5 (Consistent Name, Address & Phone) and Item 8 (Amenities Structured D
 - Item 8: if Apartments.com is in the confirmed list, the listing exists — grade amenities completeness on that listing, never "no listing found".`
         : `LISTINGS: the automatic check did not confirm aggregator listings this run. Web-search to verify presence on Apartments.com / Zillow / Rent.com before claiming the property is absent; if you find listings, grade items 5 and 8 against them.`;
 
+      const reviewStateBlock = noReviews
+        ? `REVIEW STATE (OVERRIDE — this property has essentially NO Google reviews, about ${effectiveReviewCount}):
+- Because there are no reviews yet, do NOT recommend "respond to every review", "pin a review", or anything about managing review responses — there is nothing to respond to.
+- The single highest review priority is GENERATING the first reviews using the CRES tactics (text residents a direct Google review link at move-in / after a work order / at lease signing, QR codes at every touchpoint, the $25/$200/$500 employee incentive).
+- Item 10 (Owner Response to Reviews): grade MISSING with evidence "No Google reviews yet, so there are no owner responses to manage — generating the first reviews is the priority." Do NOT web-search item 10 and do NOT spend a recommendation slot on responding to reviews.
+- Items 3 and 4 (review volume/quality) are MISSING — too few reviews to count or rate.`
+        : "";
+
       const groundTruthBlock = gbpGround
         ? `GOOGLE BUSINESS PROFILE GROUND TRUTH (verified via SerpAPI — Google's actual data):
 - Listing exists as: "${gbpGround.name}"
 - Address per Google: ${gbpGround.address}
 - Rating: ${gbpGround.rating !== null ? gbpGround.rating + " stars" : "not shown"}
-- Google review count: ${gbpGround.reviewCount !== null ? gbpGround.reviewCount + " reviews" : "not shown"}
+- Google review count: ${
+            typeof gbpGround.reviewCount === "number"
+              ? gbpGround.reviewCount + " reviews"
+              : effectiveReviewCount !== null
+              ? `about ${effectiveReviewCount} review${effectiveReviewCount === 1 ? "" : "s"} (Google didn't show a total; this is the count we could verify)`
+              : "not shown"
+          }
 - Hours: ${gbpGround.hasHours ? "listed" : "NOT listed"}
 - Phone: ${gbpGround.phone || "NOT listed"}
 - Website per Google: ${gbpGround.website || "NOT listed"}
@@ -546,7 +576,7 @@ IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume
       const prompt = `${groundTruthBlock}
 
 ${listingsBlock}
-
+${reviewStateBlock ? "\n" + reviewStateBlock + "\n" : ""}
 Audit ${property.name} at ${property.address} for LLM search visibility. ${costControl}
 
 PROPERTY FACTS:
