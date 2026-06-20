@@ -3422,106 +3422,6 @@ function PrintableReport({ property }: { property: Property }) {
           <div style={{ fontSize: 12, color: PRINT_MUTED }}>Prepared by: CRES</div>
         </section>
 
-        {/* ============ LLM VISIBILITY FINDINGS ============ */}
-        {(llmTs || llmRecs) && (
-          <section className="pb-before">
-            <PrintSectionHeader>LLM Visibility Audit Findings</PrintSectionHeader>
-            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
-              Audited {llmTs ? new Date(llmTs).toLocaleString() : "—"}. Score{" "}
-              <strong style={{ color: PRINT_NAVY }}>
-                {earnedLLM}/{totalLLM}
-              </strong>{" "}
-              ({scorePct}%).
-            </p>
-            <table>
-              <thead>
-                <tr>
-                  <th style={findingsTh}>Data Point</th>
-                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Status</th>
-                  <th style={findingsTh}>Audit Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {LLM_GROUPS.map((group) => {
-                  const items = LLM_ITEMS.filter((it) => it.group === group.id);
-                  const gEarned = items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0);
-                  const gTotal = items.reduce((s, it) => s + it.pts, 0);
-                  return (
-                    <Fragment key={group.id}>
-                      <tr className="pb-avoid">
-                        <td
-                          colSpan={3}
-                          style={{
-                            background: "#eef2f5",
-                            padding: "5px 10px",
-                            fontFamily: "'Barlow Condensed', sans-serif",
-                            fontWeight: 700,
-                            fontSize: 10.5,
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                            color: PRINT_NAVY,
-                            borderTop: "1px solid #d8dee4",
-                          }}
-                        >
-                          {group.label}{" "}
-                          <span style={{ color: "#888", fontWeight: 500 }}>· {gEarned}/{gTotal} pts</span>
-                        </td>
-                      </tr>
-                      {items.map((item) => {
-                        const status = statusOf(property, item.id);
-                        const earned = earnedPoints(item.pts, status);
-                        const ev = property.checklistEvidence?.[String(item.id)];
-                        return (
-                          <tr key={item.id} className="pb-avoid">
-                            <td
-                              style={{
-                                ...findingsTd,
-                                fontFamily: "'Josefin Sans', sans-serif",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: PRINT_NAVY,
-                                width: 170,
-                              }}
-                            >
-                              {item.label}
-                            </td>
-                            <td
-                              style={{
-                                ...findingsTd,
-                                background: STATUS_BG[status],
-                                color: STATUS_TEXT[status],
-                                fontWeight: 700,
-                                fontSize: 10,
-                                textAlign: "center",
-                                letterSpacing: "0.04em",
-                              }}
-                            >
-                              {STATUS_LABEL[status]}
-                              <div
-                                style={{
-                                  fontSize: 9,
-                                  color: STATUS_TEXT[status],
-                                  fontWeight: 500,
-                                  marginTop: 2,
-                                }}
-                              >
-                                {earned}/{item.pts} pts
-                              </div>
-                            </td>
-                            <td style={findingsTd}>
-                              {ev || `No audit evidence captured. ${item.description}`}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </section>
-        )}
-
         {/* ============ SEO RANK FINDINGS ============ */}
         {seo && (
           <section className="pb-before">
@@ -3648,6 +3548,106 @@ function PrintableReport({ property }: { property: Property }) {
                         {r.top_map_pack[0] || r.top_organic[0]?.name || "—"}
                       </td>
                     </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        )}
+
+        {/* ============ LLM VISIBILITY FINDINGS ============ */}
+        {(llmTs || llmRecs) && (
+          <section className="pb-before">
+            <PrintSectionHeader>LLM Visibility Audit Findings</PrintSectionHeader>
+            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
+              Audited {llmTs ? new Date(llmTs).toLocaleString() : "—"}. Score{" "}
+              <strong style={{ color: PRINT_NAVY }}>
+                {earnedLLM}/{totalLLM}
+              </strong>{" "}
+              ({scorePct}%).
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th style={findingsTh}>Data Point</th>
+                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Status</th>
+                  <th style={findingsTh}>Audit Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {LLM_GROUPS.map((group) => {
+                  const items = LLM_ITEMS.filter((it) => it.group === group.id);
+                  const gEarned = items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0);
+                  const gTotal = items.reduce((s, it) => s + it.pts, 0);
+                  return (
+                    <Fragment key={group.id}>
+                      <tr className="pb-avoid">
+                        <td
+                          colSpan={3}
+                          style={{
+                            background: "#eef2f5",
+                            padding: "5px 10px",
+                            fontFamily: "'Barlow Condensed', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 10.5,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: PRINT_NAVY,
+                            borderTop: "1px solid #d8dee4",
+                          }}
+                        >
+                          {group.label}{" "}
+                          <span style={{ color: "#888", fontWeight: 500 }}>· {gEarned}/{gTotal} pts</span>
+                        </td>
+                      </tr>
+                      {items.map((item) => {
+                        const status = statusOf(property, item.id);
+                        const earned = earnedPoints(item.pts, status);
+                        const ev = property.checklistEvidence?.[String(item.id)];
+                        return (
+                          <tr key={item.id} className="pb-avoid">
+                            <td
+                              style={{
+                                ...findingsTd,
+                                fontFamily: "'Josefin Sans', sans-serif",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: PRINT_NAVY,
+                                width: 170,
+                              }}
+                            >
+                              {item.label}
+                            </td>
+                            <td
+                              style={{
+                                ...findingsTd,
+                                background: STATUS_BG[status],
+                                color: STATUS_TEXT[status],
+                                fontWeight: 700,
+                                fontSize: 10,
+                                textAlign: "center",
+                                letterSpacing: "0.04em",
+                              }}
+                            >
+                              {STATUS_LABEL[status]}
+                              <div
+                                style={{
+                                  fontSize: 9,
+                                  color: STATUS_TEXT[status],
+                                  fontWeight: 500,
+                                  marginTop: 2,
+                                }}
+                              >
+                                {earned}/{item.pts} pts
+                              </div>
+                            </td>
+                            <td style={findingsTd}>
+                              {ev || `No audit evidence captured. ${item.description}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
                   );
                 })}
               </tbody>
