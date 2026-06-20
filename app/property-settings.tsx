@@ -68,6 +68,7 @@ export default function PropertySettings({
   } | null>(null);
   const enrichCancelRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [redetecting, setRedetecting] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -220,8 +221,6 @@ export default function PropertySettings({
   const handleCancelEnrich = () => {
     enrichCancelRef.current = true;
   };
-
-  const [redetecting, setRedetecting] = useState(false);
 
   const handleRedetect = async () => {
     setRedetecting(true);
