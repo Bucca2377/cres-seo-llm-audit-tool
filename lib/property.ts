@@ -91,6 +91,11 @@ export interface Property {
    */
   gbpUrl?: string;
   /**
+   * The property's Apartments.com listing URL. Used by the Marketing Audit to
+   * check the ILS listing (active vs shell, hours, photos, tour/apply tools).
+   */
+  apartmentsUrl?: string;
+  /**
    * "Must-check" SEO search queries the user has pinned for this property.
    * These are always included in every SEO audit run alongside the freshly
    * auto-generated queries, so a query the user cares about (e.g. "3 bed
@@ -116,6 +121,60 @@ export interface Property {
     recommendations: AuditRecommendations;
     timestamp: string;
   };
+  marketingAudit?: MarketingAuditResult;
+}
+
+/** Green = found & functional, amber = present/unverified, red = absent/broken. */
+export type MarketingStatus = "green" | "amber" | "red";
+
+export interface MarketingFinding {
+  label: string;
+  status: MarketingStatus;
+  note: string;
+}
+
+export interface MarketingSourceCell {
+  status: MarketingStatus;
+  note: string;
+}
+
+export interface MarketingConsistencyRow {
+  label: string;
+  apartments: MarketingSourceCell;
+  google: MarketingSourceCell;
+  website: MarketingSourceCell;
+}
+
+export interface MarketingCriticalIssue {
+  title: string;
+  observed: string;
+  impact: string;
+}
+
+export interface MarketingRec {
+  action: string;
+  detail: string;
+}
+
+/**
+ * Structured result of the Marketing Audit (website + Apartments.com + Google
+ * consistency). Persisted on the property so the tab and the printable report
+ * can read it after a run.
+ */
+export interface MarketingAuditResult {
+  executiveSummary: string[];
+  websiteFindings: MarketingFinding[];
+  criticalIssues: MarketingCriticalIssue[];
+  consistency: MarketingConsistencyRow[];
+  recommendations: {
+    immediate: MarketingRec[];
+    high: MarketingRec[];
+    ongoing: MarketingRec[];
+  };
+  summary: string[];
+  /** Echoes the URLs audited, for the report header. */
+  sources: { website?: string; apartments?: string; google?: string };
+  timestamp: string;
 }
 
 const ROSTER_KEY = "cres-roster";
@@ -472,6 +531,7 @@ export async function callAI(opts: {
   system?: string;
   maxTokens?: number;
   useWebSearch?: boolean;
+  webFetch?: boolean;
 }) {
   const r = await fetch("/api/ai", {
     method: "POST",

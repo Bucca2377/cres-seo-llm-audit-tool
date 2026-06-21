@@ -488,6 +488,17 @@ export default function PropertySettings({
           "Search the property on Google Maps and copy the URL. Locks GBP identity for audits and review checks. Filled automatically by Re-detect."
         )}
 
+        {field(
+          "Apartments.com listing URL",
+          <input
+            value={draft.apartmentsUrl ?? ""}
+            onChange={(e) => setDraft({ ...draft, apartmentsUrl: e.target.value })}
+            style={inputStyle}
+            placeholder="https://www.apartments.com/<slug>/<id>/"
+          />,
+          "Used by the Marketing Audit to check the ILS listing (active vs shell, hours, photos, tour/apply tools)."
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           {field(
             "Units",

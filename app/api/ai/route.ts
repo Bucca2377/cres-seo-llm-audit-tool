@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface AIRequest {
   prompt: string;
   system?: string;
   maxTokens?: number;
   useWebSearch?: boolean;
+  /**
+   * Enables Claude's web_fetch tool (plus web_search) so the model can pull
+   * specific URLs — used by the Marketing Audit to fetch the property
+   * website, Apartments.com listing, etc. Requires the web-fetch beta header.
+   */
+  webFetch?: boolean;
 }
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
@@ -44,17 +50,26 @@ export async function POST(req: NextRequest) {
     messages: [{ role: "user", content: body.prompt }],
   };
   if (body.system) payload.system = body.system;
-  if (body.useWebSearch) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+  if (body.webFetch) {
+    // web_fetch lets Claude pull specific URLs; pair it with web_search so it
+    // can still find the listing if a URL is missing. web_fetch is a beta tool.
+    payload.tools = [
+      { type: "web_search_20250305", name: "web_search" },
+      { type: "web_fetch_20250910", name: "web_fetch", max_uses: 12 },
+    ];
+    headers["anthropic-beta"] = "web-fetch-2025-09-10";
+  } else if (body.useWebSearch) {
     payload.tools = [{ type: "web_search_20250305", name: "web_search" }];
   }
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 

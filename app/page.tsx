@@ -13,6 +13,8 @@ import {
   type AuditRecommendations,
   type RecommendationCard,
   type RecommendationPriority,
+  type MarketingAuditResult,
+  type MarketingStatus,
 } from "@/lib/property";
 import PropertySettings from "./property-settings";
 
@@ -2920,10 +2922,494 @@ function ContentTab({ property }: { property: Property }) {
   );
 }
 
+/* ================= MARKETING AUDIT TAB ============================ */
+const MK_STATUS: Record<MarketingStatus, { bg: string; fg: string; label: string }> = {
+  green: { bg: "#E0F0E8", fg: "#15803d", label: "Good" },
+  amber: { bg: "#fff2dd", fg: "#9a7200", label: "Check" },
+  red: { bg: "#FCE4E4", fg: "#b14a2a", label: "Issue" },
+};
+
+function MkStatusCell({ cell }: { cell: { status: MarketingStatus; note: string } }) {
+  const s = MK_STATUS[cell.status] || MK_STATUS.amber;
+  return (
+    <td style={{ padding: "8px 10px", background: s.bg, borderBottom: "1px solid #eef0f2", verticalAlign: "top" }}>
+      <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: s.fg, marginBottom: 2 }}>
+        {s.label}
+      </div>
+      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#333", lineHeight: 1.45 }}>{cell.note}</div>
+    </td>
+  );
+}
+
+/** Homepage + screen-reader URL — the two reliable entry points. Claude
+ * follows the real nav links it finds on the homepage for the rest (path
+ * conventions vary by CMS: Entrata, RealPage, Yardi all differ). */
+function buildSiteUrls(website: string): string[] {
+  const raw = (website || "").trim();
+  if (!raw) return [];
+  const base = (raw.startsWith("http") ? raw : `https://${raw}`).replace(/\/+$/, "");
+  return [base + "/", base + "/screen-reader/"];
+}
+
+/** Stringify SerpAPI place_results hours into a readable day-by-day list. */
+function formatGbpHours(place: any): string {
+  const h = place?.hours;
+  if (!Array.isArray(h) || h.length === 0) return "not listed on Google";
+  return h
+    .map((entry: any) => {
+      if (entry && typeof entry === "object") {
+        if (entry.day) {
+          const times = Array.isArray(entry.times) ? entry.times.join(", ") : entry.hours || entry.time || "";
+          return `${entry.day}: ${times}`.trim();
+        }
+        const k = Object.keys(entry)[0];
+        if (k) return `${k}: ${entry[k]}`;
+      }
+      return String(entry);
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function MarketingAuditTab({
+  property,
+  onUpdateProperty,
+}: {
+  property: Property;
+  onUpdateProperty: (p: Property) => void;
+}) {
+  const [website, setWebsite] = useState(property.website ?? "");
+  const [aptUrl, setAptUrl] = useState(property.apartmentsUrl ?? "");
+  const [gbpUrl, setGbpUrl] = useState(property.gbpUrl ?? "");
+  const [stage, setStage] = useState<"idle" | "running" | "done">("idle");
+  const [progress, setProgress] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<MarketingAuditResult | null>(property.marketingAudit ?? null);
+
+  useEffect(() => {
+    setWebsite(property.website ?? "");
+    setAptUrl(property.apartmentsUrl ?? "");
+    setGbpUrl(property.gbpUrl ?? "");
+    setResults(property.marketingAudit ?? null);
+    setStage(property.marketingAudit ? "done" : "idle");
+    setError(null);
+    setProgress("");
+  }, [property.id]);
+
+  const running = stage === "running";
+
+  const run = async () => {
+    setError(null);
+    if (!website.trim()) {
+      setError("Add the property website URL first.");
+      return;
+    }
+    setStage("running");
+    setResults(null);
+
+    // Persist any URL edits up front so the run uses (and saves) them.
+    let current: Property = { ...property, website: website.trim(), apartmentsUrl: aptUrl.trim(), gbpUrl: gbpUrl.trim() };
+    onUpdateProperty(current);
+
+    try {
+      // --- Google Business Profile ground truth (deterministic via SerpAPI) ---
+      setProgress("Pulling Google Business Profile data…");
+      let gbpBlock = "GOOGLE BUSINESS PROFILE: could not be verified automatically this run — fetch the provided Google URL if present, otherwise mark Google cells 'Requires Client Verification'.";
+      try {
+        const serpData = await callSerp({
+          query: buildGbpSearchQuery(current),
+          engine: "google_maps",
+          location: extractLocation(current.address),
+        });
+        const gbp = extractGBP(serpData, current);
+        const place = serpData?.place_results;
+        if (gbp || place) {
+          const rating = gbp?.rating ?? (typeof place?.rating === "number" ? place.rating : null);
+          const reviewCount = gbp?.reviewCount ?? (typeof place?.reviews === "number" ? place.reviews : null);
+          gbpBlock = `GOOGLE BUSINESS PROFILE GROUND TRUTH (verified via SerpAPI — authoritative for Google; do NOT re-fetch Google Maps):
+- Listing name: "${gbp?.name || place?.title || "(unknown)"}"
+- Address on Google: ${gbp?.address || place?.address || "(not shown)"}
+- Hours on Google: ${formatGbpHours(place)}
+- Rating: ${rating !== null ? rating + " stars" : "not shown"}
+- Review count: ${reviewCount !== null ? reviewCount : "not shown"}
+- Website link on Google: ${gbp?.website || place?.website || "not shown"}
+- Phone on Google: ${place?.phone || "not shown"}
+- Note: Google may surface aggregator-pulled pricing; never mark Google pricing "green".`;
+        }
+      } catch {
+        /* best-effort; proceed without GBP ground truth */
+      }
+
+      // --- Build the analysis prompt ---
+      setProgress("Fetching website + Apartments.com and analyzing (60–90s)…");
+      const siteUrls = buildSiteUrls(current.website || "");
+      const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
+
+Fetch and review these sources, then report ONLY what you directly observe.
+
+PROPERTY WEBSITE — fetch the homepage first, then follow the REAL navigation links you find on it (do NOT guess URL paths; path conventions vary by CMS). Start with:
+${siteUrls.map((u) => `- ${u}`).join("\n")}
+From the homepage nav, also fetch the actual Floor Plans, Amenities, Photos/Gallery, Contact, Apply, Specials/Concessions, Pets, and FAQ pages if links exist. Skip anything that 404s.
+
+APARTMENTS.COM LISTING: ${current.apartmentsUrl || "(none provided — mark Apartments.com cells 'Requires Client Verification' and note no listing URL was provided; do not invent)"}
+
+${gbpBlock}
+
+STATIC-FETCH RULES (critical — a fetched page is static HTML; JavaScript widgets will not render):
+- NEVER mark a JS-rendered element (availability/pricing widgets, photo galleries, tour-scheduling modals like Knock/Tour24, Apply Now portals, lead/contact forms) RED unless there is no container, embed, or anchor of any kind for it. If a container/anchor exists but no content rendered, or a CTA points to a placeholder like "#!", classify it AMBER and say live confirmation is needed ("Requires Client Verification").
+- Only mark something RED when its absence is structurally confirmed.
+- If the Apartments.com page shows "not currently advertising," that is a RED critical issue, not a minor note.
+- Flag cross-platform discrepancies (hours differing day-by-day, conflicting pricing, amenities on one platform not another).
+
+WRITING RULES:
+- Be concise and scannable. Short sentences. No filler, no restating the obvious, no "Note:" sections.
+- Plain English for a property manager. Do NOT use hyphens, em dashes, or en dashes as sentence punctuation; use separate sentences.
+- Status values are exactly "green" (found & functional), "amber" (present but incomplete/unverified/requires client verification), or "red" (confirmed absent or broken).
+
+Return ONLY this JSON object, no prose before or after:
+{
+  "executiveSummary": ["paragraph 1: what was audited + key strengths", "paragraph 2: most critical gaps + impact on lease conversion"],
+  "websiteFindings": [
+    {"label":"Leasing office hours","status":"green|amber|red","note":"one short clause"},
+    {"label":"Schedule a tour","status":"...","note":"..."},
+    {"label":"Apply now / online application","status":"...","note":"..."},
+    {"label":"Available units & pricing","status":"...","note":"..."},
+    {"label":"Concessions / specials","status":"...","note":"..."},
+    {"label":"Preferred employers","status":"...","note":"..."},
+    {"label":"Photos / gallery","status":"...","note":"..."},
+    {"label":"Virtual tours","status":"...","note":"..."},
+    {"label":"Amenities page","status":"...","note":"..."}
+  ],
+  "criticalIssues": [
+    {"title":"short title","observed":"one sentence of what was observed","impact":"one sentence on how it hurts lease conversion"}
+  ],
+  "consistency": [
+    {"label":"Currently advertising / active","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Office hours listed","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Pricing / availability","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Photos quality","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Virtual tour","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Concessions listed","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Preferred employers","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Tour scheduling","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
+    {"label":"Online application","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}}
+  ],
+  "recommendations": {
+    "immediate": [{"action":"bolded action","detail":"one concise line of what to do and why"}],
+    "high": [{"action":"...","detail":"..."}],
+    "ongoing": [{"action":"...","detail":"..."}]
+  },
+  "summary": ["paragraph 1: strongest assets + most urgent gap", "paragraph 2: the 2-3 actions most likely to drive leases"]
+}`;
+
+      const data = await callAI({ prompt, webFetch: true, maxTokens: 6000 });
+      const text = (data.content || [])
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text)
+        .join("\n");
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("The audit did not return a structured result. Try again.");
+      const parsed = JSON.parse(match[0]) as Partial<MarketingAuditResult>;
+
+      const result: MarketingAuditResult = {
+        executiveSummary: parsed.executiveSummary || [],
+        websiteFindings: parsed.websiteFindings || [],
+        criticalIssues: parsed.criticalIssues || [],
+        consistency: parsed.consistency || [],
+        recommendations: {
+          immediate: parsed.recommendations?.immediate || [],
+          high: parsed.recommendations?.high || [],
+          ongoing: parsed.recommendations?.ongoing || [],
+        },
+        summary: parsed.summary || [],
+        sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
+        timestamp: new Date().toISOString(),
+      };
+
+      current = { ...current, marketingAudit: result };
+      onUpdateProperty(current);
+      setResults(result);
+      setStage("done");
+      setProgress("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Marketing audit failed.");
+      setStage("idle");
+      setProgress("");
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    flex: 1,
+    border: "1px solid #d8dee4",
+    borderRadius: 6,
+    padding: "8px 11px",
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 13,
+    color: "#2a2a2a",
+    outline: "none",
+  };
+  const labelStyle: React.CSSProperties = {
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 11,
+    color: "#888",
+    width: 130,
+    flexShrink: 0,
+    alignSelf: "center",
+  };
+
+  return (
+    <div style={{ background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford }}>
+          Marketing Audit
+        </div>
+        {results?.timestamp && (
+          <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888" }}>
+            Last audited {new Date(results.timestamp).toLocaleString()}
+          </span>
+        )}
+      </div>
+      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 14 }}>
+        Reviews the property website, Apartments.com listing, and Google Business Profile for leasing readiness and cross-platform consistency.
+      </div>
+
+      {/* URL inputs */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10 }}>
+          <span style={labelStyle}>Website</span>
+          <input value={website} onChange={(e) => setWebsite(e.target.value)} style={inputStyle} placeholder="https://www.villageatsnowfield.com" />
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <span style={labelStyle}>Apartments.com</span>
+          <input value={aptUrl} onChange={(e) => setAptUrl(e.target.value)} style={inputStyle} placeholder="https://www.apartments.com/<slug>/<id>/" />
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <span style={labelStyle}>Google listing</span>
+          <input value={gbpUrl} onChange={(e) => setGbpUrl(e.target.value)} style={inputStyle} placeholder="https://www.google.com/maps/place/..." />
+        </div>
+      </div>
+
+      <button
+        onClick={run}
+        disabled={running}
+        style={{
+          background: B.caribbean,
+          border: "none",
+          borderRadius: 8,
+          padding: "11px 20px",
+          color: "white",
+          fontFamily: "'Barlow Condensed',sans-serif",
+          fontWeight: 700,
+          fontSize: 14,
+          letterSpacing: "0.06em",
+          cursor: running ? "wait" : "pointer",
+          opacity: running ? 0.7 : 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+        title="Fetches the website + Apartments.com via Claude and the Google listing via SerpAPI, then writes a client-ready audit."
+      >
+        <span>✦</span>
+        {running ? "Auditing…" : results ? "Re-run Marketing Audit" : "Run Marketing Audit"}
+      </button>
+
+      {running && (
+        <div style={{ marginTop: 14, padding: "12px 16px", background: "#f9fafb", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.caribbean, display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[0, 1, 2].map((n) => (
+              <div key={n} style={{ width: 5, height: 5, background: B.caribbean, borderRadius: "50%", animation: `bounce 0.9s ${n * 0.18}s infinite` }} />
+            ))}
+          </div>
+          <span>{progress}</span>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ marginTop: 14, padding: "10px 16px", background: "#feeee7", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.tangelo }}>
+          Audit error: {error}
+        </div>
+      )}
+
+      {!results && !running && !error && (
+        <div style={{ marginTop: 16, padding: "20px 16px", background: "#fafafa", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
+          Runs ~60–90s. Reads the three platforms, flags leasing-conversion gaps, and writes an Executive Summary, color-coded findings, critical issues, an ILS/Google consistency check, and tiered recommendations.
+        </div>
+      )}
+
+      {results && (
+        <MarketingAuditResultView results={results} />
+      )}
+    </div>
+  );
+}
+
+function MarketingAuditResultView({ results }: { results: MarketingAuditResult }) {
+  const sectionTitle: React.CSSProperties = {
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 13,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: B.oxford,
+    margin: "24px 0 10px",
+  };
+  const para: React.CSSProperties = {
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 13,
+    color: "#2a2a2a",
+    lineHeight: 1.6,
+    marginBottom: 8,
+  };
+  const th: React.CSSProperties = {
+    padding: "8px 10px",
+    textAlign: "left",
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 11,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: "white",
+    background: B.oxford,
+  };
+  const tierLabel = (label: string, color: string): React.CSSProperties => ({
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 12,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color,
+    margin: "12px 0 6px",
+  });
+
+  const renderRecs = (recs: { action: string; detail: string }[], label: string, color: string) =>
+    recs.length > 0 && (
+      <div>
+        <div style={tierLabel(label, color)}>{label}</div>
+        {recs.map((r, i) => (
+          <div key={i} style={{ ...para, marginBottom: 6 }}>
+            <strong style={{ color: B.oxford }}>{r.action}.</strong> {r.detail}
+          </div>
+        ))}
+      </div>
+    );
+
+  return (
+    <div>
+      {/* Executive Summary */}
+      {results.executiveSummary.length > 0 && (
+        <>
+          <div style={sectionTitle}>Executive Summary</div>
+          {results.executiveSummary.map((p, i) => (
+            <p key={i} style={para}>{p}</p>
+          ))}
+        </>
+      )}
+
+      {/* Website Findings */}
+      {results.websiteFindings.length > 0 && (
+        <>
+          <div style={sectionTitle}>Website Audit Findings</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              {results.websiteFindings.map((f, i) => {
+                const s = MK_STATUS[f.status] || MK_STATUS.amber;
+                return (
+                  <tr key={i}>
+                    <td style={{ padding: "8px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", width: 190, fontWeight: 600 }}>
+                      {f.label}
+                    </td>
+                    <td style={{ padding: "8px 10px", background: s.bg, borderBottom: "1px solid #eef0f2", width: 70 }}>
+                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: s.fg }}>{s.label}</span>
+                    </td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", lineHeight: 1.45 }}>
+                      {f.note}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {/* Critical Issues */}
+      {results.criticalIssues.length > 0 && (
+        <>
+          <div style={sectionTitle}>Critical Issues Impacting Leasing</div>
+          {results.criticalIssues.map((issue, i) => (
+            <div key={i} style={{ marginBottom: 12, paddingLeft: 4 }}>
+              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: B.oxford }}>
+                {i + 1}. {issue.title}
+              </div>
+              <div style={{ ...para, marginBottom: 4 }}>{issue.observed}</div>
+              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.tangelo, lineHeight: 1.5 }}>
+                <strong>Impact:</strong> {issue.impact}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* ILS & Google Consistency */}
+      {results.consistency.length > 0 && (
+        <>
+          <div style={sectionTitle}>ILS &amp; Google Consistency Check</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, background: "#faf5ee", color: "#666" }}>Data Point</th>
+                <th style={th}>Apartments.com</th>
+                <th style={th}>Google</th>
+                <th style={th}>Website</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.consistency.map((row, i) => (
+                <tr key={i}>
+                  <td style={{ padding: "8px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", fontWeight: 600, width: 150 }}>
+                    {row.label}
+                  </td>
+                  <MkStatusCell cell={row.apartments} />
+                  <MkStatusCell cell={row.google} />
+                  <MkStatusCell cell={row.website} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {/* Recommendations */}
+      {(results.recommendations.immediate.length > 0 ||
+        results.recommendations.high.length > 0 ||
+        results.recommendations.ongoing.length > 0) && (
+        <>
+          <div style={sectionTitle}>Recommendations to Drive More Leases</div>
+          {renderRecs(results.recommendations.immediate, "Immediate Priority — This Week", B.tangelo)}
+          {renderRecs(results.recommendations.high, "High Priority — Within 2 Weeks", B.caribbean)}
+          {renderRecs(results.recommendations.ongoing, "Ongoing Optimization", B.oxford)}
+        </>
+      )}
+
+      {/* Summary */}
+      {results.summary.length > 0 && (
+        <>
+          <div style={sectionTitle}>Summary</div>
+          {results.summary.map((p, i) => (
+            <p key={i} style={para}>{p}</p>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ================= MAIN APP ======================================= */
 const TABS = [
-  { id: "llm", label: "LLM Visibility" },
+  { id: "marketing", label: "Marketing Audit" },
   { id: "seo", label: "SEO & Rank Check" },
+  { id: "llm", label: "LLM Visibility" },
   { id: "content", label: "Content Generator" },
 ];
 
@@ -3734,7 +4220,7 @@ export default function MarketingHub() {
     exportProperty,
     importProperty,
   } = useRoster();
-  const [tab, setTab] = useState("llm");
+  const [tab, setTab] = useState("marketing");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -3981,6 +4467,7 @@ export default function MarketingHub() {
           ))}
         </div>
 
+        {tab === "marketing" && <MarketingAuditTab property={property} onUpdateProperty={updateActive} />}
         {tab === "llm" && <LLMTab property={property} onUpdateProperty={updateActive} />}
         {tab === "seo" && <SEOTab property={property} onUpdateProperty={updateActive} />}
         {tab === "content" && <ContentTab property={property} />}
