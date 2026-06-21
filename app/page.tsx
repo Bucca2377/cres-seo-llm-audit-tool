@@ -3679,6 +3679,7 @@ function PrintableReport({ property }: { property: Property }) {
   const llmRecs = property.llmAuditRecommendations;
   const llmTs = property.llmAuditTimestamp;
   const seo = property.seoAudit;
+  const mkt = property.marketingAudit;
 
   const now = new Date();
   const monthYear = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -3907,6 +3908,151 @@ function PrintableReport({ property }: { property: Property }) {
           </div>
           <div style={{ fontSize: 12, color: PRINT_MUTED }}>Prepared by: CRES</div>
         </section>
+
+        {/* ============ MARKETING AUDIT FINDINGS ============ */}
+        {mkt && (
+          <section className="pb-before">
+            <PrintSectionHeader>Marketing Audit</PrintSectionHeader>
+            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
+              Audited {new Date(mkt.timestamp).toLocaleString()}. Sources: website, Apartments.com, Google Business Profile.
+            </p>
+
+            {/* Executive Summary */}
+            {mkt.executiveSummary.length > 0 && (
+              <div className="pb-avoid" style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Executive Summary
+                </div>
+                {mkt.executiveSummary.map((p, i) => (
+                  <p key={i} style={bodyP}>{p}</p>
+                ))}
+              </div>
+            )}
+
+            {/* Website Findings */}
+            {mkt.websiteFindings.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Website Audit Findings
+                </div>
+                <table>
+                  <tbody>
+                    {mkt.websiteFindings.map((f, i) => {
+                      const s = MK_STATUS[f.status] || MK_STATUS.amber;
+                      return (
+                        <tr key={i} className="pb-avoid">
+                          <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 150 }}>{f.label}</td>
+                          <td style={{ ...findingsTd, background: s.bg, fontWeight: 700, color: s.fg, width: 60, textAlign: "center" }}>{s.label}</td>
+                          <td style={findingsTd}>{f.note}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Critical Issues */}
+            {mkt.criticalIssues.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Critical Issues Impacting Leasing
+                </div>
+                {mkt.criticalIssues.map((issue, i) => (
+                  <div key={i} className="pb-avoid" style={{ marginBottom: 9 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, color: PRINT_NAVY }}>
+                      {i + 1}. {issue.title}
+                    </div>
+                    <p style={{ ...bodyP, margin: "2px 0 2px 0" }}>{issue.observed}</p>
+                    <p style={{ ...bodyP, margin: 0, color: "#b14a2a" }}>
+                      <strong style={{ color: "#b14a2a" }}>Impact:</strong> {issue.impact}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ILS & Google Consistency */}
+            {mkt.consistency.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  ILS &amp; Google Consistency Check
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ ...findingsTh, background: "#faf5ee", color: "#666" }}>Data Point</th>
+                      <th style={findingsTh}>Apartments.com</th>
+                      <th style={findingsTh}>Google</th>
+                      <th style={findingsTh}>Website</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mkt.consistency.map((row, i) => {
+                      const cell = (c: { status: MarketingStatus; note: string }) => {
+                        const s = MK_STATUS[c.status] || MK_STATUS.amber;
+                        return (
+                          <td style={{ ...findingsTd, background: s.bg }}>
+                            <strong style={{ color: s.fg }}>{s.label}.</strong> {c.note}
+                          </td>
+                        );
+                      };
+                      return (
+                        <tr key={i} className="pb-avoid">
+                          <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 110 }}>{row.label}</td>
+                          {cell(row.apartments)}
+                          {cell(row.google)}
+                          {cell(row.website)}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Marketing Recommendations — its own section, not merged with SEO/LLM */}
+            {(mkt.recommendations.immediate.length > 0 ||
+              mkt.recommendations.high.length > 0 ||
+              mkt.recommendations.ongoing.length > 0) && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Recommendations to Drive More Leases
+                </div>
+                {([
+                  ["Immediate Priority — This Week", "#b14a2a", mkt.recommendations.immediate],
+                  ["High Priority — Within 2 Weeks", PRINT_TEAL, mkt.recommendations.high],
+                  ["Ongoing Optimization", PRINT_NAVY, mkt.recommendations.ongoing],
+                ] as [string, string, { action: string; detail: string }[]][]).map(([label, color, recs]) =>
+                  recs.length > 0 ? (
+                    <div key={label} className="pb-avoid" style={{ marginBottom: 8 }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color, marginBottom: 3 }}>
+                        {label}
+                      </div>
+                      {recs.map((r, i) => (
+                        <p key={i} style={{ ...bodyP, margin: "0 0 3px 0" }}>
+                          <strong style={{ color: PRINT_NAVY }}>{r.action}.</strong> {r.detail}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null
+                )}
+              </div>
+            )}
+
+            {/* Marketing Summary */}
+            {mkt.summary.length > 0 && (
+              <div className="pb-avoid">
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Summary
+                </div>
+                {mkt.summary.map((p, i) => (
+                  <p key={i} style={bodyP}>{p}</p>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* ============ SEO RANK FINDINGS ============ */}
         {seo && (
