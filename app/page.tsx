@@ -4266,6 +4266,206 @@ function dedupeRecCards(cards: RecommendationCard[]): RecommendationCard[] {
   return kept;
 }
 
+/** Standalone printed Resident Review Audit (its own PDF, not combined). */
+function ReviewAuditReport({ property }: { property: Property }) {
+  const ra = property.reviewAudit;
+  const now = new Date();
+  const monthYear = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const cssName = property.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const pageStyles = `
+@media print {
+  @page {
+    size: letter;
+    margin: 0.85in 0.65in 0.75in 0.65in;
+    @top-left {
+      content: "CRES  |  Resident Review Audit  |  ${cssName}  |  ${monthYear}";
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 8.5pt;
+      color: #062347;
+      margin-top: 0.4in;
+    }
+    @bottom-center {
+      content: "Confidential – Prepared by CRES  |  Page " counter(page);
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 8.5pt;
+      color: #888;
+      margin-bottom: 0.4in;
+    }
+  }
+}`;
+  const bodyP: React.CSSProperties = { fontFamily: "'Josefin Sans', sans-serif", fontSize: 11, lineHeight: 1.6, color: PRINT_BODY, margin: "0 0 10px 0" };
+  const td: React.CSSProperties = { padding: "5px 8px", fontSize: 10, lineHeight: 1.45, color: PRINT_BODY, verticalAlign: "top", borderBottom: "0.5px solid #d8d8d8" };
+  const th: React.CSSProperties = { padding: "5px 8px", background: PRINT_NAVY, color: "white", textAlign: "left", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" };
+  const subHead: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, margin: "0 0 6px 0" };
+
+  const sentTable = (rows: ReviewSentimentRow[]) => (
+    <table style={{ marginBottom: 14 }}>
+      <thead>
+        <tr>
+          <th style={th}>Theme</th>
+          <th style={{ ...th, width: 60, textAlign: "center" }}>Mentions</th>
+          <th style={{ ...th, width: 70 }}>Sentiment</th>
+          <th style={th}>CRES Recommendation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i} className="pb-avoid">
+            <td style={{ ...td, fontWeight: 600, color: PRINT_NAVY }}>{r.theme}</td>
+            <td style={{ ...td, textAlign: "center" }}>{r.count}</td>
+            <td style={{ ...td, fontWeight: 700, color: r.sentiment === "Positive" ? "#15803d" : r.sentiment === "Negative" ? "#b14a2a" : "#9a7200" }}>{r.sentiment}</td>
+            <td style={td}>{r.recommendation}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
+      <div className="printable-report" style={{ color: PRINT_BODY, fontFamily: "'Josefin Sans', sans-serif", fontSize: 11, lineHeight: 1.55 }}>
+        {/* Cover */}
+        <section style={{ textAlign: "center", paddingTop: "1.4in", marginBottom: "0.5in" }}>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 30, letterSpacing: "0.04em", color: PRINT_NAVY }}>RESIDENT REVIEW AUDIT</div>
+          <div style={{ width: 80, height: 3, background: "#f25620", margin: "10px auto 18px" }} />
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 20, color: PRINT_NAVY }}>{property.name}</div>
+          <div style={{ fontSize: 12, color: "#222", marginTop: 4 }}>{property.address || ""}</div>
+          {ra && <div style={{ fontSize: 12, color: PRINT_MUTED, marginTop: 10 }}>Reporting Period: {ra.periodLabel} · {new Date(ra.timestamp).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>}
+          <div style={{ fontSize: 12, color: PRINT_MUTED, marginTop: 4 }}>Prepared by: CRES</div>
+        </section>
+
+        {!ra && (
+          <p style={bodyP}>No Review Audit has been run for this property yet. Run it from the Review Audit tab to populate this report.</p>
+        )}
+
+        {ra && (
+          <>
+            {/* KPIs */}
+            <div className="pb-avoid" style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+              {([
+                ["Current Rating", ra.kpis.currentRating !== null ? ra.kpis.currentRating.toFixed(1) : "—", `${ra.kpis.totalReviews ?? "—"} total`],
+                ["Prior Rating", ra.kpis.priorRating !== null ? ra.kpis.priorRating.toFixed(1) : "—", ra.kpis.priorIsEstimated ? "estimated" : "prior run"],
+                ["New Reviews", String(ra.kpis.newReviews), ra.periodLabel],
+                ["Response Rate", ra.kpis.responseRatePeriod !== null ? `${ra.kpis.responseRatePeriod}%` : "—", "owner replies"],
+              ] as [string, string, string][]).map(([label, val, sub]) => (
+                <div key={label} style={{ flex: 1, padding: "9px 12px", border: "1px solid #cfcfcf", borderLeft: `3px solid ${PRINT_TEAL}` }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9, color: "#666", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: PRINT_NAVY, lineHeight: 1 }}>{val}</div>
+                  <div style={{ fontSize: 9, color: "#888", marginTop: 3 }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Breakdown */}
+            <PrintSectionHeader>{ra.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</PrintSectionHeader>
+            <table style={{ marginBottom: 8, width: "auto" }}>
+              <tbody>
+                <tr>
+                  {(["s5", "s4", "s3", "s2", "s1"] as const).map((key, idx) => (
+                    <td key={key} style={{ ...td, textAlign: "center", padding: "4px 14px" }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9, color: "#666" }}>{5 - idx} Star</div>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 18, color: PRINT_NAVY }}>{ra.starBreakdown[key]}</div>
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+            {ra.narratives.breakdown && <p style={bodyP}>{ra.narratives.breakdown}</p>}
+
+            {/* Rating Overview */}
+            {ra.narratives.ratingOverview && (
+              <>
+                <PrintSectionHeader>Rating Overview</PrintSectionHeader>
+                <p style={bodyP}>{ra.narratives.ratingOverview}</p>
+              </>
+            )}
+
+            {/* Sentiment 1 */}
+            {ra.sentimentHistorical.length > 0 && (
+              <>
+                <PrintSectionHeader>Sentiment Analysis 1 of 2: Historical Profile</PrintSectionHeader>
+                <p style={{ ...bodyP, fontSize: 9.5, color: "#777" }}>Google keyword tags across all {ra.kpis.totalReviews ?? ""} reviews — the cumulative reputation prospects see.</p>
+                {sentTable(ra.sentimentHistorical)}
+              </>
+            )}
+
+            {/* Sentiment 2 */}
+            {ra.sentimentPeriod.length > 0 && (
+              <>
+                <PrintSectionHeader>Sentiment Analysis 2 of 2: {ra.periodLabel}</PrintSectionHeader>
+                <p style={{ ...bodyP, fontSize: 9.5, color: "#777" }}>Themes from the new reviews this period.</p>
+                {sentTable(ra.sentimentPeriod)}
+              </>
+            )}
+
+            {/* Response gaps */}
+            {ra.responseGaps.length > 0 && (
+              <>
+                <PrintSectionHeader>Response Gaps &amp; Escalations</PrintSectionHeader>
+                {ra.responseGaps.map((g, i) => (
+                  <p key={i} style={{ ...bodyP, margin: "0 0 3px 0" }}>
+                    <strong style={{ color: g.rating <= 2 ? "#b14a2a" : PRINT_NAVY }}>{g.reviewer} ({g.rating}★):</strong> {g.reason}
+                  </p>
+                ))}
+              </>
+            )}
+
+            {/* Response quality */}
+            {ra.responseQuality.length > 0 && (
+              <>
+                <PrintSectionHeader>Owner Response Quality</PrintSectionHeader>
+                {ra.responseQuality.map((q, i) => (
+                  <div key={i} className="pb-avoid" style={{ marginBottom: 8 }}>
+                    <p style={{ ...bodyP, margin: "0 0 2px 0" }}><strong style={{ color: PRINT_NAVY }}>{q.reviewer}:</strong> {q.issue}</p>
+                    <p style={{ ...bodyP, margin: 0, color: "#15803d", paddingLeft: 10, borderLeft: "2px solid #93b2ab" }}>Suggested: {q.suggestedRewrite}</p>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* New reviews */}
+            {ra.reviews.length > 0 && (
+              <>
+                <PrintSectionHeader>New Reviews ({ra.reviews.length})</PrintSectionHeader>
+                {ra.reviews.map((r, i) => (
+                  <div key={i} className="pb-avoid" style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 10.5 }}>
+                      <strong style={{ color: PRINT_NAVY }}>{r.name}</strong>{" "}
+                      <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, color: r.rating >= 4 ? "#15803d" : r.rating <= 2 ? "#b14a2a" : "#9a7200" }}>{r.rating}★</span>{" "}
+                      <span style={{ color: "#999" }}>{r.relativeDate}</span>
+                      {r.hasResponse && <span style={{ color: "#15803d", fontSize: 9 }}> · replied</span>}
+                    </div>
+                    <div style={{ fontSize: 10, color: r.text ? "#444" : "#aaa", fontStyle: r.text ? "normal" : "italic", lineHeight: 1.45 }}>{r.text || "[No written review text submitted]"}</div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* Recommendations */}
+            {isStructuredRecs(ra.recommendations) && (
+              <section className="pb-before">
+                <PrintSectionHeader>CRES Recommendations</PrintSectionHeader>
+                {ra.recommendations.map((card, i) => (
+                  <PrintRecCard key={i} card={card} />
+                ))}
+              </section>
+            )}
+
+            {/* Summary */}
+            {ra.narratives.summary && (
+              <>
+                <div style={{ ...subHead, marginTop: 14 }}>Summary</div>
+                <p style={bodyP}>{ra.narratives.summary}</p>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 function PrintableReport({ property }: { property: Property }) {
   const llmRecs = property.llmAuditRecommendations;
   const llmTs = property.llmAuditTimestamp;
@@ -4943,6 +5143,18 @@ export default function MarketingHub() {
   } = useRoster();
   const [tab, setTab] = useState("marketing");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which report to print: the combined Marketing/SEO/LLM doc, or the
+  // standalone Review Audit. Set just before window.print() so only the
+  // targeted .printable-report is in the DOM.
+  const [printTarget, setPrintTarget] = useState<"combined" | "review">("combined");
+  const [printNonce, setPrintNonce] = useState(0);
+  useEffect(() => {
+    if (printNonce > 0) window.print();
+  }, [printNonce]);
+  const doPrint = (target: "combined" | "review") => {
+    setPrintTarget(target);
+    setPrintNonce((n) => n + 1);
+  };
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
 
@@ -5155,7 +5367,7 @@ export default function MarketingHub() {
             <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#22c55e" }}>Live AI</span>
           </div>
           <button
-            onClick={() => window.print()}
+            onClick={() => doPrint(tab === "reviews" ? "review" : "combined")}
             style={{
               background: "rgba(255,255,255,0.1)",
               border: "1px solid rgba(255,255,255,0.15)",
@@ -5169,9 +5381,13 @@ export default function MarketingHub() {
               alignItems: "center",
               gap: 6,
             }}
-            title="Open the browser print dialog. Choose 'Save as PDF' as the destination to download a PDF of the current tab's findings."
+            title={
+              tab === "reviews"
+                ? "Print the Resident Review Audit as its own PDF. Choose 'Save as PDF' as the destination."
+                : "Open the browser print dialog. Choose 'Save as PDF' to download a PDF of the Marketing / SEO / LLM findings."
+            }
           >
-            <span>📄</span> Print Report
+            <span>📄</span> {tab === "reviews" ? "Print Review Audit" : "Print Report"}
           </button>
           <button onClick={() => setSettingsOpen(true)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>⚙</span> Edit
@@ -5195,7 +5411,11 @@ export default function MarketingHub() {
         {tab === "content" && <ContentTab property={property} />}
       </div>
 
-      <PrintableReport property={property} />
+      {printTarget === "review" ? (
+        <ReviewAuditReport property={property} />
+      ) : (
+        <PrintableReport property={property} />
+      )}
 
       <PropertySettings
         open={settingsOpen}
