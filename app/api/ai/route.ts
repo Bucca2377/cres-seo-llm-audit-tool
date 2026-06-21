@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     // can still find the listing if a URL is missing. web_fetch is a beta tool.
     payload.tools = [
       { type: "web_search_20250305", name: "web_search" },
-      { type: "web_fetch_20250910", name: "web_fetch", max_uses: 12 },
+      { type: "web_fetch_20250910", name: "web_fetch", max_uses: 20 },
     ];
     headers["anthropic-beta"] = "web-fetch-2025-09-10";
   } else if (body.useWebSearch) {

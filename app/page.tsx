@@ -3058,7 +3058,8 @@ function MarketingAuditTab({
         /* best-effort */
       }
       const aptStatusBlock = current.apartmentsUrl
-        ? `APARTMENTS.COM STATUS: A specific listing URL was provided${aptConfirmed ? ", and an Apartments.com listing for this property is confirmed live and indexed on Google" : ""}. Treat the listing as ACTIVE — mark "currently advertising / active" GREEN. Only mark it "not advertising" (red) if the fetched page LITERALLY contains text like "not currently advertising on Apartments.com". If the fetch returns no listing content, that is bot protection, not absence — mark the dynamic rows AMBER "Requires Client Verification", never red.`
+        ? `APARTMENTS.COM — YOU MUST FETCH THIS URL: ${current.apartmentsUrl}
+Apartments.com server-renders its full listing for SEO, so the fetch returns the complete units/pricing table, photos, specials, and office hours. FETCH IT and report the ACTUAL data you see: how many available units, the price range, availability dates, any move-in special (with expiration), photo count, and office hours.${aptConfirmed ? " (An Apartments.com listing for this property is confirmed live and indexed on Google.)" : ""} The listing is ACTIVE — mark "currently advertising / active" GREEN. Only mark "not advertising" red if the fetched page LITERALLY says "not currently advertising on Apartments.com". Never report "no units shown" — if you somehow get no content, retry the fetch once, then mark dynamic rows AMBER, never red.`
         : `APARTMENTS.COM STATUS: No listing URL was provided. Mark Apartments.com cells "Requires Client Verification" and note no URL was provided. Do not invent.`;
 
       // --- Build the analysis prompt ---
@@ -3077,11 +3078,11 @@ ${aptStatusBlock}
 
 ${gbpBlock}
 
-STATIC-FETCH RULES (critical — a fetched page is static HTML; JavaScript widgets do NOT render. This is the #1 source of false negatives, so apply strictly):
-- These elements are ALWAYS JavaScript-rendered and will be MISSING from a static fetch even when fully present and working: pricing/availability tables and floor-plan widgets (Entrata, RealPage, Yardi, Apartments.com), photo galleries, virtual/3D tours, tour-scheduling tools (Knock, Tour24), and Apply Now portals. When you do not see one of these in the fetched HTML, the correct status is AMBER "Requires Client Verification" — NEVER red. Say live confirmation is needed.
-- Mark something RED ONLY when its absence is structurally confirmed: there is no link, button, container, embed, or anchor for it anywhere, or a CTA points to a placeholder like "#!".
-- "No pricing", "no floor plans", "no virtual tour", "no application" are NOT valid red findings if the site has a Floor Plans / Photos / Apply page or link — those pages render their content via JS. Use AMBER for those.
-- APARTMENTS.COM SPECIFICALLY: its pricing/units table, photos, and tour tools are JS-rendered and the site is bot-protected, so a static fetch usually returns the listing WITHOUT them even when 5+ units are actively advertised. Do NOT conclude "not currently advertising" or "no units shown" from an empty fetch. Only mark "not advertising" red if the page LITERALLY says so (see APARTMENTS.COM STATUS above).
+FETCH RULES (apply strictly — false negatives are the #1 failure mode):
+- APARTMENTS.COM content IS fully fetchable (it server-renders units, pricing, photos, specials, and hours for SEO). READ it and report the real data. Do NOT treat it as unreadable, bot-blocked, or "no units".
+- The PROPERTY WEBSITE's own embedded widgets are the JS-rendered exception: live availability/pricing tables and floor-plan modals (Entrata, RealPage, Yardi), photo lightboxes, virtual/3D tour embeds, tour-scheduling modals (Knock, Tour24), and Apply Now portals may NOT render in a static fetch of the property site. When one of these is missing from the property-site fetch but a corresponding page/link exists (a Floor Plans, Photos, or Apply nav link), the status is AMBER "Requires Client Verification" — NEVER red.
+- Mark something RED ONLY when its absence is structurally confirmed: no link, button, container, embed, or anchor for it anywhere, or a CTA points to a placeholder like "#!".
+- "No pricing / floor plans / virtual tour / application" is NOT a valid red finding if a Floor Plans / Photos / Apply page or link exists. Use AMBER.
 - Flag genuine cross-platform discrepancies (hours differing day-by-day, conflicting amenities). Do NOT manufacture discrepancies from data that simply did not render.
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy or issue. Different tracking numbers are intentional for lead-source attribution; treat them as expected, never a problem.
 
