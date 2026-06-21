@@ -124,8 +124,13 @@ export interface Property {
   marketingAudit?: MarketingAuditResult;
 }
 
-/** Green = found & functional, amber = present/unverified, red = absent/broken. */
-export type MarketingStatus = "green" | "amber" | "red";
+/**
+ * green = found & functional, amber = present/unverified/requires verification,
+ * red = absent/broken, na = not applicable to this platform (e.g. a Google
+ * Business Profile does not carry concessions, preferred employers, or an
+ * online application — those rows should read N/A, not a warning).
+ */
+export type MarketingStatus = "green" | "amber" | "red" | "na";
 
 export interface MarketingFinding {
   label: string;
@@ -151,11 +156,6 @@ export interface MarketingCriticalIssue {
   impact: string;
 }
 
-export interface MarketingRec {
-  action: string;
-  detail: string;
-}
-
 /**
  * Structured result of the Marketing Audit (website + Apartments.com + Google
  * consistency). Persisted on the property so the tab and the printable report
@@ -166,11 +166,8 @@ export interface MarketingAuditResult {
   websiteFindings: MarketingFinding[];
   criticalIssues: MarketingCriticalIssue[];
   consistency: MarketingConsistencyRow[];
-  recommendations: {
-    immediate: MarketingRec[];
-    high: MarketingRec[];
-    ongoing: MarketingRec[];
-  };
+  /** Same structured-card format as the SEO/LLM audits, for visual consistency. */
+  recommendations: AuditRecommendations;
   summary: string[];
   /** Echoes the URLs audited, for the report header. */
   sources: { website?: string; apartments?: string; google?: string };

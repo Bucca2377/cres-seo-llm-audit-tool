@@ -2927,6 +2927,7 @@ const MK_STATUS: Record<MarketingStatus, { bg: string; fg: string; label: string
   green: { bg: "#E0F0E8", fg: "#15803d", label: "Good" },
   amber: { bg: "#fff2dd", fg: "#9a7200", label: "Check" },
   red: { bg: "#FCE4E4", fg: "#b14a2a", label: "Issue" },
+  na: { bg: "#f4f6f8", fg: "#9aa3ad", label: "N/A" },
 };
 
 function MkStatusCell({ cell }: { cell: { status: MarketingStatus; note: string } }) {
@@ -3060,11 +3061,16 @@ STATIC-FETCH RULES (critical — a fetched page is static HTML; JavaScript widge
 - Only mark something RED when its absence is structurally confirmed.
 - If the Apartments.com page shows "not currently advertising," that is a RED critical issue, not a minor note.
 - Flag cross-platform discrepancies (hours differing day-by-day, conflicting pricing, amenities on one platform not another).
+- DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy or issue. Different tracking numbers are intentional for lead-source attribution; treat them as expected, never a problem.
+
+PLATFORM SCOPE (important — avoids false warnings on Google):
+- A Google Business Profile only carries: active presence, hours, photos, rating/reviews, and the website link. It does NOT carry pricing, concessions, preferred employers, an online application, self-service tour scheduling, or virtual tours in the ILS sense.
+- For any consistency row that a platform does not carry by design, set that platform's status to "na" with a one-word note like "Not a Google feature" — do NOT use "amber"/"check" just because the data isn't there. Only the rows Google actually carries should be green/amber/red.
 
 WRITING RULES:
 - Be concise and scannable. Short sentences. No filler, no restating the obvious, no "Note:" sections.
 - Plain English for a property manager. Do NOT use hyphens, em dashes, or en dashes as sentence punctuation; use separate sentences.
-- Status values are exactly "green" (found & functional), "amber" (present but incomplete/unverified/requires client verification), or "red" (confirmed absent or broken).
+- Status values are exactly "green" (found & functional), "amber" (present but incomplete/unverified/requires client verification), "red" (confirmed absent or broken), or "na" (not applicable to that platform — use for Google rows it does not carry).
 
 Return ONLY this JSON object, no prose before or after:
 {
@@ -3094,13 +3100,25 @@ Return ONLY this JSON object, no prose before or after:
     {"label":"Tour scheduling","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
     {"label":"Online application","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}}
   ],
-  "recommendations": {
-    "immediate": [{"action":"bolded action","detail":"one concise line of what to do and why"}],
-    "high": [{"action":"...","detail":"..."}],
-    "ongoing": [{"action":"...","detail":"..."}]
-  },
+  "recommendations": [
+    {
+      "priority": "QUICK WIN" | "FOUNDATIONAL" | "CONTENT" | "STRATEGIC",
+      "title": "Imperative phrase, max 12 words, no period",
+      "what": "1-3 sentences. The concrete action. Name the page/platform/tool. No hedging.",
+      "why": "1-2 sentences. The observed gap + its impact on lease conversion.",
+      "effort": "Format: '~<time> · <who>'. e.g. '~30 min · marketing manager', '~1 week · web vendor'.",
+      "success": "Measurable outcome with timeframe.",
+      "source": "Which finding this addresses, e.g. 'Virtual tour missing on website + Apartments.com'."
+    }
+  ],
   "summary": ["paragraph 1: strongest assets + most urgent gap", "paragraph 2: the 2-3 actions most likely to drive leases"]
-}`;
+}
+
+RECOMMENDATION RULES (match the rest of the app exactly):
+- EXACTLY 5 recommendations, ordered highest impact first.
+- "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
+- "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
+- Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.`;
 
       const data = await callAI({ prompt, webFetch: true, maxTokens: 6000 });
       const text = (data.content || [])
@@ -3111,16 +3129,15 @@ Return ONLY this JSON object, no prose before or after:
       if (!match) throw new Error("The audit did not return a structured result. Try again.");
       const parsed = JSON.parse(match[0]) as Partial<MarketingAuditResult>;
 
+      const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
+        ? (parsed.recommendations as RecommendationCard[])
+        : [];
       const result: MarketingAuditResult = {
         executiveSummary: parsed.executiveSummary || [],
         websiteFindings: parsed.websiteFindings || [],
         criticalIssues: parsed.criticalIssues || [],
         consistency: parsed.consistency || [],
-        recommendations: {
-          immediate: parsed.recommendations?.immediate || [],
-          high: parsed.recommendations?.high || [],
-          ongoing: parsed.recommendations?.ongoing || [],
-        },
+        recommendations: recs,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
         timestamp: new Date().toISOString(),
@@ -3272,28 +3289,6 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
     color: "white",
     background: B.oxford,
   };
-  const tierLabel = (label: string, color: string): React.CSSProperties => ({
-    fontFamily: "'Barlow Condensed',sans-serif",
-    fontWeight: 700,
-    fontSize: 12,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    color,
-    margin: "12px 0 6px",
-  });
-
-  const renderRecs = (recs: { action: string; detail: string }[], label: string, color: string) =>
-    recs.length > 0 && (
-      <div>
-        <div style={tierLabel(label, color)}>{label}</div>
-        {recs.map((r, i) => (
-          <div key={i} style={{ ...para, marginBottom: 6 }}>
-            <strong style={{ color: B.oxford }}>{r.action}.</strong> {r.detail}
-          </div>
-        ))}
-      </div>
-    );
-
   return (
     <div>
       {/* Executive Summary */}
@@ -3380,15 +3375,11 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
         </>
       )}
 
-      {/* Recommendations */}
-      {(results.recommendations.immediate.length > 0 ||
-        results.recommendations.high.length > 0 ||
-        results.recommendations.ongoing.length > 0) && (
+      {/* Recommendations — same card format as the SEO/LLM tabs */}
+      {isStructuredRecs(results.recommendations) && (
         <>
           <div style={sectionTitle}>Recommendations to Drive More Leases</div>
-          {renderRecs(results.recommendations.immediate, "Immediate Priority — This Week", B.tangelo)}
-          {renderRecs(results.recommendations.high, "High Priority — Within 2 Weeks", B.caribbean)}
-          {renderRecs(results.recommendations.ongoing, "Ongoing Optimization", B.oxford)}
+          <RecommendationsBlock recs={results.recommendations} />
         </>
       )}
 
@@ -4011,32 +4002,16 @@ function PrintableReport({ property }: { property: Property }) {
               </div>
             )}
 
-            {/* Marketing Recommendations — its own section, not merged with SEO/LLM */}
-            {(mkt.recommendations.immediate.length > 0 ||
-              mkt.recommendations.high.length > 0 ||
-              mkt.recommendations.ongoing.length > 0) && (
+            {/* Marketing Recommendations — same card format as SEO/LLM, kept
+                as its own section (not merged into the combined card block). */}
+            {isStructuredRecs(mkt.recommendations) && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
                   Recommendations to Drive More Leases
                 </div>
-                {([
-                  ["Immediate Priority — This Week", "#b14a2a", mkt.recommendations.immediate],
-                  ["High Priority — Within 2 Weeks", PRINT_TEAL, mkt.recommendations.high],
-                  ["Ongoing Optimization", PRINT_NAVY, mkt.recommendations.ongoing],
-                ] as [string, string, { action: string; detail: string }[]][]).map(([label, color, recs]) =>
-                  recs.length > 0 ? (
-                    <div key={label} className="pb-avoid" style={{ marginBottom: 8 }}>
-                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color, marginBottom: 3 }}>
-                        {label}
-                      </div>
-                      {recs.map((r, i) => (
-                        <p key={i} style={{ ...bodyP, margin: "0 0 3px 0" }}>
-                          <strong style={{ color: PRINT_NAVY }}>{r.action}.</strong> {r.detail}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null
-                )}
+                {mkt.recommendations.map((card, i) => (
+                  <PrintRecCard key={i} card={card} />
+                ))}
               </div>
             )}
 
