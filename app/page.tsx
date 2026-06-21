@@ -3078,12 +3078,13 @@ ${aptStatusBlock}
 
 ${gbpBlock}
 
-FETCH RULES (apply strictly — false negatives are the #1 failure mode):
-- APARTMENTS.COM content IS fully fetchable (it server-renders units, pricing, photos, specials, and hours for SEO). READ it and report the real data. Do NOT treat it as unreadable, bot-blocked, or "no units".
-- The PROPERTY WEBSITE's own embedded widgets are the JS-rendered exception: live availability/pricing tables and floor-plan modals (Entrata, RealPage, Yardi), photo lightboxes, virtual/3D tour embeds, tour-scheduling modals (Knock, Tour24), and Apply Now portals may NOT render in a static fetch of the property site. When one of these is missing from the property-site fetch but a corresponding page/link exists (a Floor Plans, Photos, or Apply nav link), the status is AMBER "Requires Client Verification" — NEVER red.
-- Mark something RED ONLY when its absence is structurally confirmed: no link, button, container, embed, or anchor for it anywhere, or a CTA points to a placeholder like "#!".
-- "No pricing / floor plans / virtual tour / application" is NOT a valid red finding if a Floor Plans / Photos / Apply page or link exists. Use AMBER.
-- Flag genuine cross-platform discrepancies (hours differing day-by-day, conflicting amenities). Do NOT manufacture discrepancies from data that simply did not render.
+FETCH RULES (apply strictly — report what you ACTUALLY SEE in the fetched content; never assume):
+- READ the fetched content and report real data. Apartments.com AND most property sites (including Entrata) server-render pricing, floor plans, photos, and specials directly in the HTML. If those are present in what you fetched, mark them GREEN with the actual numbers/details. Do NOT hedge readable data to amber.
+- You MUST fetch the Floor Plans / Pricing page and the Photos page before judging pricing, photos, or virtual tour. Do not judge those from the homepage alone.
+- Use AMBER "Requires Client Verification" ONLY when a feature's page or link exists but its content genuinely did NOT render in the fetch — a true empty JS-only widget or modal: a "Schedule a Tour" button that opens a JS scheduler (Knock/Tour24), an availability widget that returned an empty container, or an Apply portal behind a login. Say live confirmation is needed.
+- Mark RED only when absence is structurally confirmed across what you fetched: no link, button, container, embed, or content for it anywhere (e.g. no virtual tour / 3D tour / video embed on the Photos page AND none on the listing).
+- "No pricing / floor plans / application" is NOT valid red if that page renders the data (read it, mark green) or if the page/link exists but content didn't render (amber).
+- Flag genuine cross-platform discrepancies only (hours differing day-by-day, conflicting amenities). Do NOT manufacture discrepancies from data that did not render.
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy or issue. Different tracking numbers are intentional for lead-source attribution; treat them as expected, never a problem.
 
 PLATFORM SCOPE (important — avoids false warnings on Google):
