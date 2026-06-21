@@ -8,6 +8,10 @@ interface SerpRequest {
   location?: string;
   engine?: "google" | "google_maps" | "google_maps_reviews";
   data_id?: string;
+  /** google_maps_reviews: "newestFirst" | "mostRelevant" | "highestRating" | "lowestRating". */
+  sort_by?: string;
+  /** google_maps_reviews: pagination cursor from serpapi_pagination.next_page_token. */
+  next_page_token?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -53,6 +57,8 @@ export async function POST(req: NextRequest) {
   if (engine === "google_maps_reviews") {
     baseParams.data_id = body.data_id as string;
     baseParams.hl = "en";
+    if (body.sort_by) baseParams.sort_by = body.sort_by;
+    if (body.next_page_token) baseParams.next_page_token = body.next_page_token;
   } else {
     baseParams.q = body.query as string;
     baseParams.hl = "en";

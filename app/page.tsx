@@ -15,6 +15,13 @@ import {
   type RecommendationPriority,
   type MarketingAuditResult,
   type MarketingStatus,
+  type ReviewAuditResult,
+  type ReviewPeriod,
+  type ReviewSnapshot,
+  type ReviewSentimentRow,
+  type ReviewItem,
+  type ReviewResponseGap,
+  type ReviewResponseQualityFlag,
 } from "@/lib/property";
 import PropertySettings from "./property-settings";
 
@@ -3420,9 +3427,578 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
   );
 }
 
+/* ================= REVIEW AUDIT TAB ============================== */
+function reviewHasResponse(r: any): boolean {
+  const c = r?.response;
+  if (!c) return false;
+  if (typeof c === "string") return c.trim().length > 0;
+  if (typeof c === "object") return Object.keys(c).length > 0;
+  return false;
+}
+function reviewResponseText(r: any): string {
+  const c = r?.response;
+  if (!c) return "";
+  if (typeof c === "string") return c.trim();
+  if (typeof c === "object") return (c.snippet || c.text || c.extracted_snippet || "").trim();
+  return "";
+}
+const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string }[] = [
+  { id: "1mo", label: "Last 1 month", days: 31, windowLabel: "Last 30 days" },
+  { id: "6mo", label: "Last 6 months", days: 186, windowLabel: "Last 6 months" },
+];
+const STAR_COLORS = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"]; // 5★ → 1★
+
+function ReviewAuditTab({
+  property,
+  onUpdateProperty,
+}: {
+  property: Property;
+  onUpdateProperty: (p: Property) => void;
+}) {
+  const [period, setPeriod] = useState<ReviewPeriod>(property.reviewAudit?.period ?? "1mo");
+  const [stage, setStage] = useState<"idle" | "running" | "done">(property.reviewAudit ? "done" : "idle");
+  const [progress, setProgress] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<ReviewAuditResult | null>(property.reviewAudit ?? null);
+
+  useEffect(() => {
+    setResults(property.reviewAudit ?? null);
+    setPeriod(property.reviewAudit?.period ?? "1mo");
+    setStage(property.reviewAudit ? "done" : "idle");
+    setError(null);
+    setProgress("");
+  }, [property.id]);
+
+  const running = stage === "running";
+
+  const run = async () => {
+    setError(null);
+    setStage("running");
+    setResults(null);
+    let current: Property = property;
+
+    try {
+      // 1. Google listing → rating, total reviews, data_id.
+      setProgress("Finding the Google listing…");
+      const serpData = await callSerp({
+        query: buildGbpSearchQuery(current),
+        engine: "google_maps",
+        location: extractLocation(current.address),
+      });
+      const gbp = extractGBP(serpData, current);
+      const place = serpData?.place_results;
+      const dataId = gbp?.dataId || place?.data_id || "";
+      const currentRating = gbp?.rating ?? (typeof place?.rating === "number" ? place.rating : null);
+      const totalReviews = gbp?.reviewCount ?? (typeof place?.reviews === "number" ? place.reviews : null);
+      if (!dataId) {
+        throw new Error("Couldn't find this property's Google listing. Set the Google Business Profile URL in Property Settings, then retry.");
+      }
+
+      // Auto-capture gbpUrl/website if missing (same as other audits).
+      if (gbp) {
+        const patch = computeEnrichment(current, gbp);
+        if (Object.keys(patch).length > 0) current = { ...current, ...patch };
+      }
+
+      // 2. Page reviews newest-first until older than the window (cap 6 pages).
+      const periodDef = REVIEW_PERIODS.find((p) => p.id === period)!;
+      const cutoff = new Date(Date.now() - periodDef.days * 24 * 60 * 60 * 1000);
+      let allReviews: any[] = [];
+      let topics: { keyword: string; mentions: number }[] = [];
+      let token = "";
+      let truncated = false;
+      for (let pageNum = 0; pageNum < 6; pageNum++) {
+        setProgress(`Pulling reviews (page ${pageNum + 1})…`);
+        const resp: any = await callSerp({
+          engine: "google_maps_reviews",
+          data_id: dataId,
+          sort_by: "newestFirst",
+          ...(token ? { next_page_token: token } : {}),
+        });
+        if (pageNum === 0 && Array.isArray(resp?.topics)) {
+          topics = resp.topics
+            .filter((t: any) => t?.keyword)
+            .map((t: any) => ({ keyword: t.keyword, mentions: t.mentions || 0 }));
+        }
+        const batch: any[] = Array.isArray(resp?.reviews) ? resp.reviews : [];
+        allReviews = allReviews.concat(batch);
+        const oldest = batch[batch.length - 1];
+        const oldestDate = oldest?.iso_date ? new Date(oldest.iso_date) : null;
+        token = resp?.serpapi_pagination?.next_page_token || "";
+        // Stop once the page's oldest review predates the window, or no more pages.
+        if (!batch.length || !token || (oldestDate && oldestDate < cutoff)) {
+          if (token && oldestDate && oldestDate >= cutoff) truncated = true; // window may extend beyond what we paged
+          break;
+        }
+        if (pageNum === 5 && token) truncated = true;
+      }
+
+      // 3. Window + compute KPIs in code (never trust the model for counts).
+      const windowed = allReviews.filter((r) => {
+        if (!r?.iso_date) return false;
+        return new Date(r.iso_date) >= cutoff;
+      });
+      const star = { s1: 0, s2: 0, s3: 0, s4: 0, s5: 0 };
+      windowed.forEach((r) => {
+        const n = Math.round(r.rating || 0);
+        if (n === 1) star.s1++;
+        else if (n === 2) star.s2++;
+        else if (n === 3) star.s3++;
+        else if (n === 4) star.s4++;
+        else if (n === 5) star.s5++;
+      });
+      const newReviews = windowed.length;
+      const windowWithResp = windowed.filter(reviewHasResponse).length;
+      const responseRatePeriod = newReviews > 0 ? Math.round((windowWithResp / newReviews) * 100) : null;
+      const allWithResp = allReviews.filter(reviewHasResponse).length;
+      const responseRateAllTime = allReviews.length > 0 ? Math.round((allWithResp / allReviews.length) * 100) : null;
+
+      // Prior rating: prefer the most recent stored snapshot; else reverse-estimate.
+      const priorSnap = (current.reviewSnapshots || [])
+        .slice()
+        .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+      let priorRating: number | null = null;
+      let priorIsEstimated = false;
+      if (priorSnap && typeof priorSnap.rating === "number") {
+        priorRating = priorSnap.rating;
+      } else if (currentRating !== null && totalReviews && totalReviews > newReviews) {
+        const sumWindow = windowed.reduce((s, r) => s + (r.rating || 0), 0);
+        const est = (currentRating * totalReviews - sumWindow) / (totalReviews - newReviews);
+        priorRating = Math.round(est * 10) / 10;
+        priorIsEstimated = true;
+      }
+
+      const reviews: ReviewItem[] = windowed.map((r) => ({
+        name: r?.user?.name || "Anonymous",
+        relativeDate: r?.date || "",
+        isoDate: r?.iso_date || "",
+        rating: Math.round(r?.rating || 0),
+        text: (r?.snippet || r?.extracted_snippet || "").trim(),
+        hasResponse: reviewHasResponse(r),
+      }));
+      const responseGaps: ReviewResponseGap[] = [];
+      windowed.forEach((r) => {
+        const name = r?.user?.name || "Anonymous";
+        const rating = Math.round(r?.rating || 0);
+        if (!reviewHasResponse(r)) responseGaps.push({ reviewer: name, rating, reason: "No owner response posted yet" });
+        else if (rating <= 2) responseGaps.push({ reviewer: name, rating, reason: "Low rating — review the response tone and escalate internally" });
+      });
+
+      // 4. Claude: sentiment + response quality + narratives + recommendations.
+      setProgress("Analyzing sentiment and writing recommendations…");
+      const reviewLines = windowed
+        .map((r) => {
+          const name = r?.user?.name || "Anonymous";
+          const text = (r?.snippet || r?.extracted_snippet || "").trim() || "[no written text]";
+          const resp = reviewResponseText(r);
+          return `- ${name} (${Math.round(r?.rating || 0)}★, ${r?.date || "?"}): "${text}"${resp ? ` | OWNER REPLY: "${resp}"` : " | OWNER REPLY: none"}`;
+        })
+        .join("\n");
+      const topicLines = topics.length
+        ? topics.map((t) => `- ${t.keyword} (${t.mentions} mentions)`).join("\n")
+        : "(no keyword tags returned by Google)";
+
+      const prompt = `You are a CRES reputation analyst writing a Resident Review Audit for ${current.name} at ${current.address}. Reporting period: ${periodDef.windowLabel}.
+
+COMPUTED FACTS (authoritative — do NOT recompute or contradict these):
+- Current Google rating: ${currentRating ?? "unknown"} (${totalReviews ?? "?"} total reviews)
+- Prior rating: ${priorRating ?? "unknown"}${priorIsEstimated ? " (estimated)" : ""}
+- New reviews in period: ${newReviews} (★ breakdown — 5:${star.s5} 4:${star.s4} 3:${star.s3} 2:${star.s2} 1:${star.s1})
+- Owner response rate this period: ${responseRatePeriod ?? "n/a"}%
+
+GOOGLE KEYWORD TAGS (all-time, algorithmically generated by Google):
+${topicLines}
+
+NEW REVIEWS IN PERIOD (with owner replies):
+${reviewLines || "(no new reviews in this period)"}
+
+${CRES_PLAYBOOK}
+
+Return ONLY this JSON object, no prose:
+{
+  "narratives": {
+    "breakdown": "1-2 sentences summarizing the period's new-review star mix and owner-response coverage.",
+    "ratingOverview": "1-2 sentences on the current vs prior rating move and the lever to improve it.",
+    "summary": "2 short sentences: the headline reputation takeaway + the single most important action."
+  },
+  "sentimentHistorical": [
+    {"theme": "<one of the Google keyword tags>", "count": <its mention count>, "sentiment": "Positive|Negative|Mixed|Neutral", "recommendation": "1 sentence tying it to a CRES P&P solicitation tactic"}
+  ],
+  "sentimentPeriod": [
+    {"theme": "<theme from THIS period's review texts, name the staff member if a review names one>", "count": <# of period reviews on this theme>, "sentiment": "Positive|Negative|Mixed|Neutral", "recommendation": "1 sentence; if a 4/5-star review names a staff member call out the $25 incentive; if a 1/2-star, advise response review + internal escalation"}
+  ],
+  "responseQuality": [
+    {"reviewer": "<name>", "issue": "why the existing owner reply reads generic/templated", "suggestedRewrite": "a short, specific, personalized reply referencing the review or a brand differentiator"}
+  ],
+  "recommendations": [
+    {"priority": "QUICK WIN"|"FOUNDATIONAL"|"CONTENT"|"STRATEGIC", "title": "imperative, <=12 words", "what": "concrete action, name staff/incentive when relevant", "why": "the observed review data + impact", "effort": "~<time> · <who>", "success": "measurable outcome", "source": "which review finding"}
+  ]
+}
+
+RULES:
+- sentimentHistorical: one row per Google keyword tag above (skip if none).
+- sentimentPeriod: derive themes ONLY from the period review texts above; if a review names a staff member in a 4/5-star, note the $25 incentive per CRES P&P.
+- responseQuality: ONLY flag owner replies that are present but generic/templated; do not invent replies. Empty array if none.
+- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$200/$500 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names.`;
+
+      const data = await callAI({ prompt, maxTokens: 4000 });
+      const text = (data.content || [])
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text)
+        .join("\n");
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("The audit did not return a structured result. Try again.");
+      const parsed = JSON.parse(match[0]) as any;
+
+      const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
+        ? (parsed.recommendations as RecommendationCard[])
+        : [];
+
+      const result: ReviewAuditResult = {
+        period,
+        periodLabel: periodDef.windowLabel,
+        kpis: {
+          currentRating,
+          priorRating,
+          priorIsEstimated,
+          newReviews,
+          totalReviews,
+          responseRatePeriod,
+          responseRateAllTime,
+        },
+        starBreakdown: star,
+        sentimentHistorical: (parsed.sentimentHistorical || []) as ReviewSentimentRow[],
+        sentimentPeriod: (parsed.sentimentPeriod || []) as ReviewSentimentRow[],
+        reviews,
+        responseGaps,
+        responseQuality: (parsed.responseQuality || []) as ReviewResponseQualityFlag[],
+        recommendations: recs,
+        narratives: {
+          breakdown: parsed.narratives?.breakdown || "",
+          ratingOverview: parsed.narratives?.ratingOverview || "",
+          summary: parsed.narratives?.summary || "",
+        },
+        truncated,
+        reviewsAnalyzed: allReviews.length,
+        timestamp: new Date().toISOString(),
+      };
+
+      // 5. Append a trend snapshot.
+      const snapshot: ReviewSnapshot = {
+        date: result.timestamp,
+        rating: currentRating ?? 0,
+        totalReviews: totalReviews ?? 0,
+      };
+      const snapshots = [...(current.reviewSnapshots || []), snapshot].slice(-24);
+
+      current = { ...current, reviewAudit: result, reviewSnapshots: snapshots };
+      onUpdateProperty(current);
+      setResults(result);
+      setStage("done");
+      setProgress("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Review audit failed.");
+      setStage("idle");
+      setProgress("");
+    }
+  };
+
+  return (
+    <div style={{ background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford }}>
+          Resident Review Audit
+        </div>
+        {results?.timestamp && (
+          <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888" }}>
+            Last run {new Date(results.timestamp).toLocaleString()}
+          </span>
+        )}
+      </div>
+      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 14 }}>
+        Pulls live Google reviews, tracks rating + volume over time, analyzes sentiment, and writes CRES-grounded recommendations.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 0, border: `1px solid ${B.cambridge}`, borderRadius: 7, overflow: "hidden" }}>
+          {REVIEW_PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              disabled={running}
+              style={{
+                background: period === p.id ? B.caribbean : "white",
+                color: period === p.id ? "white" : B.caribbean,
+                border: "none",
+                padding: "8px 16px",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: running ? "default" : "pointer",
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={run}
+          disabled={running}
+          style={{
+            background: B.caribbean,
+            border: "none",
+            borderRadius: 8,
+            padding: "11px 20px",
+            color: "white",
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 14,
+            letterSpacing: "0.06em",
+            cursor: running ? "wait" : "pointer",
+            opacity: running ? 0.7 : 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span>✦</span>
+          {running ? "Auditing…" : results ? "Re-run Review Audit" : "Run Review Audit"}
+        </button>
+      </div>
+
+      {running && (
+        <div style={{ padding: "12px 16px", background: "#f9fafb", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.caribbean, marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[0, 1, 2].map((n) => (
+              <div key={n} style={{ width: 5, height: 5, background: B.caribbean, borderRadius: "50%", animation: `bounce 0.9s ${n * 0.18}s infinite` }} />
+            ))}
+          </div>
+          <span>{progress}</span>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ padding: "10px 16px", background: "#feeee7", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.tangelo, marginBottom: 16 }}>
+          Audit error: {error}
+        </div>
+      )}
+
+      {!results && !running && !error && (
+        <div style={{ padding: "20px 16px", background: "#fafafa", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
+          Runs ~20–40s. Choose a period, then pull live Google reviews to score rating trend, star mix, sentiment, owner-response coverage, and the next month&rsquo;s actions.
+        </div>
+      )}
+
+      {results && <ReviewAuditResultView results={results} snapshots={property.reviewSnapshots || []} />}
+    </div>
+  );
+}
+
+function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditResult; snapshots: ReviewSnapshot[] }) {
+  const k = results.kpis;
+  const sectionTitle: React.CSSProperties = {
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 13,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: B.oxford,
+    margin: "24px 0 10px",
+  };
+  const para: React.CSSProperties = {
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 13,
+    color: "#2a2a2a",
+    lineHeight: 1.6,
+    marginBottom: 8,
+  };
+  const th: React.CSSProperties = {
+    padding: "8px 10px",
+    textAlign: "left",
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 11,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: "white",
+    background: B.oxford,
+  };
+  const sentimentColor = (s: string) =>
+    s === "Positive" ? "#15803d" : s === "Negative" ? B.tangelo : s === "Mixed" ? "#9a7200" : "#666";
+
+  const delta = k.currentRating !== null && k.priorRating !== null ? Math.round((k.currentRating - k.priorRating) * 10) / 10 : null;
+  const starRows: [string, number, string][] = [
+    ["5 Star", results.starBreakdown.s5, STAR_COLORS[0]],
+    ["4 Star", results.starBreakdown.s4, STAR_COLORS[1]],
+    ["3 Star", results.starBreakdown.s3, STAR_COLORS[2]],
+    ["2 Star", results.starBreakdown.s2, STAR_COLORS[3]],
+    ["1 Star", results.starBreakdown.s1, STAR_COLORS[4]],
+  ];
+  const maxStar = Math.max(1, ...starRows.map((r) => r[1]));
+
+  const renderSentiment = (rows: ReviewSentimentRow[]) => (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          <th style={th}>Theme</th>
+          <th style={{ ...th, width: 70, textAlign: "center" }}>Mentions</th>
+          <th style={{ ...th, width: 90 }}>Sentiment</th>
+          <th style={th}>CRES Recommendation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} style={{ background: i % 2 ? "#fafafa" : "white" }}>
+            <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", fontWeight: 600 }}>{row.theme}</td>
+            <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", textAlign: "center", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, color: "#666" }}>{row.count}</td>
+            <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, fontWeight: 600, color: sentimentColor(row.sentiment) }}>{row.sentiment}</td>
+            <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", lineHeight: 1.45 }}>{row.recommendation}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  return (
+    <div>
+      {/* KPIs */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
+        <KPI label="Current Rating" value={k.currentRating !== null ? k.currentRating.toFixed(1) : "—"} sub={`${k.totalReviews ?? "—"} total reviews`} accent={B.caribbean} />
+        <KPI label="Prior Rating" value={k.priorRating !== null ? k.priorRating.toFixed(1) : "—"} sub={k.priorIsEstimated ? "estimated" : "from last run"} trend={delta !== null && delta !== 0 ? delta : undefined} accent={B.oxford} />
+        <KPI label="New Reviews" value={k.newReviews} sub={results.periodLabel} accent={B.tangelo} />
+        <KPI label="Owner Response Rate" value={k.responseRatePeriod !== null ? `${k.responseRatePeriod}%` : "—"} sub="this period" accent={k.responseRatePeriod !== null && k.responseRatePeriod >= 90 ? "#22c55e" : "#f59e0b"} />
+      </div>
+
+      {/* Trend */}
+      {snapshots.length >= 2 && (
+        <>
+          <div style={sectionTitle}>Rating &amp; Volume Trend</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 4px", overflowX: "auto" }}>
+            {snapshots.slice(-12).map((s, i) => {
+              const h = Math.max(6, (s.rating / 5) * 70);
+              return (
+                <div key={i} style={{ textAlign: "center", flexShrink: 0, width: 54 }}>
+                  <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, color: B.oxford }}>{s.rating.toFixed(1)}</div>
+                  <div style={{ height: h, background: B.caribbean, borderRadius: 3, margin: "2px auto", width: 22 }} />
+                  <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 9, color: "#999" }}>{s.totalReviews} rev</div>
+                  <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 8.5, color: "#bbb" }}>{new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Review Breakdown */}
+      <div style={sectionTitle}>{results.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</div>
+      <div style={{ marginBottom: 8 }}>
+        {starRows.map(([label, count, color]) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <span style={{ width: 54, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>{label}</span>
+            <div style={{ flex: 1, background: "#f0f2f4", borderRadius: 3, height: 16, position: "relative" }}>
+              <div style={{ width: `${(count / maxStar) * 100}%`, background: color, height: "100%", borderRadius: 3, minWidth: count > 0 ? 4 : 0 }} />
+            </div>
+            <span style={{ width: 24, textAlign: "right", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: B.oxford }}>{count}</span>
+          </div>
+        ))}
+      </div>
+      {results.narratives.breakdown && <p style={para}>{results.narratives.breakdown}</p>}
+
+      {/* Rating Overview */}
+      {results.narratives.ratingOverview && (
+        <>
+          <div style={sectionTitle}>Rating Overview</div>
+          <p style={para}>{results.narratives.ratingOverview}</p>
+        </>
+      )}
+
+      {/* Sentiment 1: Historical */}
+      {results.sentimentHistorical.length > 0 && (
+        <>
+          <div style={sectionTitle}>Sentiment Analysis 1 of 2: Historical Profile</div>
+          <p style={{ ...para, fontSize: 11.5, color: "#888" }}>Google keyword tags across all {k.totalReviews ?? ""} reviews — the cumulative reputation prospects see.</p>
+          {renderSentiment(results.sentimentHistorical)}
+        </>
+      )}
+
+      {/* Sentiment 2: Period */}
+      {results.sentimentPeriod.length > 0 && (
+        <>
+          <div style={sectionTitle}>Sentiment Analysis 2 of 2: {results.periodLabel}</div>
+          <p style={{ ...para, fontSize: 11.5, color: "#888" }}>Themes from the new reviews this period — what is driving feedback right now.</p>
+          {renderSentiment(results.sentimentPeriod)}
+        </>
+      )}
+
+      {/* Response gaps */}
+      {results.responseGaps.length > 0 && (
+        <>
+          <div style={sectionTitle}>Response Gaps &amp; Escalations</div>
+          {results.responseGaps.map((g, i) => (
+            <div key={i} style={{ ...para, marginBottom: 4 }}>
+              <strong style={{ color: g.rating <= 2 ? B.tangelo : B.oxford }}>{g.reviewer} ({g.rating}★):</strong> {g.reason}
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Response quality */}
+      {results.responseQuality.length > 0 && (
+        <>
+          <div style={sectionTitle}>Owner Response Quality</div>
+          {results.responseQuality.map((q, i) => (
+            <div key={i} style={{ marginBottom: 10 }}>
+              <div style={{ ...para, marginBottom: 2 }}>
+                <strong style={{ color: B.oxford }}>{q.reviewer}:</strong> {q.issue}
+              </div>
+              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#15803d", lineHeight: 1.5, paddingLeft: 12, borderLeft: `2px solid ${B.cambridge}` }}>
+                Suggested: {q.suggestedRewrite}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* New reviews */}
+      {results.reviews.length > 0 && (
+        <>
+          <div style={sectionTitle}>New Reviews ({results.reviews.length})</div>
+          {results.reviews.map((r, i) => (
+            <div key={i} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #f0f2f4" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, fontWeight: 600, color: "#333" }}>{r.name}</span>
+                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, color: r.rating >= 4 ? "#15803d" : r.rating <= 2 ? B.tangelo : "#9a7200" }}>{r.rating}★</span>
+                <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa" }}>{r.relativeDate}</span>
+                {r.hasResponse && <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#15803d" }}>✓ replied</span>}
+              </div>
+              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: r.text ? "#444" : "#bbb", lineHeight: 1.5, marginTop: 2, fontStyle: r.text ? "normal" : "italic" }}>
+                {r.text || "[No written review text submitted]"}
+              </div>
+            </div>
+          ))}
+          {results.truncated && (
+            <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa", fontStyle: "italic" }}>
+              Showing the {results.reviewsAnalyzed} most recent reviews analyzed; the period may contain more.
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Recommendations */}
+      {isStructuredRecs(results.recommendations) && (
+        <>
+          <div style={sectionTitle}>CRES Recommendations</div>
+          <RecommendationsBlock recs={results.recommendations} />
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ================= MAIN APP ======================================= */
 const TABS = [
   { id: "marketing", label: "Marketing Audit" },
+  { id: "reviews", label: "Review Audit" },
   { id: "seo", label: "SEO & Rank Check" },
   { id: "llm", label: "LLM Visibility" },
   { id: "content", label: "Content Generator" },
@@ -4613,6 +5189,7 @@ export default function MarketingHub() {
         </div>
 
         {tab === "marketing" && <MarketingAuditTab property={property} onUpdateProperty={updateActive} />}
+        {tab === "reviews" && <ReviewAuditTab property={property} onUpdateProperty={updateActive} />}
         {tab === "llm" && <LLMTab property={property} onUpdateProperty={updateActive} />}
         {tab === "seo" && <SEOTab property={property} onUpdateProperty={updateActive} />}
         {tab === "content" && <ContentTab property={property} />}

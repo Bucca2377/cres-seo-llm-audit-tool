@@ -122,6 +122,85 @@ export interface Property {
     timestamp: string;
   };
   marketingAudit?: MarketingAuditResult;
+  reviewAudit?: ReviewAuditResult;
+  /** One entry per Review Audit run; powers the rating + volume trend. */
+  reviewSnapshots?: ReviewSnapshot[];
+}
+
+/* ---- Review Audit types ---- */
+export type ReviewPeriod = "1mo" | "6mo";
+
+export interface ReviewSnapshot {
+  date: string; // ISO timestamp of the run
+  rating: number;
+  totalReviews: number;
+}
+
+export interface ReviewKpis {
+  currentRating: number | null;
+  priorRating: number | null;
+  priorIsEstimated: boolean;
+  newReviews: number;
+  totalReviews: number | null;
+  responseRatePeriod: number | null; // % of period reviews with an owner reply
+  responseRateAllTime: number | null; // % across the reviews we sampled
+}
+
+export interface ReviewStarBreakdown {
+  s1: number;
+  s2: number;
+  s3: number;
+  s4: number;
+  s5: number;
+}
+
+/** A sentiment/theme row (used for both the all-time keyword tags and the period themes). */
+export interface ReviewSentimentRow {
+  theme: string;
+  count: number;
+  sentiment: "Positive" | "Negative" | "Mixed" | "Neutral";
+  recommendation: string;
+}
+
+export interface ReviewItem {
+  name: string;
+  relativeDate: string; // e.g. "2 weeks ago"
+  isoDate: string;
+  rating: number;
+  text: string; // "" when no written text
+  hasResponse: boolean;
+}
+
+/** A response gap: a review missing a reply, or a low rating needing escalation. */
+export interface ReviewResponseGap {
+  reviewer: string;
+  rating: number;
+  reason: string; // "No owner response" | "1-star needs escalation" etc.
+}
+
+/** A flagged owner response that reads generic/templated, with a suggested rewrite. */
+export interface ReviewResponseQualityFlag {
+  reviewer: string;
+  issue: string;
+  suggestedRewrite: string;
+}
+
+export interface ReviewAuditResult {
+  period: ReviewPeriod;
+  periodLabel: string; // e.g. "Last 30 days" / "Last 6 months"
+  kpis: ReviewKpis;
+  starBreakdown: ReviewStarBreakdown;
+  sentimentHistorical: ReviewSentimentRow[];
+  sentimentPeriod: ReviewSentimentRow[];
+  reviews: ReviewItem[];
+  responseGaps: ReviewResponseGap[];
+  responseQuality: ReviewResponseQualityFlag[];
+  recommendations: AuditRecommendations;
+  narratives: { breakdown: string; ratingOverview: string; summary: string };
+  /** True when more reviews exist in the window than we paged in. */
+  truncated: boolean;
+  reviewsAnalyzed: number;
+  timestamp: string;
 }
 
 /**
@@ -502,6 +581,8 @@ export async function callSerp(opts: {
   location?: string;
   engine?: "google" | "google_maps" | "google_maps_reviews";
   data_id?: string;
+  sort_by?: string;
+  next_page_token?: string;
 }) {
   const r = await fetch("/api/serp", {
     method: "POST",
