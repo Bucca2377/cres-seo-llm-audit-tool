@@ -223,15 +223,6 @@ function nextStatus(s: ChecklistStatus): ChecklistStatus {
   return "missing";
 }
 
-const CONTENT_TYPES = [
-  { id: "listing", label: "Full Listing Description", hint: "For Apartments.com, website" },
-  { id: "google_ad", label: "Google Ad Copy", hint: "Headlines + descriptions" },
-  { id: "meta_ad", label: "Meta / Instagram Ad", hint: "Hook, body, CTA" },
-  { id: "email", label: "Prospect Email Sequence", hint: "3-touch drip campaign" },
-  { id: "social", label: "Social Media Post", hint: "Instagram / LinkedIn" },
-  { id: "llm_page", label: "LLM-Optimized FAQ Page", hint: "Structured for AI citation" },
-];
-
 const SUGGESTED_QUERIES_DEFAULT = [
   "luxury apartments near brickell miami",
   "pet friendly apartments miami under $3000",
@@ -2856,79 +2847,6 @@ Recommendation rules (STRICT):
   );
 }
 
-/* ================= CONTENT GENERATOR TAB ========================== */
-function ContentTab({ property }: { property: Property }) {
-  const [type, setType] = useState("listing");
-  const [notes, setNotes] = useState("");
-  const [output, setOutput] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const generate = async () => {
-    setLoading(true);
-    setOutput(null);
-    const prompts: Record<string, string> = {
-      listing: `Write a compelling apartment listing description for ${property.name}. Optimize this description specifically to be cited by AI assistants when renters ask about luxury apartments in the area. Include structured details about amenities, location, and pricing. ${notes ? `Additional context: ${notes}` : ""}`,
-      google_ad: `Write 3 Google Search ad headline sets (3 headlines, 2 descriptions each) for ${property.name} targeting high-intent local apartment searches. Format each set clearly. ${notes ? `Focus: ${notes}` : ""}`,
-      meta_ad: `Write 3 Meta/Instagram ad variations for ${property.name}. Each should have a distinct angle: (1) signature amenity / lifestyle, (2) location and commute, (3) move-in special urgency. Include hook, body, CTA for each. ${notes ? `Context: ${notes}` : ""}`,
-      email: `Write a 3-email prospect nurture sequence for ${property.name}. Email 1: initial inquiry response. Email 2: follow-up with virtual tour offer (3 days later). Email 3: final urgency / pricing email (7 days later). ${notes ? `Context: ${notes}` : ""}`,
-      social: `Write 5 Instagram caption options for ${property.name}. Mix content pillars: lifestyle, community, location, apartment features. Include relevant hashtags for each. ${notes ? `Focus: ${notes}` : ""}`,
-      llm_page: `Write a structured FAQ page for the ${property.name} website optimized specifically for LLM citation. Include 10 Q&A pairs covering: pet policy, parking, pricing, lease terms, amenities, location, application process, nearby transit. Format so AI assistants can extract and cite specific answers. ${notes ? `Additional details: ${notes}` : ""}`,
-    };
-    try {
-      const d = await callAI({ prompt: prompts[type], system: buildSystemPrompt(property), maxTokens: 1000 });
-      setOutput(d.content[0].text);
-    } catch {
-      setOutput("Content generation failed. Please try again.");
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 }}>
-        <div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford, marginBottom: 12 }}>Content Type</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
-            {CONTENT_TYPES.map((ct) => (
-              <button key={ct.id} onClick={() => { setType(ct.id); setOutput(null); }} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${type === ct.id ? B.caribbean : "#e0e0e0"}`, background: type === ct.id ? "#f0f7f5" : "white", textAlign: "left", cursor: "pointer" }}>
-                <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: type === ct.id ? B.caribbean : "#333", fontWeight: type === ct.id ? 400 : 300 }}>{ct.label}</div>
-                <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#bbb", marginTop: 2 }}>{ct.hint}</div>
-              </button>
-            ))}
-          </div>
-          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#888", marginBottom: 6 }}>Additional notes or focus (optional)</div>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Move-in special, new floor plan, highlight views..." style={{ width: "100%", height: 80, border: "1px solid #e0e0e0", borderRadius: 8, padding: "10px 12px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", fontWeight: 300, resize: "none", outline: "none", background: "#fafafa" }} />
-          <button onClick={generate} disabled={loading} style={{ width: "100%", marginTop: 10, background: B.caribbean, border: "none", borderRadius: 7, padding: "10px 0", color: "white", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, letterSpacing: "0.08em", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: loading ? 0.6 : 1 }}>
-            <span>✦</span>{loading ? "Generating..." : "Generate with AI"}
-          </button>
-        </div>
-
-        <div style={{ background: "white", borderRadius: 10, padding: 22, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", minHeight: 400 }}>
-          {!output && !loading && (
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#ccc", gap: 12 }}>
-              <div style={{ fontSize: 36, opacity: 0.3 }}>✦</div>
-              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13 }}>Select a content type and click Generate</div>
-            </div>
-          )}
-          {loading && <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.caribbean, fontStyle: "italic", padding: "12px 0" }}>Claude is generating {CONTENT_TYPES.find((c) => c.id === type)?.label.toLowerCase()}...</div>}
-          {output && (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford }}>{CONTENT_TYPES.find((c) => c.id === type)?.label}</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => navigator.clipboard?.writeText(output)} style={{ padding: "4px 12px", border: `1px solid ${B.cambridge}`, borderRadius: 5, background: "transparent", color: B.caribbean, fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, cursor: "pointer" }}>Copy</button>
-                  <button onClick={() => setOutput(null)} style={{ padding: "4px 12px", border: "1px solid #ddd", borderRadius: 5, background: "transparent", color: "#888", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, cursor: "pointer" }}>Clear</button>
-                </div>
-              </div>
-              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, lineHeight: 1.8, color: "#2a2a2a", whiteSpace: "pre-wrap" }}>{output}</div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ================= MARKETING AUDIT TAB ============================ */
 const MK_STATUS: Record<MarketingStatus, { bg: string; fg: string; label: string }> = {
   green: { bg: "#E0F0E8", fg: "#15803d", label: "Good" },
@@ -3511,12 +3429,22 @@ function ReviewAuditTab({
       const maxPages = periodDef.maxPages;
       for (let pageNum = 0; pageNum < maxPages; pageNum++) {
         setProgress(`Pulling reviews (page ${pageNum + 1})…`);
-        const resp: any = await callSerp({
-          engine: "google_maps_reviews",
-          data_id: dataId,
-          sort_by: "newestFirst",
-          ...(token ? { next_page_token: token } : {}),
-        });
+        let resp: any;
+        try {
+          resp = await callSerp({
+            engine: "google_maps_reviews",
+            data_id: dataId,
+            // sort_by only on the first request; the page token already encodes
+            // the sort. SerpAPI review pagination is flaky/slow, so any later
+            // page failure is non-fatal — we keep the reviews already gathered.
+            ...(token ? { next_page_token: token } : { sort_by: "newestFirst" }),
+          });
+        } catch {
+          if (pageNum === 0)
+            throw new Error("Couldn't load this property's Google reviews right now. Please try again in a moment.");
+          truncated = true;
+          break;
+        }
         if (pageNum === 0 && Array.isArray(resp?.topics)) {
           topics = resp.topics
             .filter((t: any) => t?.keyword)
@@ -4000,10 +3928,9 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
 /* ================= MAIN APP ======================================= */
 const TABS = [
   { id: "marketing", label: "Marketing Audit" },
-  { id: "reviews", label: "Review Audit" },
   { id: "seo", label: "SEO & Rank Check" },
   { id: "llm", label: "LLM Visibility" },
-  { id: "content", label: "Content Generator" },
+  { id: "reviews", label: "Review Audit" },
 ];
 
 /* ================= PRINTABLE REPORT =============================== */
@@ -5410,7 +5337,6 @@ export default function MarketingHub() {
         {tab === "reviews" && <ReviewAuditTab property={property} onUpdateProperty={updateActive} />}
         {tab === "llm" && <LLMTab property={property} onUpdateProperty={updateActive} />}
         {tab === "seo" && <SEOTab property={property} onUpdateProperty={updateActive} />}
-        {tab === "content" && <ContentTab property={property} />}
       </div>
 
       {printTarget === "review" ? (
