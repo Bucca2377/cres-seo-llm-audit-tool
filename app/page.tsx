@@ -3442,9 +3442,10 @@ function reviewResponseText(r: any): string {
   if (typeof c === "object") return (c.snippet || c.text || c.extracted_snippet || "").trim();
   return "";
 }
-const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string }[] = [
-  { id: "1mo", label: "Last 1 month", days: 31, windowLabel: "Last 30 days" },
-  { id: "6mo", label: "Last 6 months", days: 186, windowLabel: "Last 6 months" },
+const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string; maxPages: number }[] = [
+  { id: "1mo", label: "Last month", days: 31, windowLabel: "Last 30 days", maxPages: 4 },
+  { id: "6mo", label: "Past 6 months", days: 186, windowLabel: "Last 6 months", maxPages: 8 },
+  { id: "12mo", label: "Past 12 months", days: 366, windowLabel: "Last 12 months", maxPages: 14 },
 ];
 const STAR_COLORS = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"]; // 5★ → 1★
 
@@ -3507,7 +3508,8 @@ function ReviewAuditTab({
       let topics: { keyword: string; mentions: number }[] = [];
       let token = "";
       let truncated = false;
-      for (let pageNum = 0; pageNum < 6; pageNum++) {
+      const maxPages = periodDef.maxPages;
+      for (let pageNum = 0; pageNum < maxPages; pageNum++) {
         setProgress(`Pulling reviews (page ${pageNum + 1})…`);
         const resp: any = await callSerp({
           engine: "google_maps_reviews",
@@ -3530,7 +3532,7 @@ function ReviewAuditTab({
           if (token && oldestDate && oldestDate >= cutoff) truncated = true; // window may extend beyond what we paged
           break;
         }
-        if (pageNum === 5 && token) truncated = true;
+        if (pageNum === maxPages - 1 && token) truncated = true;
       }
 
       // 3. Window + compute KPIs in code (never trust the model for counts).

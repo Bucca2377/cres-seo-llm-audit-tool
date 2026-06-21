@@ -128,7 +128,7 @@ export interface Property {
 }
 
 /* ---- Review Audit types ---- */
-export type ReviewPeriod = "1mo" | "6mo";
+export type ReviewPeriod = "1mo" | "6mo" | "12mo";
 
 export interface ReviewSnapshot {
   date: string; // ISO timestamp of the run
