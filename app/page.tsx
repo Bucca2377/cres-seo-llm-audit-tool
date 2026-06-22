@@ -4377,14 +4377,22 @@ function ReviewAuditReport({ property }: { property: Property }) {
     <>
       <style dangerouslySetInnerHTML={{ __html: pageStyles }} />
       <div className="printable-report" style={{ color: PRINT_BODY, fontFamily: "'Josefin Sans', sans-serif", fontSize: 11, lineHeight: 1.55 }}>
-        {/* Cover */}
-        <section style={{ textAlign: "center", paddingTop: "1.4in", marginBottom: "0.5in" }}>
-          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 30, letterSpacing: "0.04em", color: PRINT_NAVY }}>RESIDENT REVIEW AUDIT</div>
-          <div style={{ width: 80, height: 3, background: "#f25620", margin: "10px auto 18px" }} />
-          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 20, color: PRINT_NAVY }}>{property.name}</div>
-          <div style={{ fontSize: 12, color: "#222", marginTop: 4 }}>{property.address || ""}</div>
-          {ra && <div style={{ fontSize: 12, color: PRINT_MUTED, marginTop: 10 }}>Reporting Period: {ra.periodLabel} · {new Date(ra.timestamp).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>}
-          <div style={{ fontSize: 12, color: PRINT_MUTED, marginTop: 4 }}>Prepared by: CRES</div>
+        {/* Cover — own page */}
+        <section className="pb-after" style={{ textAlign: "center", paddingTop: "1.4in" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/cres-logo.svg"
+            alt="CRES"
+            style={{ maxWidth: 320, width: "60%", height: "auto", display: "block", margin: "0 auto 28px" }}
+          />
+          <div style={{ width: "52%", borderTop: `3px solid ${PRINT_ORANGE}`, margin: "0 auto 32px" }} />
+          <h1 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 32, color: PRINT_NAVY, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 28px 0" }}>
+            Resident Review Audit
+          </h1>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: PRINT_NAVY, marginBottom: 8 }}>{property.name}</div>
+          <div style={{ fontSize: 13, color: "#222", marginBottom: 18 }}>{property.address || ""}</div>
+          {ra && <div style={{ fontSize: 12, color: PRINT_MUTED, marginBottom: 6 }}>Reporting Period: {ra.periodLabel} · {new Date(ra.timestamp).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>}
+          <div style={{ fontSize: 12, color: PRINT_MUTED }}>Prepared by: CRES</div>
         </section>
 
         {!ra && (
@@ -4413,18 +4421,18 @@ function ReviewAuditReport({ property }: { property: Property }) {
 
             {/* Trend — one bar per month */}
             {snapshots.length >= 2 && (
-              <div className="pb-avoid" style={{ marginBottom: 16 }}>
+              <div className="pb-avoid" style={{ marginBottom: 22 }}>
                 <div style={subHead}>Rating &amp; Volume Trend (by month)</div>
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 14, paddingTop: 6 }}>
                   {snapshots.slice(-12).map((s, i) => {
-                    const h = Math.max(5, (s.rating / 5) * 56);
+                    const h = Math.max(8, (s.rating / 5) * 80);
                     const mLabel = snapshotMonthLabel(s);
                     return (
-                      <div key={i} style={{ textAlign: "center", width: 46 }}>
-                        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 9, color: PRINT_NAVY }}>{s.rating.toFixed(1)}</div>
-                        <div style={{ height: h, background: PRINT_TEAL, margin: "2px auto", width: 18, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
-                        <div style={{ fontSize: 7.5, color: "#888" }}>{s.totalReviews} rev</div>
-                        <div style={{ fontSize: 7, color: "#aaa" }}>{mLabel}</div>
+                      <div key={i} style={{ textAlign: "center", width: 52 }}>
+                        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10, color: PRINT_NAVY }}>{s.rating.toFixed(1)}</div>
+                        <div style={{ height: h, background: PRINT_TEAL, margin: "3px auto", width: 26, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
+                        <div style={{ fontSize: 8, color: "#888" }}>{s.totalReviews} rev</div>
+                        <div style={{ fontSize: 8, color: "#aaa" }}>{mLabel}</div>
                       </div>
                     );
                   })}
@@ -4434,18 +4442,18 @@ function ReviewAuditReport({ property }: { property: Property }) {
 
             {/* Breakdown — star bars */}
             <PrintSectionHeader>{ra.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</PrintSectionHeader>
-            <div style={{ marginBottom: 8 }}>
+            <div style={{ marginBottom: 14 }}>
               {(["s5", "s4", "s3", "s2", "s1"] as const).map((key, idx) => {
                 const count = ra.starBreakdown[key];
                 const maxC = Math.max(1, ra.starBreakdown.s1, ra.starBreakdown.s2, ra.starBreakdown.s3, ra.starBreakdown.s4, ra.starBreakdown.s5);
                 const colors = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"];
                 return (
-                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                    <span style={{ width: 44, fontSize: 9, color: "#555" }}>{5 - idx} Star</span>
-                    <div style={{ flex: 1, background: "#f0f2f4", height: 12, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
-                      <div style={{ width: `${(count / maxC) * 100}%`, background: colors[idx], height: "100%", minWidth: count > 0 ? 3 : 0, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
+                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <span style={{ width: 48, fontSize: 10, color: "#555" }}>{5 - idx} Star</span>
+                    <div style={{ flex: 1, background: "#f0f2f4", height: 18, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+                      <div style={{ width: `${(count / maxC) * 100}%`, background: colors[idx], height: "100%", minWidth: count > 0 ? 4 : 0, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
                     </div>
-                    <span style={{ width: 18, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 11, color: PRINT_NAVY }}>{count}</span>
+                    <span style={{ width: 20, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: PRINT_NAVY }}>{count}</span>
                   </div>
                 );
               })}
