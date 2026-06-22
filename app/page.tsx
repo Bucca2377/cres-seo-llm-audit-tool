@@ -185,6 +185,45 @@ function RecCard({ card }: { card: RecommendationCard }) {
  * format OR the legacy plain-text fallback. The legacy fallback renders
  * exactly as the old UI did, so existing persisted audits keep working.
  */
+/**
+ * Extract structured recommendation cards from a model response. Robust to
+ * (a) ```json code fences, and (b) TRUNCATED output (e.g. the token budget was
+ * hit mid-array): rather than throwing and dumping raw JSON to the UI, it
+ * recovers every complete card object and drops a trailing incomplete one.
+ * Returns [] if nothing usable is found — never a raw string.
+ */
+function parseRecCards(rawText: string): RecommendationCard[] {
+  const text = (rawText || "").trim();
+  if (!text) return [];
+  // 1. Happy path: parse the whole { "recommendations": [...] } object.
+  const objMatch = text.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      const parsed = JSON.parse(objMatch[0]) as { recommendations?: unknown };
+      if (isStructuredRecs(parsed.recommendations as AuditRecommendations)) {
+        return parsed.recommendations as RecommendationCard[];
+      }
+    } catch {
+      /* truncated or malformed — recover individual cards below */
+    }
+  }
+  // 2. Recovery: each card is a flat object (its string values contain no
+  //    literal braces), so match complete {...} blocks that carry a "title".
+  //    A truncated final card has no closing brace and is simply skipped.
+  const cards: RecommendationCard[] = [];
+  const cardRe = /\{[^{}]*"title"[^{}]*\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = cardRe.exec(text))) {
+    try {
+      const c = JSON.parse(m[0]) as RecommendationCard;
+      if (c && typeof c.title === "string") cards.push(c);
+    } catch {
+      /* skip an unparseable fragment */
+    }
+  }
+  return cards;
+}
+
 function RecommendationsBlock({ recs }: { recs: AuditRecommendations | null | undefined }) {
   if (!recs) return null;
   if (isStructuredRecs(recs)) {
@@ -2354,23 +2393,13 @@ Recommendation rules (STRICT):
       const rResp = await callAI({
         prompt: recsPrompt,
         system: buildSystemPrompt(currentProperty),
-        maxTokens: 2500,
+        maxTokens: 4000,
       });
 
-      // Parse the structured JSON; fall back to raw text if Claude regresses.
+      // Parse the structured JSON. parseRecCards recovers complete cards even
+      // if the model's JSON is truncated, so we never dump raw JSON to the UI.
       const rawText = rResp.content?.[0]?.text || "";
-      let recommendations: AuditRecommendations = rawText;
-      const recsMatch = rawText.match(/\{[\s\S]*\}/);
-      if (recsMatch) {
-        try {
-          const parsed = JSON.parse(recsMatch[0]) as { recommendations?: unknown };
-          if (isStructuredRecs(parsed.recommendations as AuditRecommendations)) {
-            recommendations = parsed.recommendations as RecommendationCard[];
-          }
-        } catch {
-          /* fall through with raw text */
-        }
-      }
+      const recommendations: AuditRecommendations = parseRecCards(rawText);
 
       const finalResults: SEOAuditResults = {
         queries,
