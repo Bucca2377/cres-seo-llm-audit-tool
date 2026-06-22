@@ -3650,7 +3650,10 @@ RULES:
       const qById = new Map(qualityCandidates.map((c) => [c.id, c]));
       const responseQuality: ReviewResponseQualityFlag[] = ((parsed.responseQuality || []) as any[])
         .map((f) => {
-          const c = qById.get(f.id);
+          // Match by id; fall back to reviewer name if the model returned a name.
+          const c =
+            qById.get(f.id) ||
+            qualityCandidates.find((q) => f.reviewer && q.reviewer.toLowerCase() === String(f.reviewer).toLowerCase());
           if (!c) return null;
           return {
             reviewer: c.reviewer,
@@ -3992,9 +3995,11 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
                   Review: &ldquo;{q.reviewText}&rdquo;
                 </div>
               )}
-              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#444", lineHeight: 1.5, marginBottom: 6, paddingLeft: 10, borderLeft: "2px solid #e0e0e0" }}>
-                <strong style={{ color: "#777" }}>Current reply:</strong> &ldquo;{q.originalResponse}&rdquo;
-              </div>
+              {q.originalResponse ? (
+                <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#444", lineHeight: 1.5, marginBottom: 6, paddingLeft: 10, borderLeft: "2px solid #e0e0e0" }}>
+                  <strong style={{ color: "#777" }}>Current reply:</strong> &ldquo;{q.originalResponse}&rdquo;
+                </div>
+              ) : null}
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#9a7200", lineHeight: 1.5, marginBottom: 6 }}>
                 {q.issue}
               </div>
@@ -4085,9 +4090,9 @@ function PrintSectionHeader({ children }: { children: React.ReactNode }) {
       style={{
         fontFamily: "'Barlow Condensed', sans-serif",
         fontWeight: 700,
-        fontSize: 22,
+        fontSize: 20,
         color: PRINT_NAVY,
-        margin: "0 0 18px 0",
+        margin: "26px 0 14px 0",
         paddingBottom: 6,
         borderBottom: `2px solid ${PRINT_TEAL}`,
         letterSpacing: "0.02em",
@@ -4501,7 +4506,9 @@ function ReviewAuditReport({ property }: { property: Property }) {
                       <strong style={{ color: PRINT_NAVY }}>{q.reviewer} ({q.rating}★):</strong>{" "}
                       {q.reviewText && <em style={{ color: "#666" }}>&ldquo;{q.reviewText}&rdquo;</em>}
                     </p>
-                    <p style={{ ...bodyP, margin: "0 0 2px 0", color: "#555" }}>Current reply: &ldquo;{q.originalResponse}&rdquo;</p>
+                    {q.originalResponse ? (
+                      <p style={{ ...bodyP, margin: "0 0 2px 0", color: "#555" }}>Current reply: &ldquo;{q.originalResponse}&rdquo;</p>
+                    ) : null}
                     <p style={{ ...bodyP, margin: "0 0 2px 0", color: "#9a7200" }}>{q.issue}</p>
                     <p style={{ ...bodyP, margin: 0, color: "#15803d", paddingLeft: 10, borderLeft: "2px solid #93b2ab" }}>Suggested rewrite: {q.suggestedRewrite}</p>
                   </div>
