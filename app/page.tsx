@@ -3003,12 +3003,12 @@ ${aptStatusBlock}
 
 ${gbpBlock}
 
-FETCH RULES (apply strictly — report what you ACTUALLY SEE in the fetched content; never assume):
-- READ the fetched content and report real data. Apartments.com AND most property sites (including Entrata) server-render pricing, floor plans, photos, and specials directly in the HTML. If those are present in what you fetched, mark them GREEN with the actual numbers/details. Do NOT hedge readable data to amber.
-- You MUST fetch the Floor Plans / Pricing page and the Photos page before judging pricing, photos, or virtual tour. Do not judge those from the homepage alone.
-- Use AMBER "Requires Client Verification" ONLY when a feature's page or link exists but its content genuinely did NOT render in the fetch — a true empty JS-only widget or modal: a "Schedule a Tour" button that opens a JS scheduler (Knock/Tour24), an availability widget that returned an empty container, or an Apply portal behind a login. Say live confirmation is needed.
-- Mark RED only when absence is structurally confirmed across what you fetched: no link, button, container, embed, or content for it anywhere (e.g. no virtual tour / 3D tour / video embed on the Photos page AND none on the listing).
-- "No pricing / floor plans / application" is NOT valid red if that page renders the data (read it, mark green) or if the page/link exists but content didn't render (amber).
+FETCH RULES (apply strictly — report what you ACTUALLY SEE; a failed fetch is NOT a finding):
+- BLOCKED / FAILED / EMPTY FETCH = AMBER, NEVER RED. If a web_fetch returns an error (url_not_accessible, timeout, 403, etc.) or empty content for a page, that page is BLOCKING automated access or rendering via JavaScript. This is NOT evidence the page is down, missing, or broken. Mark the affected rows AMBER "Requires Client Verification — page could not be auto-fetched; confirm live" and NEVER write "did not load", "page is down", or mark it red. Many property sites block automated fetchers even though the page works perfectly in a real browser.
+- READ the fetched content and report real data. Apartments.com and many property sites server-render pricing, floor plans, photos, and specials in the HTML. If those are present in what you fetched, mark them GREEN with the actual numbers/details. Do NOT hedge readable data to amber.
+- PHOTOS / GALLERIES: a static fetch usually captures only the hero image because galleries are JS lightboxes. NEVER report "only 1 photo" or "gallery has N photos" as an issue from a static fetch. If you cannot confirm the full gallery, mark AMBER, never red.
+- FLOOR PLANS / PRICING: if the floor-plans page is in the nav but its fetch failed or returned no plan data, mark AMBER "pricing renders via a JS widget or the page blocked auto-fetch; verify live" — NOT red.
+- RED requires that you SUCCESSFULLY fetched the relevant page AND it structurally lacks the feature (no link, button, container, or embed anywhere). If you could not fetch the page, you may NOT mark that row red.
 - Flag genuine cross-platform discrepancies only (hours differing day-by-day, conflicting amenities). Do NOT manufacture discrepancies from data that did not render.
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy or issue. Different tracking numbers are intentional for lead-source attribution; treat them as expected, never a problem.
 
