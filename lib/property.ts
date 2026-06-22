@@ -610,6 +610,28 @@ export async function callSerp(opts: {
   return data;
 }
 
+/**
+ * Render one or more URLs with a real headless browser (server-side) and get
+ * back the page text. Penetrates JS-rendered and bot-protected property/ILS
+ * sites that a plain fetch (or Claude's web_fetch) can't read.
+ */
+export async function callFetch(opts: {
+  url: string;
+  follow?: boolean;
+  maxPages?: number;
+}): Promise<{ pages: { url: string; status: number | null; text: string }[]; error?: string }> {
+  const r = await fetch("/api/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+  const data = await r.json().catch(() => ({ pages: [], error: "Render request failed" }));
+  if (!r.ok && !data.pages) {
+    throw new Error(data.error || `Render failed (${r.status})`);
+  }
+  return data;
+}
+
 export async function callAI(opts: {
   prompt: string;
   system?: string;

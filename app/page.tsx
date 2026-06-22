@@ -7,6 +7,7 @@ import {
   buildPropContext,
   callAI,
   callSerp,
+  callFetch,
   isStructuredRecs,
   type Property,
   type ChecklistStatus,
@@ -2867,16 +2868,6 @@ function MkStatusCell({ cell }: { cell: { status: MarketingStatus; note: string 
   );
 }
 
-/** Homepage + screen-reader URL — the two reliable entry points. Claude
- * follows the real nav links it finds on the homepage for the rest (path
- * conventions vary by CMS: Entrata, RealPage, Yardi all differ). */
-function buildSiteUrls(website: string): string[] {
-  const raw = (website || "").trim();
-  if (!raw) return [];
-  const base = (raw.startsWith("http") ? raw : `https://${raw}`).replace(/\/+$/, "");
-  return [base + "/", base + "/screen-reader/"];
-}
-
 /** Stringify SerpAPI place_results hours into a readable day-by-day list. */
 function formatGbpHours(place: any): string {
   const h = place?.hours;
@@ -2982,44 +2973,56 @@ function MarketingAuditTab({
       } catch {
         /* best-effort */
       }
-      const aptStatusBlock = current.apartmentsUrl
-        ? `APARTMENTS.COM — YOU MUST FETCH THIS URL: ${current.apartmentsUrl}
-Apartments.com server-renders its full listing for SEO, so the fetch returns the complete units/pricing table, photos, specials, and office hours. FETCH IT and report the ACTUAL data you see: how many available units, the price range, availability dates, any move-in special (with expiration), photo count, and office hours.${aptConfirmed ? " (An Apartments.com listing for this property is confirmed live and indexed on Google.)" : ""} The listing is ACTIVE — mark "currently advertising / active" GREEN. Only mark "not advertising" red if the fetched page LITERALLY says "not currently advertising on Apartments.com". Never report "no units shown" — if you somehow get no content, retry the fetch once, then mark dynamic rows AMBER, never red.`
-        : `APARTMENTS.COM STATUS: No listing URL was provided. Mark Apartments.com cells "Requires Client Verification" and note no URL was provided. Do not invent.`;
+      // --- Render the website + Apartments.com with a real headless browser ---
+      // Penetrates JS-rendered and bot-protected sites that a plain fetch (or
+      // Claude's web_fetch) can't read.
+      setProgress("Rendering the website with a real browser (60–90s)…");
+      let siteText = "";
+      try {
+        const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 8 });
+        siteText = (siteRes.pages || [])
+          .map((p) => `=== ${p.url} (status ${p.status ?? "?"}) ===\n${(p.text || "").trim() || "[no content rendered]"}`)
+          .join("\n\n");
+      } catch {
+        siteText = "";
+      }
 
-      // --- Build the analysis prompt ---
-      setProgress("Fetching website + Apartments.com and analyzing (60–90s)…");
-      const siteUrls = buildSiteUrls(current.website || "");
+      let aptText = "";
+      if (current.apartmentsUrl) {
+        setProgress("Rendering the Apartments.com listing…");
+        try {
+          const aptRes = await callFetch({ url: current.apartmentsUrl, follow: false });
+          aptText = (aptRes.pages || [])
+            .map((p) => `(status ${p.status ?? "?"})\n${(p.text || "").trim() || "[no content rendered]"}`)
+            .join("\n\n");
+        } catch {
+          aptText = "";
+        }
+      }
+
+      setProgress("Analyzing the rendered content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
-Fetch and review these sources, then report ONLY what you directly observe.
+The content below was captured with a REAL headless browser, so JavaScript-rendered pricing, floor plans, photo galleries, tour tools, and specials ARE included. Report ONLY what you actually see in it.
 
-PROPERTY WEBSITE — fetch the homepage first, then follow the REAL navigation links you find on it (do NOT guess URL paths; path conventions vary by CMS). Start with:
-${siteUrls.map((u) => `- ${u}`).join("\n")}
-From the homepage nav, also fetch the actual Floor Plans, Amenities, Photos/Gallery, Contact, Apply, Specials/Concessions, Pets, and FAQ pages if links exist. Skip anything that 404s.
+PROPERTY WEBSITE — rendered pages:
+${siteText || "(the website could not be rendered this run)"}
 
-APARTMENTS.COM LISTING: ${current.apartmentsUrl || "(none provided)"}
-${aptStatusBlock}
+APARTMENTS.COM LISTING (${current.apartmentsUrl || "none provided"}):
+${aptText || (current.apartmentsUrl ? "(could not be rendered this run)" : "no listing URL was provided")}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
 ${gbpBlock}
 
-FETCH RULES (apply strictly — report what you ACTUALLY SEE; a failed fetch is NOT a finding):
-- BLOCKED / FAILED / EMPTY FETCH = AMBER, NEVER RED. If a web_fetch returns an error (url_not_accessible, timeout, 403, etc.) or empty content for a page, that page is BLOCKING automated access or rendering via JavaScript. This is NOT evidence the page is down, missing, or broken. Mark the affected rows AMBER "Requires Client Verification — page could not be auto-fetched; confirm live" and NEVER write "did not load", "page is down", or mark it red. Many property sites block automated fetchers even though the page works perfectly in a real browser.
-- READ the fetched content and report real data. Apartments.com and many property sites server-render pricing, floor plans, photos, and specials in the HTML. If those are present in what you fetched, mark them GREEN with the actual numbers/details. Do NOT hedge readable data to amber.
-- PHOTOS / GALLERIES: a static fetch usually captures only the hero image because galleries are JS lightboxes. NEVER report "only 1 photo" or "gallery has N photos" as an issue from a static fetch. If you cannot confirm the full gallery, mark AMBER, never red.
-- FLOOR PLANS / PRICING: if the floor-plans page is in the nav but its fetch failed or returned no plan data, mark AMBER "pricing renders via a JS widget or the page blocked auto-fetch; verify live" — NOT red.
-- RED requires that you SUCCESSFULLY fetched the relevant page AND it structurally lacks the feature (no link, button, container, or embed anywhere). If you could not fetch the page, you may NOT mark that row red.
-- Flag genuine cross-platform discrepancies only (hours differing day-by-day, conflicting amenities). Do NOT manufacture discrepancies from data that did not render.
-- DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy or issue. Different tracking numbers are intentional for lead-source attribution; treat them as expected, never a problem.
+RULES (apply strictly):
+- The content above is fully rendered (JavaScript included). READ it and report real data: when a feature is present, mark it GREEN with the actual numbers/details (real prices, unit counts, special wording, hours).
+- AMBER "Requires Client Verification" ONLY when a page shows status 403 / empty / "[no content rendered]" (it failed to render) or the data is genuinely ambiguous. Do NOT call a page "did not load" if other pages rendered fine.
+- RED only when a feature is structurally ABSENT across all the rendered content (no mention, link, button, or section for it anywhere).
+- If the Apartments.com content shows units or pricing, mark "currently advertising / active" GREEN. Only mark "not advertising" red if it LITERALLY says "not currently advertising".
+- GOOGLE SCOPE: a Google Business Profile only carries active presence, hours, photos, rating/reviews, and the website link. For rows it does NOT carry (pricing, concessions, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature". Never put amber/red in those Google cells.
+- DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy. Different tracking numbers are intentional for lead-source attribution.
+- Plain English, concise, no em dashes as punctuation, no "Note:" sections.
 
-PLATFORM SCOPE (important — avoids false warnings on Google):
-- A Google Business Profile only carries: active presence, hours, photos, rating/reviews, and the website link. It does NOT carry pricing, concessions, preferred employers, an online application, self-service tour scheduling, or virtual tours in the ILS sense.
-- For any consistency row that a platform does not carry by design, set that platform's status to "na" with a one-word note like "Not a Google feature" — do NOT use "amber"/"check" just because the data isn't there. Only the rows Google actually carries should be green/amber/red.
-
-WRITING RULES:
-- Be concise and scannable. Short sentences. No filler, no restating the obvious, no "Note:" sections.
-- Plain English for a property manager. Do NOT use hyphens, em dashes, or en dashes as sentence punctuation; use separate sentences.
-- Status values are exactly "green" (found & functional), "amber" (present but incomplete/unverified/requires client verification), "red" (confirmed absent or broken), or "na" (not applicable to that platform — use for Google rows it does not carry).
+Status values are exactly "green" (found & functional), "amber" (present but unverified / failed to render), "red" (confirmed absent), or "na" (not applicable to that platform).
 
 Return ONLY this JSON object, no prose before or after:
 {
@@ -3069,7 +3072,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
 - Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.`;
 
-      const data = await callAI({ prompt, webFetch: true, maxTokens: 6000 });
+      const data = await callAI({ prompt, maxTokens: 6000 });
       const text = (data.content || [])
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
