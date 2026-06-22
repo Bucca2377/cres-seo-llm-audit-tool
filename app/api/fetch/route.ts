@@ -49,10 +49,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
+  } catch (e) {
+    // Graceful: return 200 with no pages so the audit degrades to "verify
+    // live" amber instead of a hard failure. Most common cause: Playwright
+    // was updated but its browser wasn't reinstalled, or the dev server is
+    // running with a stale browser registry (restart it).
+    const msg = e instanceof Error ? e.message.split("\n")[0] : "launch failed";
+    return NextResponse.json({
+      pages: [],
+      error: `Headless browser failed to launch: ${msg}. Run "npx playwright install chromium" and restart the dev server.`,
+    });
+  }
   const pages: { url: string; status: number | null; text: string }[] = [];
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   try {
