@@ -120,6 +120,7 @@ export interface Property {
     }>;
     recommendations: AuditRecommendations;
     timestamp: string;
+    location?: string;
   };
   marketingAudit?: MarketingAuditResult;
   reviewAudit?: ReviewAuditResult;

@@ -2138,6 +2138,8 @@ interface SEOAuditResults {
   ranks: GoogleRankResult[];
   recommendations: AuditRecommendations;
   timestamp: string;
+  /** The search origin used for ranks (Map Pack is hyper-local). */
+  location?: string;
 }
 
 function SEOAudit({
@@ -2375,6 +2377,7 @@ Recommendation rules (STRICT):
         ranks,
         recommendations,
         timestamp: new Date().toISOString(),
+        location: extractLocation(currentProperty.address) || extractCity(currentProperty.address),
       };
       setResults(finalResults);
       onUpdateProperty({ ...currentProperty, seoAudit: finalResults });
@@ -2680,6 +2683,26 @@ Recommendation rules (STRICT):
               }
               accent={B.oxford}
             />
+          </div>
+
+          {/* Map Pack location caveat — ranks are hyper-local */}
+          <div
+            style={{
+              padding: "8px 14px",
+              background: "#fff8ec",
+              border: "1px solid #f5e2bd",
+              borderRadius: 8,
+              marginBottom: 14,
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 11.5,
+              color: "#7a5b1e",
+              lineHeight: 1.55,
+            }}
+          >
+            <strong>Checked from {results.location || "the property's city"}.</strong> Google&rsquo;s Map Pack is
+            hyper-local: it changes with the searcher&rsquo;s exact location and personalization, so a Map Pack
+            rank here may not match what you see from your own device. Treat Map Pack positions as
+            &ldquo;visible to a searcher near the property,&rdquo; not an absolute rank. Organic ranks are far more stable.
           </div>
 
           {/* Strongest / weakest */}
