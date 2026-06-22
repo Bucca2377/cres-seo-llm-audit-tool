@@ -2987,42 +2987,24 @@ function MarketingAuditTab({
         siteText = "";
       }
 
-      let aptText = "";
-      if (current.apartmentsUrl) {
-        setProgress("Rendering the Apartments.com listing…");
-        try {
-          const aptRes = await callFetch({ url: current.apartmentsUrl, follow: false });
-          aptText = (aptRes.pages || [])
-            .map((p) => `(status ${p.status ?? "?"})\n${(p.text || "").trim() || "[no content rendered]"}`)
-            .join("\n\n");
-        } catch {
-          aptText = "";
-        }
-      }
-
-      setProgress("Analyzing the rendered content and writing the report…");
+      setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
-The content below was captured with a REAL headless browser, so JavaScript-rendered pricing, floor plans, photo galleries, tour tools, and specials ARE included. Report ONLY what you actually see in it.
+PROPERTY WEBSITE — the pages below were captured with a REAL headless browser, so JavaScript-rendered pricing, floor plans, galleries, tour tools, and specials ARE included. Report ONLY what you actually see in them:
+${siteText || "(the website could not be rendered this run — mark website rows amber 'verify live')"}
 
-PROPERTY WEBSITE — rendered pages:
-${siteText || "(the website could not be rendered this run)"}
-
-APARTMENTS.COM LISTING (${current.apartmentsUrl || "none provided"}):
-${aptText || (current.apartmentsUrl ? "(could not be rendered this run)" : "no listing URL was provided")}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
+APARTMENTS.COM LISTING: ${current.apartmentsUrl ? `FETCH this exact URL with your web fetch tool and report what you actually see (Apartments.com is readable that way and returns the full units/pricing/specials/photos/hours): ${current.apartmentsUrl}` : "no listing URL was provided"}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
 ${gbpBlock}
 
 RULES (apply strictly):
-- The content above is fully rendered (JavaScript included). READ it and report real data: when a feature is present, mark it GREEN with the actual numbers/details (real prices, unit counts, special wording, hours).
-- AMBER "Requires Client Verification" ONLY when a page shows status 403 / empty / "[no content rendered]" (it failed to render) or the data is genuinely ambiguous. Do NOT call a page "did not load" if other pages rendered fine.
-- RED only when a feature is structurally ABSENT across all the rendered content (no mention, link, button, or section for it anywhere).
-- If the Apartments.com content shows units or pricing, mark "currently advertising / active" GREEN. Only mark "not advertising" red if it LITERALLY says "not currently advertising".
+- WEBSITE: the content above is fully rendered (JavaScript included). READ it and report real data — mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present. Mark a website row RED only when the feature is structurally ABSENT across all the rendered pages. Mark AMBER only if a page shows status 403/empty or the website could not be rendered.
+- APARTMENTS.COM: fetch the URL above with your tool. If it returns the listing (units, pricing, photos, specials), mark "currently advertising / active" GREEN and report the real data. Only mark "not advertising" red if it LITERALLY says "not currently advertising". If your fetch errors or returns nothing, mark the Apartments.com rows AMBER "could not verify automatically; check live" — NEVER red.
 - GOOGLE SCOPE: a Google Business Profile only carries active presence, hours, photos, rating/reviews, and the website link. For rows it does NOT carry (pricing, concessions, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature". Never put amber/red in those Google cells.
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy. Different tracking numbers are intentional for lead-source attribution.
 - Plain English, concise, no em dashes as punctuation, no "Note:" sections.
 
-Status values are exactly "green" (found & functional), "amber" (present but unverified / failed to render), "red" (confirmed absent), or "na" (not applicable to that platform).
+Status values are exactly "green" (found & functional), "amber" (present but unverified / could not render), "red" (confirmed absent), or "na" (not applicable to that platform).
 
 Return ONLY this JSON object, no prose before or after:
 {
@@ -3072,7 +3054,9 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
 - Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.`;
 
-      const data = await callAI({ prompt, maxTokens: 6000 });
+      // Website content is provided (Playwright); Apartments.com is fetched by
+      // Claude's web_fetch (which penetrates it where Playwright is 403'd).
+      const data = await callAI({ prompt, webFetch: true, maxTokens: 6000 });
       const text = (data.content || [])
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
