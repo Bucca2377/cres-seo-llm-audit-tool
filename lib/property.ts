@@ -131,7 +131,8 @@ export interface Property {
 export type ReviewPeriod = "1mo" | "6mo" | "12mo";
 
 export interface ReviewSnapshot {
-  date: string; // ISO timestamp of the run
+  month: string; // "YYYY-MM" — one point per calendar month (upserted)
+  date: string; // ISO timestamp of the latest run that set this month
   rating: number;
   totalReviews: number;
 }
@@ -171,17 +172,22 @@ export interface ReviewItem {
   hasResponse: boolean;
 }
 
-/** A response gap: a review missing a reply, or a low rating needing escalation. */
+/** A review with no owner reply: shows the review, a suggested reply, and (for low ratings) an escalation note. */
 export interface ReviewResponseGap {
   reviewer: string;
   rating: number;
-  reason: string; // "No owner response" | "1-star needs escalation" etc.
+  text: string; // the review as written ("" if none)
+  escalate: boolean; // true for 1-2 star — needs internal escalation
+  suggestedResponse: string; // a reply to post
 }
 
-/** A flagged owner response that reads generic/templated, with a suggested rewrite. */
+/** A flagged owner response that reads generic/templated — shows the original, commentary, and a rewrite. */
 export interface ReviewResponseQualityFlag {
   reviewer: string;
-  issue: string;
+  rating: number;
+  reviewText: string; // the review as written
+  originalResponse: string; // the owner reply exactly as posted
+  issue: string; // why it reads generic
   suggestedRewrite: string;
 }
 
