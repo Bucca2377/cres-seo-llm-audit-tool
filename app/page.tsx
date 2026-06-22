@@ -3367,6 +3367,23 @@ const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLab
 ];
 const STAR_COLORS = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"]; // 5★ → 1★
 
+/** "YYYY-MM" for a snapshot, deriving from its date for legacy snapshots
+ * saved before month-keying existed. */
+function snapshotMonthKey(s: ReviewSnapshot): string {
+  return s.month || (s.date ? s.date.slice(0, 7) : "");
+}
+/** Short month label like "May '26" for the trend axis. */
+function snapshotMonthLabel(s: ReviewSnapshot): string {
+  const key = snapshotMonthKey(s);
+  const [yy, mm] = key.split("-");
+  if (!yy || !mm) return "";
+  return (
+    new Date(Number(yy), Number(mm) - 1, 1).toLocaleDateString("en-US", { month: "short" }) +
+    " '" +
+    yy.slice(2)
+  );
+}
+
 function ReviewAuditTab({
   property,
   onUpdateProperty,
@@ -3683,7 +3700,9 @@ RULES:
         rating: currentRating ?? 0,
         totalReviews: totalReviews ?? 0,
       };
-      const snapshots = [...(current.reviewSnapshots || []).filter((s) => s.month !== monthKey), snapshot]
+      // Normalize legacy snapshots (saved before month-keying) so sort/upsert work.
+      const existing = (current.reviewSnapshots || []).map((s) => ({ ...s, month: snapshotMonthKey(s) || monthKey }));
+      const snapshots = [...existing.filter((s) => s.month !== monthKey), snapshot]
         .sort((a, b) => (a.month < b.month ? -1 : 1))
         .slice(-24);
 
@@ -3874,8 +3893,7 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 4px", overflowX: "auto" }}>
             {snapshots.slice(-12).map((s, i) => {
               const h = Math.max(6, (s.rating / 5) * 70);
-              const [yy, mm] = s.month.split("-");
-              const mLabel = new Date(Number(yy), Number(mm) - 1, 1).toLocaleDateString("en-US", { month: "short" }) + " '" + yy.slice(2);
+              const mLabel = snapshotMonthLabel(s);
               return (
                 <div key={i} style={{ textAlign: "center", flexShrink: 0, width: 54 }}>
                   <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, color: B.oxford }}>{s.rating.toFixed(1)}</div>
@@ -4395,8 +4413,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
                   {snapshots.slice(-12).map((s, i) => {
                     const h = Math.max(5, (s.rating / 5) * 56);
-                    const [yy, mm] = s.month.split("-");
-                    const mLabel = new Date(Number(yy), Number(mm) - 1, 1).toLocaleDateString("en-US", { month: "short" }) + " '" + yy.slice(2);
+                    const mLabel = snapshotMonthLabel(s);
                     return (
                       <div key={i} style={{ textAlign: "center", width: 46 }}>
                         <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 9, color: PRINT_NAVY }}>{s.rating.toFixed(1)}</div>
