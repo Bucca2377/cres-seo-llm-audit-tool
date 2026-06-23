@@ -3894,6 +3894,7 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
     ["1 Star", results.starBreakdown.s1, STAR_COLORS[4]],
   ];
   const maxStar = Math.max(1, ...starRows.map((r) => r[1]));
+  const periodTotal = starRows.reduce((sum, r) => sum + r[1], 0);
 
   const renderSentiment = (rows: ReviewSentimentRow[]) => (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -3951,19 +3952,25 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
         </>
       )}
 
-      {/* Review Breakdown */}
+      {/* Review Breakdown — hide the empty bar chart when no new reviews landed this period */}
       <div style={sectionTitle}>{results.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</div>
-      <div style={{ marginBottom: 8 }}>
-        {starRows.map(([label, count, color]) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <span style={{ width: 54, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>{label}</span>
-            <div style={{ flex: 1, background: "#f0f2f4", borderRadius: 3, height: 16, position: "relative" }}>
-              <div style={{ width: `${(count / maxStar) * 100}%`, background: color, height: "100%", borderRadius: 3, minWidth: count > 0 ? 4 : 0 }} />
+      {periodTotal === 0 ? (
+        !results.narratives.breakdown && (
+          <p style={para}>No new reviews were posted during {results.periodLabel}, so there is no new-review breakdown for this period.</p>
+        )
+      ) : (
+        <div style={{ marginBottom: 8 }}>
+          {starRows.map(([label, count, color]) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+              <span style={{ width: 54, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>{label}</span>
+              <div style={{ flex: 1, background: "#f0f2f4", borderRadius: 3, height: 16, position: "relative" }}>
+                <div style={{ width: `${(count / maxStar) * 100}%`, background: color, height: "100%", borderRadius: 3, minWidth: count > 0 ? 4 : 0 }} />
+              </div>
+              <span style={{ width: 24, textAlign: "right", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: B.oxford }}>{count}</span>
             </div>
-            <span style={{ width: 24, textAlign: "right", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: B.oxford }}>{count}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
       {results.narratives.breakdown && <p style={para}>{results.narratives.breakdown}</p>}
 
       {/* Rating Overview */}
@@ -4481,24 +4488,30 @@ function ReviewAuditReport({ property }: { property: Property }) {
               </div>
             )}
 
-            {/* Breakdown — star bars */}
+            {/* Breakdown — star bars (hidden when no new reviews this period) */}
             <PrintSectionHeader>{ra.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</PrintSectionHeader>
-            <div style={{ marginBottom: 14 }}>
-              {(["s5", "s4", "s3", "s2", "s1"] as const).map((key, idx) => {
-                const count = ra.starBreakdown[key];
-                const maxC = Math.max(1, ra.starBreakdown.s1, ra.starBreakdown.s2, ra.starBreakdown.s3, ra.starBreakdown.s4, ra.starBreakdown.s5);
-                const colors = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"];
-                return (
-                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                    <span style={{ width: 48, fontSize: 10, color: "#555" }}>{5 - idx} Star</span>
-                    <div style={{ flex: 1, background: "#f0f2f4", height: 18, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
-                      <div style={{ width: `${(count / maxC) * 100}%`, background: colors[idx], height: "100%", minWidth: count > 0 ? 4 : 0, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
+            {(ra.starBreakdown.s5 + ra.starBreakdown.s4 + ra.starBreakdown.s3 + ra.starBreakdown.s2 + ra.starBreakdown.s1) === 0 ? (
+              !ra.narratives.breakdown && (
+                <p style={bodyP}>No new reviews were posted during {ra.periodLabel}, so there is no new-review breakdown for this period.</p>
+              )
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                {(["s5", "s4", "s3", "s2", "s1"] as const).map((key, idx) => {
+                  const count = ra.starBreakdown[key];
+                  const maxC = Math.max(1, ra.starBreakdown.s1, ra.starBreakdown.s2, ra.starBreakdown.s3, ra.starBreakdown.s4, ra.starBreakdown.s5);
+                  const colors = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"];
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <span style={{ width: 48, fontSize: 10, color: "#555" }}>{5 - idx} Star</span>
+                      <div style={{ flex: 1, background: "#f0f2f4", height: 18, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+                        <div style={{ width: `${(count / maxC) * 100}%`, background: colors[idx], height: "100%", minWidth: count > 0 ? 4 : 0, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
+                      </div>
+                      <span style={{ width: 20, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: PRINT_NAVY }}>{count}</span>
                     </div>
-                    <span style={{ width: 20, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: PRINT_NAVY }}>{count}</span>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
             {ra.narratives.breakdown && <p style={bodyP}>{ra.narratives.breakdown}</p>}
 
             {/* Rating Overview */}
