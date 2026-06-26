@@ -2984,6 +2984,7 @@ function MarketingAuditTab({
       // --- Google Business Profile ground truth (deterministic via SerpAPI) ---
       setProgress("Pulling Google Business Profile data…");
       let gbpBlock = "GOOGLE BUSINESS PROFILE: could not be verified automatically this run — fetch the provided Google URL if present, otherwise mark Google cells 'Requires Client Verification'.";
+      let googlePhotos: string[] = [];
       try {
         const serpData = await callSerp({
           query: buildGbpSearchQuery(current),
@@ -2992,6 +2993,14 @@ function MarketingAuditTab({
         });
         const gbp = extractGBP(serpData, current);
         const place = serpData?.place_results;
+        // Google profile photo URLs for the vision pass. Use the direct Google
+        // CDN thumbnails (not the serpapi proxy) and downsize to ~512px to keep
+        // vision token cost low.
+        googlePhotos = (Array.isArray(place?.images) ? place.images : [])
+          .map((im: any) => im?.thumbnail || "")
+          .filter((u: string) => /^https?:\/\//i.test(u) && !/serpapi\.com/i.test(u))
+          .map((u: string) => u.replace(/=w\d+-h\d+/i, "=w512-h512"))
+          .slice(0, 8);
         if (gbp || place) {
           const rating = gbp?.rating ?? (typeof place?.rating === "number" ? place.rating : null);
           const reviewCount = gbp?.reviewCount ?? (typeof place?.reviews === "number" ? place.reviews : null);
@@ -3157,6 +3166,29 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           }
         } catch {
           /* keep the text-only "present, quality not assessed" fallback */
+        }
+      }
+
+      // --- Vision pass on the Google profile photos (separate verdict) ---
+      if (googlePhotos.length >= 2) {
+        try {
+          setProgress("Assessing Google profile photos…");
+          const gPrompt = `These ${Math.min(googlePhotos.length, 8)} images are photos on the Google Business Profile of ${current.name} (a mix of owner and visitor photos a prospect sees when browsing the listing). Grade the overall visual quality a prospect would perceive: professional vs amateur, lighting/sharpness, and coverage (interiors, amenities, exterior). Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you see"}. green = mostly professional, good coverage; amber = mixed quality or thin coverage; red = mostly low-quality/amateur or almost none.`;
+          const gResp = await callAI({ prompt: gPrompt, images: googlePhotos, maxTokens: 400 });
+          const gText = (gResp.content || [])
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("");
+          const gm = gText.match(/\{[\s\S]*\}/);
+          if (gm) {
+            const gj = JSON.parse(gm[0]) as { status?: string; note?: string };
+            if (gj.status === "green" || gj.status === "amber" || gj.status === "red") {
+              const row = consistency.find((c) => /photo/i.test(c.label));
+              if (row) row.google = { status: gj.status, note: (gj.note || "").trim() || "Google photos assessed" };
+            }
+          }
+        } catch {
+          /* keep the text-only Google photos fallback */
         }
       }
 
