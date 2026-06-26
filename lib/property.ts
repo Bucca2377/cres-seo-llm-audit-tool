@@ -620,7 +620,7 @@ export async function callFetch(opts: {
   url: string;
   follow?: boolean;
   maxPages?: number;
-}): Promise<{ pages: { url: string; status: number | null; text: string }[]; error?: string }> {
+}): Promise<{ pages: { url: string; status: number | null; text: string }[]; images?: string[]; error?: string }> {
   const r = await fetch("/api/fetch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -639,6 +639,7 @@ export async function callAI(opts: {
   maxTokens?: number;
   useWebSearch?: boolean;
   webFetch?: boolean;
+  images?: string[];
 }) {
   const r = await fetch("/api/ai", {
     method: "POST",

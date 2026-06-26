@@ -67,6 +67,8 @@ export async function POST(req: NextRequest) {
     });
   }
   const pages: { url: string; status: number | null; text: string }[] = [];
+  const imageSet = new Set<string>();
+  const MAX_IMAGES = 12;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   try {
     // Each page gets a FRESH context. The target sites flag rapid sequential
@@ -93,14 +95,48 @@ export async function POST(req: NextRequest) {
             }))
           );
         }
-        return { status: resp ? resp.status() : null, text: text.slice(0, PAGE_TEXT_CAP), links };
+        // Gallery/marketing photo URLs (resolved absolute) so the caller can
+        // hand them to a vision model to grade quality. We abort image *bytes*
+        // for speed, but the <img> src/srcset attributes are still in the DOM.
+        const images: string[] = await page.evaluate(() => {
+          const bad = /logo|icon|sprite|favicon|placeholder|pixel|blank|spacer|loading|avatar|badge|thumb|map|pin/i;
+          const out: string[] = [];
+          document.querySelectorAll("img").forEach((node) => {
+            const img = node as HTMLImageElement;
+            let u = "";
+            const srcset = img.getAttribute("srcset");
+            if (srcset) {
+              const cands = srcset.split(",").map((s) => s.trim().split(/\s+/)[0]).filter(Boolean);
+              if (cands.length) u = cands[cands.length - 1]; // largest candidate
+            }
+            if (!u) u = img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-lazy") || "";
+            if (!u || u.startsWith("data:")) return;
+            try {
+              u = new URL(u, location.href).href;
+            } catch {
+              return;
+            }
+            if (/\.svg(\?|$)/i.test(u) || bad.test(u)) return;
+            out.push(u);
+          });
+          return out;
+        });
+        return { status: resp ? resp.status() : null, text: text.slice(0, PAGE_TEXT_CAP), links, images };
       } finally {
         await ctx.close();
       }
     };
 
+    const collectImages = (imgs: string[] | undefined) => {
+      for (const u of imgs || []) {
+        if (imageSet.size >= MAX_IMAGES) break;
+        imageSet.add(u);
+      }
+    };
+
     const home = await render(start, !!body.follow);
     pages.push({ url: start, status: home.status, text: home.text });
+    collectImages(home.images);
 
     if (body.follow && maxPages > 1) {
       let origin = "";
@@ -131,13 +167,15 @@ export async function POST(req: NextRequest) {
         try {
           const r = await render(c, false);
           pages.push({ url: c, status: r.status, text: r.text });
+          collectImages(r.images);
         } catch {
           pages.push({ url: c, status: null, text: "" });
         }
       }
     }
 
-    return NextResponse.json({ pages, _meta: { source: "playwright", pages: pages.length } });
+    const images = Array.from(imageSet);
+    return NextResponse.json({ pages, images, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Render failed", pages },

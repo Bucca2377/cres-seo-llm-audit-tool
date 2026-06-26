@@ -3030,11 +3030,13 @@ function MarketingAuditTab({
       // Claude's web_fetch) can't read.
       setProgress("Rendering the website with a real browser (60–90s)…");
       let siteText = "";
+      let siteImages: string[] = [];
       try {
         const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 8 });
         siteText = (siteRes.pages || [])
           .map((p) => `=== ${p.url} (status ${p.status ?? "?"}) ===\n${(p.text || "").trim() || "[no content rendered]"}`)
           .join("\n\n");
+        siteImages = siteRes.images || [];
       } catch {
         siteText = "";
       }
@@ -3122,11 +3124,47 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
         ? (parsed.recommendations as RecommendationCard[])
         : [];
+
+      // --- Vision pass: actually LOOK at the website gallery photos ---
+      // The text audit can only confirm photos exist; here we hand the real
+      // gallery image URLs to a vision model to grade marketing quality, then
+      // overwrite the website "Photos quality" cell + gallery finding with a
+      // real verdict instead of "present, quality not assessed".
+      const websiteFindings = parsed.websiteFindings || [];
+      const consistency = parsed.consistency || [];
+      if (siteImages.length >= 2) {
+        try {
+          setProgress("Assessing photo quality…");
+          const photoPrompt = `These ${Math.min(siteImages.length, 8)} images are from the website gallery of ${current.name}, a ${current.propertyType || "multifamily apartment"} community. Grade them on MARKETING quality the way a leasing prospect would perceive them. Judge: professional vs amateur (lighting, composition, sharpness, resolution), staging/cleanliness, and coverage (do they show interiors/units, amenities, AND exterior/common areas, or just one or two things?). Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you actually see"}. Use green = genuinely professional, well-lit, good coverage; amber = adequate but some low-res/weak shots or thin coverage; red = clearly amateur/low-quality or almost no usable photos.`;
+          const pResp = await callAI({ prompt: photoPrompt, images: siteImages, maxTokens: 400 });
+          const pText = (pResp.content || [])
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("");
+          const pm = pText.match(/\{[\s\S]*\}/);
+          if (pm) {
+            const pj = JSON.parse(pm[0]) as { status?: string; note?: string };
+            if (pj.status === "green" || pj.status === "amber" || pj.status === "red") {
+              const verdict: { status: MarketingStatus; note: string } = { status: pj.status, note: (pj.note || "").trim() || "Gallery photos assessed" };
+              const wf = websiteFindings.find((f) => /photo|gallery/i.test(f.label));
+              if (wf) {
+                wf.status = verdict.status;
+                wf.note = verdict.note;
+              }
+              const row = consistency.find((c) => /photo/i.test(c.label));
+              if (row) row.website = { status: verdict.status, note: verdict.note };
+            }
+          }
+        } catch {
+          /* keep the text-only "present, quality not assessed" fallback */
+        }
+      }
+
       const result: MarketingAuditResult = {
         executiveSummary: parsed.executiveSummary || [],
-        websiteFindings: parsed.websiteFindings || [],
+        websiteFindings,
         criticalIssues: parsed.criticalIssues || [],
-        consistency: parsed.consistency || [],
+        consistency,
         recommendations: recs,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },

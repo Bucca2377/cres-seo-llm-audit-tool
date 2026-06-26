@@ -14,6 +14,12 @@ interface AIRequest {
    * website, Apartments.com listing, etc. Requires the web-fetch beta header.
    */
   webFetch?: boolean;
+  /**
+   * Image URLs to include for a vision assessment (e.g. grading the quality of
+   * a property's gallery photos). Passed as URL image blocks; Anthropic fetches
+   * them. Capped server-side. Not combined with webFetch.
+   */
+  images?: string[];
 }
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
@@ -44,10 +50,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // When image URLs are supplied, send a multimodal user message (image blocks
+  // first, then the text prompt) so the model can grade the photos it sees.
+  const imageUrls = Array.isArray(body.images)
+    ? body.images.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u)).slice(0, 8)
+    : [];
+  const userContent =
+    imageUrls.length > 0
+      ? [
+          ...imageUrls.map((url) => ({ type: "image", source: { type: "url", url } })),
+          { type: "text", text: body.prompt },
+        ]
+      : body.prompt;
+
   const payload: Record<string, unknown> = {
     model: MODEL,
     max_tokens: body.maxTokens ?? 1000,
-    messages: [{ role: "user", content: body.prompt }],
+    messages: [{ role: "user", content: userContent }],
   };
   if (body.system) payload.system = body.system;
   const headers: Record<string, string> = {
