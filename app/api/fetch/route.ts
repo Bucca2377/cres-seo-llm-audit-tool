@@ -1,7 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+/**
+ * Resolve the installed Chromium executable directly from the Playwright
+ * browser cache. The Next dev server's Playwright sometimes fails its internal
+ * "Executable doesn't exist" check even when the binary IS present (a flaky
+ * resolution under Turbopack), so we find the real exe ourselves and pass it as
+ * executablePath, bypassing that check entirely. Returns undefined if nothing
+ * is found, in which case we fall back to Playwright's own resolution.
+ */
+function resolveChromiumExe(): string | undefined {
+  const base = path.join(
+    process.env.PLAYWRIGHT_BROWSERS_PATH ||
+      process.env.LOCALAPPDATA ||
+      path.join(os.homedir(), "AppData", "Local"),
+    process.env.PLAYWRIGHT_BROWSERS_PATH ? "" : "ms-playwright"
+  );
+  // (dir, relative exe path) — prefer the lightweight headless shell.
+  const variants: [RegExp, string[]][] = [
+    [/^chromium_headless_shell-/, ["chrome-headless-shell-win64", "chrome-headless-shell.exe"]],
+    [/^chromium_headless_shell-/, ["chrome-headless-shell-linux", "chrome-headless-shell"]],
+    [/^chromium-/, ["chrome-win", "chrome.exe"]],
+    [/^chromium-/, ["chrome-linux", "chrome"]],
+  ];
+  try {
+    const dirs = fs.readdirSync(base);
+    for (const [re, rel] of variants) {
+      for (const d of dirs) {
+        if (!re.test(d)) continue;
+        const exe = path.join(base, d, ...rel);
+        if (fs.existsSync(exe)) return exe;
+      }
+    }
+  } catch {
+    /* ignore — fall back to Playwright's own resolution */
+  }
+  return undefined;
+}
 
 interface FetchRequest {
   url: string;
@@ -51,8 +91,10 @@ export async function POST(req: NextRequest) {
 
   let browser;
   try {
+    const executablePath = resolveChromiumExe();
     browser = await chromium.launch({
       headless: true,
+      ...(executablePath ? { executablePath } : {}),
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
     });
   } catch (e) {
