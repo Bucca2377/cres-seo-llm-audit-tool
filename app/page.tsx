@@ -3477,13 +3477,21 @@ function ReviewAuditTab({
         if (Object.keys(patch).length > 0) current = { ...current, ...patch };
       }
 
-      // 2. Page reviews newest-first until older than the window (cap 6 pages).
+      // 2. Page reviews until we pass the window (cap N pages). We ask Google
+      //    for newest-first, BUT that sort silently returns zero reviews for
+      //    some listings (a Google/SerpAPI quirk — confirmed live on Flats on
+      //    Maple, which has 147 reviews yet returns none under newestFirst).
+      //    When that happens we fall back to Google's default sort so we never
+      //    report "0 reviews" for a listing that clearly has them; since the
+      //    fallback is relevance-ordered, we window by date afterward and skip
+      //    the newest-first early-break.
       const periodDef = REVIEW_PERIODS.find((p) => p.id === period)!;
       const cutoff = new Date(Date.now() - periodDef.days * 24 * 60 * 60 * 1000);
       let allReviews: any[] = [];
       let topics: { keyword: string; mentions: number }[] = [];
       let token = "";
       let truncated = false;
+      let sortMode: "newestFirst" | "" = "newestFirst"; // "" = Google default (relevance)
       const maxPages = periodDef.maxPages;
       for (let pageNum = 0; pageNum < maxPages; pageNum++) {
         setProgress(`Pulling reviews (page ${pageNum + 1})…`);
@@ -3492,10 +3500,8 @@ function ReviewAuditTab({
           resp = await callSerp({
             engine: "google_maps_reviews",
             data_id: dataId,
-            // sort_by only on the first request; the page token already encodes
-            // the sort. SerpAPI review pagination is flaky/slow, so any later
-            // page failure is non-fatal — we keep the reviews already gathered.
-            ...(token ? { next_page_token: token } : { sort_by: "newestFirst" }),
+            // sort_by only on the first request; the page token encodes the sort.
+            ...(token ? { next_page_token: token } : sortMode ? { sort_by: sortMode } : {}),
           });
         } catch {
           if (pageNum === 0)
@@ -3503,22 +3509,46 @@ function ReviewAuditTab({
           truncated = true;
           break;
         }
+        let batch: any[] = Array.isArray(resp?.reviews) ? resp.reviews : [];
+        // newestFirst returned nothing for this listing — retry page 1 with the
+        // default sort and continue paging from there.
+        if (pageNum === 0 && batch.length === 0 && sortMode === "newestFirst") {
+          sortMode = "";
+          try {
+            resp = await callSerp({ engine: "google_maps_reviews", data_id: dataId });
+            batch = Array.isArray(resp?.reviews) ? resp.reviews : [];
+          } catch {
+            /* leave batch empty; the post-loop guard handles it */
+          }
+        }
         if (pageNum === 0 && Array.isArray(resp?.topics)) {
           topics = resp.topics
             .filter((t: any) => t?.keyword)
             .map((t: any) => ({ keyword: t.keyword, mentions: t.mentions || 0 }));
         }
-        const batch: any[] = Array.isArray(resp?.reviews) ? resp.reviews : [];
         allReviews = allReviews.concat(batch);
-        const oldest = batch[batch.length - 1];
-        const oldestDate = oldest?.iso_date ? new Date(oldest.iso_date) : null;
         token = resp?.serpapi_pagination?.next_page_token || "";
-        // Stop once the page's oldest review predates the window, or no more pages.
-        if (!batch.length || !token || (oldestDate && oldestDate < cutoff)) {
-          if (token && oldestDate && oldestDate >= cutoff) truncated = true; // window may extend beyond what we paged
-          break;
+        if (!batch.length || !token) break;
+        // Early-break only valid when date-sorted. Under the relevance fallback
+        // we page up to maxPages and window by date afterward.
+        if (sortMode === "newestFirst") {
+          const oldest = batch[batch.length - 1];
+          const oldestDate = oldest?.iso_date ? new Date(oldest.iso_date) : null;
+          if (oldestDate && oldestDate < cutoff) break;
         }
         if (pageNum === maxPages - 1 && token) truncated = true;
+      }
+      // Relevance-fallback means newer reviews may exist beyond what we paged,
+      // so mark the report as a partial sample.
+      if (sortMode === "") truncated = true;
+
+      // Guard: a listing that HAS reviews but yields none here means Google
+      // returned nothing this call — don't render a misleading "0 new reviews"
+      // audit; ask for a retry instead.
+      if (allReviews.length === 0 && totalReviews && totalReviews > 0) {
+        throw new Error(
+          "Google didn't return any individual reviews for this listing just now (a temporary Maps hiccup). Please re-run the Review Audit in a moment."
+        );
       }
 
       // 3. Window + compute KPIs in code (never trust the model for counts).
