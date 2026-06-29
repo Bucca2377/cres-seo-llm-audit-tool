@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+# Secrets must never be baked into the image — Railway injects them at runtime.
+.env
+.env.local
+.env*.local
+# Local-only helpers / cruft
+start-dev.cmd
+.git-commit-msg.tmp
+.claude
+*.log
+npm-debug.log*
+.DS_Store
+README.md
