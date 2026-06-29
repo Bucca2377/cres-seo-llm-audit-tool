@@ -89,23 +89,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Launch is INTERMITTENTLY flaky on the Windows dev server: the same binary
+  // launches fine one moment and throws "Executable doesn't exist" the next
+  // (antivirus briefly locking the 203MB exe, or a Turbopack resolution race).
+  // Since it works "every other time", retrying a few times with a short pause
+  // makes it succeed nearly always. Re-resolve the exe each attempt too.
   let browser;
-  try {
-    const executablePath = resolveChromiumExe();
-    browser = await chromium.launch({
-      headless: true,
-      ...(executablePath ? { executablePath } : {}),
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
-  } catch (e) {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4 && !browser; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const executablePath = resolveChromiumExe();
+      browser = await chromium.launch({
+        headless: true,
+        ...(executablePath ? { executablePath } : {}),
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      });
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!browser) {
     // Graceful: return 200 with no pages so the audit degrades to "verify
-    // live" amber instead of a hard failure. Most common cause: Playwright
-    // was updated but its browser wasn't reinstalled, or the dev server is
-    // running with a stale browser registry (restart it).
-    const msg = e instanceof Error ? e.message.split("\n")[0] : "launch failed";
+    // live" amber instead of a hard failure.
+    const msg = lastErr instanceof Error ? lastErr.message.split("\n")[0] : "launch failed";
     return NextResponse.json({
       pages: [],
-      error: `Headless browser failed to launch: ${msg}. Run "npx playwright install chromium" and restart the dev server.`,
+      error: `Headless browser failed to launch after 4 attempts: ${msg}. Run "npx playwright install chromium" and restart the dev server.`,
     });
   }
   const pages: { url: string; status: number | null; text: string }[] = [];
@@ -176,7 +186,24 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    const home = await render(start, !!body.follow);
+    // Retry the homepage render too: a launch can succeed but the first nav
+    // still flake. An empty homepage blanks the entire website column, so it's
+    // worth a second attempt before giving up.
+    let home: { status: number | null; text: string; links: { href: string; text: string }[]; images: string[] } = {
+      status: null,
+      text: "",
+      links: [],
+      images: [],
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await sleep(1500);
+      try {
+        home = await render(start, !!body.follow);
+        if (home.text && home.text.trim().length > 50) break; // got real content
+      } catch {
+        /* retry once */
+      }
+    }
     pages.push({ url: start, status: home.status, text: home.text });
     collectImages(home.images);
 
