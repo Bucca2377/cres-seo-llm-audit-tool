@@ -126,6 +126,18 @@ export interface Property {
   reviewAudit?: ReviewAuditResult;
   /** One entry per Review Audit run; powers the rating + volume trend. */
   reviewSnapshots?: ReviewSnapshot[];
+  /** AI Rank Check: whether AI assistants name this property for its market. */
+  llmRank?: {
+    checkedAt: string;
+    query: string;
+    /** Per-model results (Claude now; ChatGPT/Gemini later). */
+    models: Array<{
+      model: string;
+      mentionsTarget: boolean;
+      namedProperties: string[];
+      note: string;
+    }>;
+  };
 }
 
 /* ---- Review Audit types ---- */
