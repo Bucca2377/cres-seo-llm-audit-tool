@@ -3446,24 +3446,6 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
         </>
       )}
 
-      {/* Critical Issues */}
-      {results.criticalIssues.length > 0 && (
-        <>
-          <div style={sectionTitle}>Critical Issues Impacting Leasing</div>
-          {results.criticalIssues.map((issue, i) => (
-            <div key={i} style={{ marginBottom: 12, paddingLeft: 4 }}>
-              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: B.oxford }}>
-                {i + 1}. {issue.title}
-              </div>
-              <div style={{ ...para, marginBottom: 4 }}>{issue.observed}</div>
-              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.tangelo, lineHeight: 1.5 }}>
-                <strong>Impact:</strong> {issue.impact}
-              </div>
-            </div>
-          ))}
-        </>
-      )}
-
       {/* ILS & Google Consistency */}
       {results.consistency.length > 0 && (
         <>
@@ -3490,6 +3472,24 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
               ))}
             </tbody>
           </table>
+        </>
+      )}
+
+      {/* Critical Issues — after the consistency data that surfaces them */}
+      {results.criticalIssues.length > 0 && (
+        <>
+          <div style={sectionTitle}>Critical Issues Impacting Leasing</div>
+          {results.criticalIssues.map((issue, i) => (
+            <div key={i} style={{ marginBottom: 12, paddingLeft: 4 }}>
+              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: B.oxford }}>
+                {i + 1}. {issue.title}
+              </div>
+              <div style={{ ...para, marginBottom: 4 }}>{issue.observed}</div>
+              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.tangelo, lineHeight: 1.5 }}>
+                <strong>Impact:</strong> {issue.impact}
+              </div>
+            </div>
+          ))}
         </>
       )}
 
@@ -5044,26 +5044,6 @@ function PrintableReport({ property }: { property: Property }) {
               </div>
             )}
 
-            {/* Critical Issues */}
-            {mkt.criticalIssues.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Critical Issues Impacting Leasing
-                </div>
-                {mkt.criticalIssues.map((issue, i) => (
-                  <div key={i} className="pb-avoid" style={{ marginBottom: 9 }}>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, color: PRINT_NAVY }}>
-                      {i + 1}. {issue.title}
-                    </div>
-                    <p style={{ ...bodyP, margin: "2px 0 2px 0" }}>{issue.observed}</p>
-                    <p style={{ ...bodyP, margin: 0, color: "#b14a2a" }}>
-                      <strong style={{ color: "#b14a2a" }}>Impact:</strong> {issue.impact}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* ILS & Google Consistency */}
             {mkt.consistency.length > 0 && (
               <div style={{ marginBottom: 16 }}>
@@ -5100,6 +5080,26 @@ function PrintableReport({ property }: { property: Property }) {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Critical Issues — after the consistency data that surfaces them */}
+            {mkt.criticalIssues.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Critical Issues Impacting Leasing
+                </div>
+                {mkt.criticalIssues.map((issue, i) => (
+                  <div key={i} className="pb-avoid" style={{ marginBottom: 9 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, color: PRINT_NAVY }}>
+                      {i + 1}. {issue.title}
+                    </div>
+                    <p style={{ ...bodyP, margin: "2px 0 2px 0" }}>{issue.observed}</p>
+                    <p style={{ ...bodyP, margin: 0, color: "#b14a2a" }}>
+                      <strong style={{ color: "#b14a2a" }}>Impact:</strong> {issue.impact}
+                    </p>
+                  </div>
+                ))}
               </div>
             )}
 
