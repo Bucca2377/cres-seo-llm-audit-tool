@@ -2181,123 +2181,6 @@ function RankCheck({ property }: { property: Property }) {
 }
 
 /* ================= SEO TAB ======================================== */
-/**
- * AI Rank Check — asks an AI assistant (Claude for now; ChatGPT/Gemini later)
- * what it recommends when a renter searches the property's market, and reports
- * whether this property gets named. This is the "do we show up on AI" answer,
- * the LLM analogue of Google rank.
- */
-function AiRankCheck({
-  property,
-  onUpdateProperty,
-}: {
-  property: Property;
-  onUpdateProperty: (p: Property) => void;
-}) {
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const result = property.llmRank ?? null;
-  const city = extractCity(property.address) || "the area";
-  const productWord = property.propertyType?.trim() || "apartments";
-
-  const run = async () => {
-    setError(null);
-    setRunning(true);
-    try {
-      const query = `best ${productWord} to rent in ${city}`;
-      const prompt = `A prospective renter asks an AI assistant: "What are the ${query}?"
-
-Use web search to answer the way the assistant naturally would, then report which SPECIFIC apartment communities you would actually name or recommend. The property being tracked is "${property.name}" at ${property.address}.
-
-Return ONLY this JSON, no prose:
-{
-  "namedProperties": ["specific community names you would recommend, best first"],
-  "mentionsTarget": true or false (is "${property.name}" among the communities you would name?),
-  "note": "one sentence — if not named, what is surfacing instead and why; if named, how it is positioned"
-}`;
-      const data = await callAI({ prompt, useWebSearch: true, maxTokens: 1500 });
-      const text = (data.content || [])
-        .filter((b: any) => b.type === "text")
-        .map((b: any) => b.text)
-        .join("\n");
-      const m = text.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error("The AI check didn't return a readable result. Try again.");
-      const parsed = JSON.parse(m[0]) as {
-        namedProperties?: string[];
-        mentionsTarget?: boolean;
-        note?: string;
-      };
-      const model = {
-        model: "Claude",
-        mentionsTarget: !!parsed.mentionsTarget,
-        namedProperties: Array.isArray(parsed.namedProperties) ? parsed.namedProperties.slice(0, 12) : [],
-        note: (parsed.note || "").trim(),
-      };
-      onUpdateProperty({
-        ...property,
-        llmRank: { checkedAt: new Date().toISOString(), query, models: [model] },
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "AI check failed.");
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div style={{ background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", marginTop: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 6 }}>
-        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford }}>
-          AI Rank Check
-        </div>
-        <button onClick={run} disabled={running} style={{ background: running ? "#ccc" : B.caribbean, color: "white", border: "none", borderRadius: 8, padding: "9px 18px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: running ? "not-allowed" : "pointer" }}>
-          {running ? "Asking Claude…" : "✦ Check AI Visibility"}
-        </button>
-      </div>
-      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#888", lineHeight: 1.55, marginTop: 0, marginBottom: 16 }}>
-        Asks Claude (with live web search) what it recommends when a renter looks for {productWord} in {city}, and checks whether this property gets named. This is your visibility on AI assistants — a fast-growing way renters research. More models (ChatGPT, Gemini) coming soon.
-      </p>
-      {error && (
-        <div style={{ padding: "10px 14px", background: "#fdecea", border: "1px solid #f5c6c0", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#b14a2a", marginBottom: 12 }}>
-          {error}
-        </div>
-      )}
-      {result &&
-        result.models.map((mdl, i) => (
-          <div key={i} style={{ border: "1px solid #e6e9ec", borderRadius: 10, padding: 16, marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: B.oxford }}>{mdl.model}</span>
-              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", padding: "3px 10px", borderRadius: 20, background: mdl.mentionsTarget ? "#E0F0E8" : "#FCE4E4", color: mdl.mentionsTarget ? "#15803d" : "#b14a2a" }}>
-                {mdl.mentionsTarget ? `Names ${property.name}` : `Does not name ${property.name}`}
-              </span>
-            </div>
-            {mdl.note && <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#444", lineHeight: 1.55, margin: "0 0 10px" }}>{mdl.note}</p>}
-            {mdl.namedProperties.length > 0 && (
-              <div>
-                <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Communities {mdl.model} recommended</div>
-                <ol style={{ margin: 0, paddingLeft: 20, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
-                  {mdl.namedProperties.map((n, j) => {
-                    const isUs = nameMatches(n, property.name);
-                    return (
-                      <li key={j} style={{ fontWeight: isUs ? 700 : 400, color: isUs ? "#15803d" : "#333" }}>
-                        {n}{isUs ? " ← you" : ""}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </div>
-            )}
-          </div>
-        ))}
-      {result && (
-        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#bbb" }}>
-          Checked {new Date(result.checkedAt).toLocaleString()} · query: “{result.query}”
-        </div>
-      )}
-    </div>
-  );
-}
-
 function SEOTab({
   property,
   onUpdateProperty,
@@ -2309,7 +2192,6 @@ function SEOTab({
     <div>
       <SEOAudit property={property} onUpdateProperty={onUpdateProperty} />
       <RankCheck property={property} />
-      <AiRankCheck property={property} onUpdateProperty={onUpdateProperty} />
     </div>
   );
 }
@@ -2517,17 +2399,47 @@ Return ONLY a JSON array of 6 strings, no prose:
         })
         .join("\n\n");
 
-      const recsPrompt = `SEO audit results for ${currentProperty.name} at ${currentProperty.address}:
+      // AI-assistant visibility — folded into this single run so one button
+      // covers Google rank + AI rank, and the recommendations address both.
+      setProgress("Checking AI assistant visibility…");
+      let llmRankResult: Property["llmRank"] | undefined;
+      try {
+        const aiCity = extractCity(currentProperty.address) || "the area";
+        const aiType = currentProperty.propertyType?.trim() || "apartments";
+        const aiQuery = `best ${aiType} to rent in ${aiCity}`;
+        const aiPrompt = `A prospective renter asks an AI assistant: "What are the ${aiQuery}?"\n\nUse web search to answer the way the assistant naturally would, then report the SPECIFIC apartment communities you would actually name or recommend. The property being tracked is "${currentProperty.name}" at ${currentProperty.address}.\n\nReturn ONLY this JSON, no prose:\n{"namedProperties":["community names you would recommend, best first"],"mentionsTarget":true or false,"note":"one sentence"}`;
+        const aiData = await callAI({ prompt: aiPrompt, useWebSearch: true, maxTokens: 1500 });
+        const aiText = (aiData.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+        const am = aiText.match(/\{[\s\S]*\}/);
+        if (am) {
+          const ap = JSON.parse(am[0]) as { namedProperties?: string[]; mentionsTarget?: boolean; note?: string };
+          llmRankResult = {
+            checkedAt: new Date().toISOString(),
+            query: aiQuery,
+            models: [{ model: "Claude", mentionsTarget: !!ap.mentionsTarget, namedProperties: Array.isArray(ap.namedProperties) ? ap.namedProperties.slice(0, 12) : [], note: (ap.note || "").trim() }],
+          };
+        }
+      } catch {
+        /* best-effort — AI visibility is non-fatal */
+      }
+      const aiSummary = llmRankResult
+        ? `AI ASSISTANT VISIBILITY — asked Claude "${llmRankResult.query}": Claude ${llmRankResult.models[0].mentionsTarget ? "NAMES" : "does NOT name"} ${currentProperty.name}. Communities Claude recommended: ${llmRankResult.models[0].namedProperties.join(", ") || "(none returned)"}. ${llmRankResult.models[0].note}`
+        : "AI ASSISTANT VISIBILITY: could not be checked this run.";
 
+      const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
+
+GOOGLE SEARCH RANK DATA:
 ${queryRankSummary}
 
-Based on the actual rank data above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s search visibility. Order by highest ROI first.
+${aiSummary}
+
+Based on BOTH the Google rank data AND the AI-assistant visibility above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s visibility across Google search AND AI assistants (ChatGPT/Claude/Gemini). Order by highest ROI first.
 
 Return ONLY a JSON object, no prose before or after:
 {
   "recommendations": [
     {
-      "priority": "QUICK WIN" | "FOUNDATIONAL" | "MAP PACK" | "STRATEGIC" | "CONTENT" | "LONG-TAIL",
+      "priority": "QUICK WIN" | "FOUNDATIONAL" | "MAP PACK" | "AI VISIBILITY" | "STRATEGIC" | "CONTENT" | "LONG-TAIL",
       "title": "Imperative phrase, max 12 words, no period",
       "what": "1-3 sentences. The concrete action. Name the page/URL, vendor, plugin, or platform. No hedging.",
       "why": "1-2 sentences. Reference the specific query/rank data above + the business impact. Cite numbers.",
@@ -2556,9 +2468,11 @@ Recommendation rules (STRICT):
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - MAP PACK: local 3-pack / Google-listing-driven visibility (the most distinctive SEO category)
    - FOUNDATIONAL: hygiene that everything else depends on (name/address/phone consistency, schema, complete Google listing)
+   - AI VISIBILITY: getting named by AI assistants (ChatGPT/Claude/Gemini) — structured/schema data, FAQ content answering renter questions, and presence on the sources AI cites (Apartments.com, Google reviews, Reddit, "best apartments in {city}" roundups/listicles)
    - CONTENT: requires writing pages, FAQs, blog posts
    - STRATEGIC: > 1 week, multi-month positioning (backlink outreach, review campaigns)
-   - LONG-TAIL: niche query optimization with lower competition`;
+   - LONG-TAIL: niche query optimization with lower competition
+12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.`;
 
       const rResp = await callAI({
         prompt: recsPrompt,
@@ -2579,7 +2493,7 @@ Recommendation rules (STRICT):
         location: extractLocation(currentProperty.address) || extractCity(currentProperty.address),
       };
       setResults(finalResults);
-      onUpdateProperty({ ...currentProperty, seoAudit: finalResults });
+      onUpdateProperty({ ...currentProperty, seoAudit: finalResults, llmRank: llmRankResult ?? currentProperty.llmRank });
       setStage("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Audit failed.");
@@ -3047,6 +2961,38 @@ Recommendation rules (STRICT):
               </tbody>
             </table>
           </div>
+
+          {/* AI assistant visibility (from the same run) */}
+          {property.llmRank && property.llmRank.models[0] && (
+            <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "16px 20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.oxford }}>
+                  AI Assistant Visibility
+                </span>
+                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", padding: "3px 10px", borderRadius: 20, background: property.llmRank.models[0].mentionsTarget ? "#E0F0E8" : "#FCE4E4", color: property.llmRank.models[0].mentionsTarget ? "#15803d" : "#b14a2a" }}>
+                  {property.llmRank.models[0].model}: {property.llmRank.models[0].mentionsTarget ? `names ${property.name}` : `does not name ${property.name}`}
+                </span>
+              </div>
+              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#888", marginBottom: 8 }}>
+                Asked “{property.llmRank.query}” — what an AI assistant recommends to renters.
+              </div>
+              {property.llmRank.models[0].note && (
+                <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#444", lineHeight: 1.55, margin: "0 0 10px" }}>{property.llmRank.models[0].note}</p>
+              )}
+              {property.llmRank.models[0].namedProperties.length > 0 && (
+                <ol style={{ margin: 0, paddingLeft: 20, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+                  {property.llmRank.models[0].namedProperties.map((n, j) => {
+                    const isUs = nameMatches(n, property.name);
+                    return (
+                      <li key={j} style={{ fontWeight: isUs ? 700 : 400, color: isUs ? "#15803d" : "#333" }}>
+                        {n}{isUs ? " ← you" : ""}
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          )}
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
