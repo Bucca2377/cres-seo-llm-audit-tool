@@ -82,17 +82,24 @@ export default function PropertySettings({
   const handleExport = () => {
     try {
       const json = onExport();
-      const safeName = (draft.name || "property").replace(/[^a-z0-9-_]+/gi, "-").toLowerCase();
+      const count = (() => {
+        try {
+          const parsed = JSON.parse(json);
+          return Array.isArray(parsed) ? parsed.length : 1;
+        } catch {
+          return 1;
+        }
+      })();
       const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `cres-property-${safeName}.json`;
+      a.download = "cres-roster-backup.json";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setNotice({ kind: "ok", text: "Property JSON downloaded." });
+      setNotice({ kind: "ok", text: `Backup downloaded — ${count} propert${count === 1 ? "y" : "ies"} with full audit history.` });
     } catch (e) {
       setNotice({ kind: "error", text: e instanceof Error ? e.message : "Export failed." });
     }
@@ -691,9 +698,9 @@ export default function PropertySettings({
                 fontSize: 12,
                 cursor: "pointer",
               }}
-              title="Download this property as a .json file"
+              title="Download ALL properties + their audit history as one backup .json file"
             >
-              ⬇ Export JSON
+              ⬇ Export All (backup)
             </button>
             <button
               onClick={handleImportClick}

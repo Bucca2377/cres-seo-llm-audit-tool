@@ -5392,7 +5392,7 @@ export default function MarketingHub() {
     deleteProperty,
     clearRoster,
     resetActiveToDemo,
-    exportProperty,
+    exportRoster,
     importProperty,
   } = useRoster();
   const [tab, setTab] = useState("marketing");
@@ -5680,7 +5680,7 @@ export default function MarketingHub() {
         onReset={resetActiveToDemo}
         onDelete={() => deleteProperty(property.id)}
         onClearAll={clearRoster}
-        onExport={() => exportProperty()}
+        onExport={() => exportRoster()}
         onImport={(json, opts) => importProperty(json, opts)}
         onUpdateProperty={updatePropertyById}
         onEnrich={enrichPropertyFromSerp}

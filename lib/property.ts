@@ -471,6 +471,18 @@ export function useRoster() {
     return JSON.stringify(rest, null, 2);
   }, [roster, activeProperty.id]);
 
+  /**
+   * Export the ENTIRE roster — every property with its full audit history —
+   * as a JSON array (ids stripped). importProperty() accepts this array
+   * directly, so it doubles as a full backup and a device-to-device /
+   * teammate transfer (e.g. moving data from a local dev URL to the hosted
+   * site, which has separate per-origin browser storage).
+   */
+  const exportRoster = useCallback((): string => {
+    const all = roster.properties.map(({ id: _omit, ...rest }) => rest);
+    return JSON.stringify(all, null, 2);
+  }, [roster]);
+
   const importProperty = useCallback(
     (
       json: string,
@@ -565,6 +577,7 @@ export function useRoster() {
     clearRoster,
     resetActiveToDemo,
     exportProperty,
+    exportRoster,
     importProperty,
     hydrated,
   };
