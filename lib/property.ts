@@ -414,19 +414,26 @@ export function useRoster() {
    * Apply a partial update to a property by id. Used by batch enrichment
    * and audit-time auto-capture. Patches are shallow-merged — existing
    * fields not present in the patch are preserved.
+   *
+   * Uses the FUNCTIONAL setState form so it reads the latest roster each
+   * call. This is critical for the batch-enrichment loop: a version that
+   * closed over `roster` would compute every update from the same stale
+   * snapshot, so each save clobbered the previous one and only the last
+   * property in the batch actually persisted.
    */
-  const updatePropertyById = useCallback(
-    (id: string, patch: Partial<Property>) => {
-      const target = roster.properties.find((p) => p.id === id);
-      if (!target) return;
+  const updatePropertyById = useCallback((id: string, patch: Partial<Property>) => {
+    setRoster((prev) => {
+      const target = prev.properties.find((p) => p.id === id);
+      if (!target) return prev;
       const merged: Property = { ...target, ...patch, id: target.id };
-      persist({
-        ...roster,
-        properties: roster.properties.map((x) => (x.id === id ? merged : x)),
-      });
-    },
-    [persist, roster]
-  );
+      const next: Roster = {
+        ...prev,
+        properties: prev.properties.map((x) => (x.id === id ? merged : x)),
+      };
+      saveRoster(next);
+      return next;
+    });
+  }, []);
 
   const addProperty = useCallback(
     (seed?: Partial<Omit<Property, "id">>) => {
