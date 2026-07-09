@@ -29,7 +29,8 @@ interface Props {
   onUpdateProperty: (id: string, patch: Partial<Property>) => void;
   /** Look up a property's website + GBP URL via SerpAPI. */
   onEnrich: (
-    property: Property
+    property: Property,
+    opts?: { overwrite?: boolean }
   ) => Promise<
     | { patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">>; gbp: unknown }
     | null
@@ -56,6 +57,7 @@ export default function PropertySettings({
   const [draft, setDraft] = useState<Property>(property);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [importMode, setImportMode] = useState<"append" | "merge" | "replace">("append");
+  const [enrichOverwrite, setEnrichOverwrite] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState<{
     running: boolean;
     current: number;
@@ -157,9 +159,11 @@ export default function PropertySettings({
   };
 
   const handleEnrichAll = async () => {
-    const candidates = properties.filter(
-      (p) => !p.website || !p.gbpUrl || !p.apartmentsUrl
-    );
+    // Overwrite mode re-detects EVERY property (to fix wrong/placeholder
+    // values); normal mode only touches properties missing a field.
+    const candidates = enrichOverwrite
+      ? [...properties]
+      : properties.filter((p) => !p.website || !p.gbpUrl || !p.apartmentsUrl);
     if (candidates.length === 0) {
       setNotice({
         kind: "ok",
@@ -168,7 +172,9 @@ export default function PropertySettings({
       return;
     }
     const ok = window.confirm(
-      `Auto-fill Website, Google Business Profile, and Apartments.com URLs for ${candidates.length} of ${properties.length} properties? This runs up to 2 SerpAPI calls per property. Properties that already have all three are skipped, and existing values are never overwritten.`
+      enrichOverwrite
+        ? `RE-DETECT & OVERWRITE all three URLs (Website, Google, Apartments.com) for ${candidates.length} properties from Google? This REPLACES existing values with what Google returns — use it to fix wrong/placeholder data (e.g. an imported website). Up to 2 SerpAPI calls per property. Double-check results afterward.`
+        : `Auto-fill Website, Google Business Profile, and Apartments.com URLs for ${candidates.length} of ${properties.length} properties? This runs up to 2 SerpAPI calls per property. Properties that already have all three are skipped, and existing values are never overwritten.`
     );
     if (!ok) return;
 
@@ -198,7 +204,7 @@ export default function PropertySettings({
         prev ? { ...prev, current: i + 1, label: target.name } : prev
       );
       try {
-        const result = await onEnrich(target);
+        const result = await onEnrich(target, { overwrite: enrichOverwrite });
         if (!result) {
           failed++;
         } else if (
@@ -762,9 +768,15 @@ export default function PropertySettings({
                 cursor: enrichProgress?.running ? "not-allowed" : "pointer",
                 fontWeight: 600,
               }}
-              title="Auto-fill Website, Google Business Profile, and Apartments.com URLs for every property in your roster (up to 2 SerpAPI calls each). Skips properties that already have all three. Never overwrites existing values."
+              title={
+                enrichOverwrite
+                  ? "Re-detect every property from Google and REPLACE its Website, Google, and Apartments.com URLs (up to 2 SerpAPI calls each)."
+                  : "Auto-fill Website, Google Business Profile, and Apartments.com URLs for every property missing them (up to 2 SerpAPI calls each). Never overwrites existing values."
+              }
             >
-              ✨ Enrich all ({properties.filter((p) => !p.website || !p.gbpUrl || !p.apartmentsUrl).length} missing)
+              {enrichOverwrite
+                ? `✨ Re-detect all (overwrite) (${properties.length})`
+                : `✨ Enrich all (${properties.filter((p) => !p.website || !p.gbpUrl || !p.apartmentsUrl).length} missing)`}
             </button>
             <button
               onClick={handleClearAll}
@@ -784,6 +796,33 @@ export default function PropertySettings({
               🧹 Clear all ({rosterSize})
             </button>
           </div>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              marginTop: 10,
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 11.5,
+              color: "#555",
+              cursor: "pointer",
+              lineHeight: 1.45,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={enrichOverwrite}
+              onChange={(e) => setEnrichOverwrite(e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <strong>Overwrite existing values</strong> when enriching — re-detect every
+              property from Google and replace its Website, Google, and Apartments.com URLs.
+              Use this to fix wrong/placeholder data imported into the roster. Leave unchecked
+              to only fill blanks (safer).
+            </span>
+          </label>
 
           {enrichProgress?.running && (
             <div

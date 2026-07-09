@@ -1419,33 +1419,29 @@ function findApartmentsUrl(data: any, property: Property): string {
 function computeEnrichment(
   property: Property,
   gbp: GBPGroundTruth | null,
-  apartmentsUrl?: string
+  apartmentsUrl?: string,
+  overwrite?: boolean
 ): Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">> {
   const patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">> = {};
 
-  // Apartments.com listing URL: only fill if unset and we found a real one.
-  if (apartmentsUrl && !(property.apartmentsUrl || "").trim()) {
+  // Apartments.com listing URL: fill if we found a real one and either the
+  // field is empty or we're overwriting.
+  if (apartmentsUrl && (overwrite || !(property.apartmentsUrl || "").trim())) {
     patch.apartmentsUrl = apartmentsUrl;
   }
 
   if (!gbp) return patch;
 
-  // Website: only fill if unset and SerpAPI gave us one
-  if (!normalizeDomain(property.website) && gbp.website) {
+  // Website: fill from SerpAPI if empty, or replace when overwriting.
+  if (gbp.website && (overwrite || !normalizeDomain(property.website))) {
     patch.website = gbp.website;
   }
 
-  // GBP URL: only fill if unset and we have a stable identifier to build one
-  if (!extractGbpIdFromUrl(property.gbpUrl)) {
-    if (gbp.dataId) {
-      // SerpAPI's data_id is the canonical Google Maps identifier; we use
-      // a query URL form because we don't always have the slug.
-      // Format: https://www.google.com/maps?q=place_id:<PLACE_ID> works
-      // for place_id; for data_id we encode it directly.
-      patch.gbpUrl = `https://www.google.com/maps/place/?q=place_id:${gbp.placeId || gbp.dataId}`;
-    } else if (gbp.placeId) {
-      patch.gbpUrl = `https://www.google.com/maps/place/?q=place_id:${gbp.placeId}`;
-    }
+  // GBP URL: fill/replace if we have a stable identifier to build one.
+  if ((gbp.dataId || gbp.placeId) && (overwrite || !extractGbpIdFromUrl(property.gbpUrl))) {
+    // SerpAPI's data_id / place_id is the canonical Google Maps identifier;
+    // we use a query URL form because we don't always have the slug.
+    patch.gbpUrl = `https://www.google.com/maps/place/?q=place_id:${gbp.placeId || gbp.dataId}`;
   }
 
   return patch;
@@ -1495,7 +1491,8 @@ function buildGbpSearchQuery(property: Property): string {
  * enrichment flow. Returns null on failure or if no GBP found.
  */
 async function enrichPropertyFromSerp(
-  property: Property
+  property: Property,
+  overwrite?: boolean
 ): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">>; gbp: GBPGroundTruth | null } | null> {
   try {
     const query = buildGbpSearchQuery(property);
@@ -1513,7 +1510,7 @@ async function enrichPropertyFromSerp(
     // the google_maps engine returns places, not organic ILS links. Only run
     // it when the property doesn't already have an Apartments.com URL.
     let apartmentsUrl = "";
-    if (!(property.apartmentsUrl || "").trim()) {
+    if (overwrite || !(property.apartmentsUrl || "").trim()) {
       try {
         const listingData = await callSerp({
           query: `${property.name} ${extractCity(property.address)}`.trim(),
@@ -1527,7 +1524,7 @@ async function enrichPropertyFromSerp(
     }
 
     if (!gbp && !apartmentsUrl) return null;
-    const patch = computeEnrichment(property, gbp, apartmentsUrl);
+    const patch = computeEnrichment(property, gbp, apartmentsUrl, overwrite);
     return { patch, gbp };
   } catch {
     return null;
@@ -5738,7 +5735,7 @@ export default function MarketingHub() {
         onExport={() => exportRoster()}
         onImport={(json, opts) => importProperty(json, opts)}
         onUpdateProperty={updatePropertyById}
-        onEnrich={enrichPropertyFromSerp}
+        onEnrich={(p, opts) => enrichPropertyFromSerp(p, opts?.overwrite)}
         onClose={() => setSettingsOpen(false)}
       />
     </div>
