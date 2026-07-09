@@ -2573,7 +2573,7 @@ Recommendation rules (STRICT):
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford }}>
-              SEO Audit
+              SEO / LLM Audit
             </div>
             <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 20, padding: "2px 10px", display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 6, height: 6, background: "#22c55e", borderRadius: "50%", display: "inline-block", animation: "lp 2s infinite" }} />
@@ -2581,7 +2581,7 @@ Recommendation rules (STRICT):
             </div>
           </div>
           <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginTop: 3 }}>
-            Auto-generates relevant queries (plus any you've pinned below), checks Map Pack + organic rank in parallel, returns ranked recommendations.
+            Auto-generates relevant queries (plus any you've pinned below), checks Google Map Pack + organic rank AND whether AI assistants name you, then returns ranked recommendations.
           </div>
           {results && results.timestamp && (
             <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: 4 }}>
@@ -2612,7 +2612,7 @@ Recommendation rules (STRICT):
           title="Web-search audit across the auto-generated queries plus any you've pinned"
         >
           <span>✦</span>
-          {isRunning ? "Auditing..." : results ? "Re-run Audit" : "Run SEO Audit"}
+          {isRunning ? "Auditing..." : results ? "Re-run Audit" : "Run SEO / LLM Audit"}
         </button>
       </div>
 
