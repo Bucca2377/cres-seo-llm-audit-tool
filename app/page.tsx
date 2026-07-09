@@ -1381,6 +1381,35 @@ function extractListingPlatforms(data: any, property: Property): string[] {
 }
 
 /**
+ * Find the property's SPECIFIC Apartments.com listing URL from Google organic
+ * results (e.g. https://www.apartments.com/six-cord-st-louis-mo/l3e6syg/).
+ * Distinguishes a real listing from a city/search page by requiring a short
+ * alphanumeric listing-ID segment in the path (e.g. "l3e6syg"), which city
+ * pages ("/st-louis-mo/pet-friendly/") never have. Verifies the result is
+ * about THIS property via name match. Returns "" if none found.
+ */
+function findApartmentsUrl(data: any, property: Property): string {
+  const org: any[] = Array.isArray(data?.organic_results) ? data.organic_results : [];
+  for (const r of org) {
+    const link: string = r.link || "";
+    const dom = normalizeDomain(link);
+    if (dom !== "apartments.com" && !dom.endsWith(".apartments.com")) continue;
+    let segs: string[] = [];
+    try {
+      segs = new URL(link).pathname.split("/").filter(Boolean);
+    } catch {
+      continue;
+    }
+    // A specific listing has a short id segment (letters+digits, no hyphens).
+    const hasListingId = segs.some((s) => /^[a-z0-9]{6,10}$/i.test(s) && /\d/.test(s));
+    if (segs.length < 2 || !hasListingId) continue;
+    const hay = `${r.title || ""} ${r.snippet || ""} ${link}`;
+    if (nameMatches(hay, property.name)) return link.split("?")[0].split("#")[0];
+  }
+  return "";
+}
+
+/**
  * Compute a website + gbpUrl patch for a property based on what we found
  * via GBP detection. Only suggests values for fields that aren't already
  * set on the property — never overwrites user-set values.
@@ -1389,9 +1418,17 @@ function extractListingPlatforms(data: any, property: Property): string[] {
  */
 function computeEnrichment(
   property: Property,
-  gbp: GBPGroundTruth
-): Partial<Pick<Property, "website" | "gbpUrl">> {
-  const patch: Partial<Pick<Property, "website" | "gbpUrl">> = {};
+  gbp: GBPGroundTruth | null,
+  apartmentsUrl?: string
+): Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">> {
+  const patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">> = {};
+
+  // Apartments.com listing URL: only fill if unset and we found a real one.
+  if (apartmentsUrl && !(property.apartmentsUrl || "").trim()) {
+    patch.apartmentsUrl = apartmentsUrl;
+  }
+
+  if (!gbp) return patch;
 
   // Website: only fill if unset and SerpAPI gave us one
   if (!normalizeDomain(property.website) && gbp.website) {
@@ -1459,7 +1496,7 @@ function buildGbpSearchQuery(property: Property): string {
  */
 async function enrichPropertyFromSerp(
   property: Property
-): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl">>; gbp: GBPGroundTruth } | null> {
+): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">>; gbp: GBPGroundTruth | null } | null> {
   try {
     const query = buildGbpSearchQuery(property);
     // google_maps engine — see the audit pre-flight note: it returns the
@@ -1471,8 +1508,26 @@ async function enrichPropertyFromSerp(
       location: extractLocation(property.address),
     });
     const gbp = extractGBP(data, property);
-    if (!gbp) return null;
-    const patch = computeEnrichment(property, gbp);
+
+    // Apartments.com listing URL — a separate google (organic) search, since
+    // the google_maps engine returns places, not organic ILS links. Only run
+    // it when the property doesn't already have an Apartments.com URL.
+    let apartmentsUrl = "";
+    if (!(property.apartmentsUrl || "").trim()) {
+      try {
+        const listingData = await callSerp({
+          query: `${property.name} ${extractCity(property.address)}`.trim(),
+          engine: "google",
+          location: extractLocation(property.address),
+        });
+        apartmentsUrl = findApartmentsUrl(listingData, property);
+      } catch {
+        /* best-effort — apts.com is optional */
+      }
+    }
+
+    if (!gbp && !apartmentsUrl) return null;
+    const patch = computeEnrichment(property, gbp, apartmentsUrl);
     return { patch, gbp };
   } catch {
     return null;

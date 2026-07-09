@@ -31,7 +31,7 @@ interface Props {
   onEnrich: (
     property: Property
   ) => Promise<
-    | { patch: Partial<Pick<Property, "website" | "gbpUrl">>; gbp: unknown }
+    | { patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">>; gbp: unknown }
     | null
   >;
   onClose: () => void;
@@ -158,17 +158,17 @@ export default function PropertySettings({
 
   const handleEnrichAll = async () => {
     const candidates = properties.filter(
-      (p) => !p.website || !p.gbpUrl
+      (p) => !p.website || !p.gbpUrl || !p.apartmentsUrl
     );
     if (candidates.length === 0) {
       setNotice({
         kind: "ok",
-        text: "All properties already have website + GBP URL set. Nothing to enrich.",
+        text: "All properties already have website, Google, and Apartments.com URLs set. Nothing to enrich.",
       });
       return;
     }
     const ok = window.confirm(
-      `Auto-fill website + Google Business Profile URL for ${candidates.length} of ${properties.length} properties? This runs 1 SerpAPI call per property (free under 250/mo). Properties that already have BOTH fields set are skipped. Existing values are never overwritten.`
+      `Auto-fill Website, Google Business Profile, and Apartments.com URLs for ${candidates.length} of ${properties.length} properties? This runs up to 2 SerpAPI calls per property. Properties that already have all three are skipped, and existing values are never overwritten.`
     );
     if (!ok) return;
 
@@ -187,6 +187,7 @@ export default function PropertySettings({
 
     let enrichedWebsite = 0;
     let enrichedGbp = 0;
+    let enrichedApts = 0;
     let skipped = 0;
     let failed = 0;
 
@@ -208,6 +209,7 @@ export default function PropertySettings({
           onUpdateProperty(target.id, result.patch);
           if (result.patch.website) enrichedWebsite++;
           if (result.patch.gbpUrl) enrichedGbp++;
+          if (result.patch.apartmentsUrl) enrichedApts++;
         }
       } catch {
         failed++;
@@ -219,7 +221,7 @@ export default function PropertySettings({
     setEnrichProgress(null);
     setNotice({
       kind: "ok",
-      text: `Enrichment complete. Website set on ${enrichedWebsite}, GBP URL set on ${enrichedGbp}. ${skipped} already populated. ${failed} not found via SerpAPI.${
+      text: `Enrichment complete. Website set on ${enrichedWebsite}, Google URL on ${enrichedGbp}, Apartments.com on ${enrichedApts}. ${skipped} already complete. ${failed} not found via SerpAPI.${
         enrichCancelRef.current ? " (Cancelled before finishing.)" : ""
       }`,
     });
@@ -760,9 +762,9 @@ export default function PropertySettings({
                 cursor: enrichProgress?.running ? "not-allowed" : "pointer",
                 fontWeight: 600,
               }}
-              title="Auto-fill Website + GBP URL for every property in your roster (1 SerpAPI call each, free under 250/mo). Skips properties that already have both fields set. Never overwrites existing values."
+              title="Auto-fill Website, Google Business Profile, and Apartments.com URLs for every property in your roster (up to 2 SerpAPI calls each). Skips properties that already have all three. Never overwrites existing values."
             >
-              ✨ Enrich all ({properties.filter((p) => !p.website || !p.gbpUrl).length} missing)
+              ✨ Enrich all ({properties.filter((p) => !p.website || !p.gbpUrl || !p.apartmentsUrl).length} missing)
             </button>
             <button
               onClick={handleClearAll}
