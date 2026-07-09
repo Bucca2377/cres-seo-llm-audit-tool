@@ -3763,8 +3763,7 @@ Return ONLY this JSON object, no prose before or after:
       "success": "Measurable outcome with timeframe.",
       "source": "Which finding this addresses, e.g. 'Virtual tour missing on website + Apartments.com'."
     }
-  ],
-  "summary": ["paragraph 1: strongest assets + most urgent gap", "paragraph 2: the 2-3 actions most likely to drive leases"]
+  ]
 }
 
 RECOMMENDATION RULES (match the rest of the app exactly):
@@ -4125,16 +4124,6 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
         <>
           <div style={sectionTitle}>Recommendations to Drive More Leases</div>
           <RecommendationsBlock recs={results.recommendations} />
-        </>
-      )}
-
-      {/* Summary */}
-      {results.summary.length > 0 && (
-        <>
-          <div style={sectionTitle}>Summary</div>
-          {results.summary.map((p, i) => (
-            <p key={i} style={para}>{p}</p>
-          ))}
         </>
       )}
     </div>
@@ -5754,17 +5743,6 @@ function PrintableReport({ property }: { property: Property }) {
               </div>
             )}
 
-            {/* Marketing Summary */}
-            {mkt.summary.length > 0 && (
-              <div className="pb-avoid">
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Summary
-                </div>
-                {mkt.summary.map((p, i) => (
-                  <p key={i} style={bodyP}>{p}</p>
-                ))}
-              </div>
-            )}
           </section>
         )}
 
