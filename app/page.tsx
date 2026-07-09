@@ -3141,7 +3141,10 @@ Return ONLY this JSON object, no prose before or after:
 }
 
 RECOMMENDATION RULES (match the rest of the app exactly):
-- EXACTLY 5 recommendations, ordered highest impact first.
+- MUST RESOLVE THE FINDINGS: the recommendations exist to fix what THIS audit found. Every Critical Issue you listed AND every red (ISSUE) or amber (CHECK) cell in the consistency check must be addressed by at least one recommendation. Do not invent recommendations unrelated to the findings, and do not leave a critical issue without a fix.
+- Order recommendations by damage: the fixes for the most harmful critical issues come first.
+- "source" MUST name the exact finding each card resolves, e.g. "Resolves Critical Issue #1: office-hours conflict across platforms" or "Fixes Website + Apartments.com: Virtual tour ISSUE".
+- COUNT: aim for 5 recommendations; use up to 7 ONLY if there are more distinct critical issues / red gaps than 5 to cover. Never leave a critical issue uncovered just to hit a number.
 - "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
 - Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.`;
