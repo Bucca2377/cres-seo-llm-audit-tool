@@ -3926,15 +3926,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         Reviews the property website, Apartments.com listing, and Google Business Profile for leasing readiness and cross-platform consistency.
       </div>
 
-      {/* Optimization checklist + visibility score — populated by the single
-          Run Marketing Audit button below (alongside the consistency audit). */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 10 }}>
-          Optimization Checklist
-        </div>
-        <OptimizationChecklist property={property} onUpdateProperty={onUpdateProperty} />
-      </div>
-
       {/* URL inputs */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10 }}>
@@ -3992,6 +3983,15 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           Audit error: {error}
         </div>
       )}
+
+      {/* Optimization checklist + visibility score — populated by the single
+          Run Marketing Audit button above (alongside the consistency audit). */}
+      <div style={{ marginTop: 24, marginBottom: 24 }}>
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 10 }}>
+          Optimization Checklist
+        </div>
+        <OptimizationChecklist property={property} onUpdateProperty={onUpdateProperty} />
+      </div>
 
       {!results && !running && !error && (
         <div style={{ marginTop: 16, padding: "20px 16px", background: "#fafafa", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
