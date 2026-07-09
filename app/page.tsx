@@ -3103,28 +3103,41 @@ function MarketingAuditTab({
       setProgress("Rendering the website with a real browser (60–90s)…");
       let siteText = "";
       let siteImages: string[] = [];
+      let siteBlocked = false;
       try {
         const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 8 });
-        siteText = (siteRes.pages || [])
+        const sitePages = siteRes.pages || [];
+        siteText = sitePages
           .map((p) => `=== ${p.url} (status ${p.status ?? "?"}) ===\n${(p.text || "").trim() || "[no content rendered]"}`)
           .join("\n\n");
         siteImages = siteRes.images || [];
+        // "Blocked" = nothing usable came back (empty, or every page 403/thin) —
+        // e.g. an aggressive Cloudflare challenge our headless browser can't pass.
+        // In that case we tell Claude to fetch the site with its OWN web_fetch,
+        // which reaches sites our browser is 403'd from (same as Apartments.com).
+        siteBlocked =
+          !sitePages.some((p) => p.status === 200 && (p.text || "").trim().length > 50);
       } catch {
         siteText = "";
+        siteBlocked = true;
       }
 
       setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
-PROPERTY WEBSITE — the pages below were captured with a REAL headless browser, so JavaScript-rendered pricing, floor plans, galleries, tour tools, and specials ARE included. Report ONLY what you actually see in them:
-${siteText || "(the website could not be rendered this run — mark website rows amber 'verify live')"}
+PROPERTY WEBSITE${current.website ? ` (${current.website})` : ""}:
+${
+  siteBlocked
+    ? `Our headless browser was BLOCKED by the site's bot protection (Cloudflare / 403), so no page content is below. FETCH the website URL above with your web_fetch tool and report what you ACTUALLY see there (office hours, floor plans/pricing, tour scheduling, online application, concessions, amenities, photos). Treat web_fetch content as authoritative for the website columns, exactly like the Apartments.com listing. Only if web_fetch ALSO cannot access it, mark the website rows amber "could not verify; check live".`
+    : `the pages below were captured with a REAL headless browser, so JavaScript-rendered pricing, floor plans, galleries, tour tools, and specials ARE included. Report ONLY what you actually see in them:\n${siteText}`
+}
 
 APARTMENTS.COM LISTING: ${current.apartmentsUrl ? `FETCH this exact URL with your web fetch tool and report what you actually see (Apartments.com is readable that way and returns the full units/pricing/specials/photos/hours): ${current.apartmentsUrl}` : "no listing URL was provided"}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
 ${gbpBlock}
 
 RULES (apply strictly):
-- WEBSITE: the content above is fully rendered (JavaScript included). READ it and report real data — mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present. Mark a website row RED only when the feature is structurally ABSENT across all the rendered pages. Mark AMBER only if a page shows status 403/empty or the website could not be rendered.
+- WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
 - APARTMENTS.COM: fetch the URL above with your tool. If it returns the listing (units, pricing, photos, specials), mark "currently advertising / active" GREEN and report the real data. Only mark "not advertising" red if it LITERALLY says "not currently advertising". If your fetch errors or returns nothing, mark the Apartments.com rows AMBER "could not verify automatically; check live" — NEVER red.
 - GOOGLE SCOPE: a Google Business Profile only carries active presence, hours, photos, rating/reviews, and the website link. For rows it does NOT carry (pricing, concessions, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature". Never put amber/red in those Google cells.
 - OFFICE HOURS = CONSISTENCY CHECK. First, normalize the values: a day shown as "12 AM to 12 AM" (or "12:00 AM to 12:00 AM" / "00:00 to 00:00") is a ZERO-LENGTH window that means CLOSED, not open 24 hours. Treat it as Closed. Then compare the hours across platforms day by day. Only flag a genuine difference in OPEN/CLOSE TIMES on a day both platforms are open (e.g. "Google shows weekdays starting at 10 AM, but the website and Apartments.com show 9 AM, and Google shows Saturday closing at 4 PM vs 2 PM elsewhere"). Mark conflicting cells AMBER with that plain-English note. Do NOT flag "12 AM to 12 AM" as open 24 hours, a data-entry error, or a conflict — it just means Closed. Mark hours GREEN when they match (treating 12 AM-12 AM as Closed). Write plainly; never use jargon like "structurally invalid".
