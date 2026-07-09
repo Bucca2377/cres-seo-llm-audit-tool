@@ -3017,6 +3017,17 @@ function MarketingAuditTab({
     setProgress("");
   }, [property.id]);
 
+  // Re-sync the URL fields when the stored values change out from under the
+  // form — e.g. after batch enrichment / re-detect overwrites them — so the
+  // Marketing Audit inputs reflect the latest saved data. Keyed on the values
+  // (the effect above only fires on a property switch). Safe against typing:
+  // editing a field updates local state only, not property.*.
+  useEffect(() => {
+    setWebsite(property.website ?? "");
+    setAptUrl(property.apartmentsUrl ?? "");
+    setGbpUrl(property.gbpUrl ?? "");
+  }, [property.website, property.apartmentsUrl, property.gbpUrl]);
+
   const running = stage === "running";
 
   const run = async () => {
