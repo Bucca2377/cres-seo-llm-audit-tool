@@ -3209,7 +3209,8 @@ ${gbpBlock}
 RULES (apply strictly):
 - WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
 - APARTMENTS.COM: fetch the URL above with your tool. If it returns the listing (units, pricing, photos, specials), mark "currently advertising / active" GREEN and report the real data. Only mark "not advertising" red if it LITERALLY says "not currently advertising". If your fetch errors or returns nothing, mark the Apartments.com rows AMBER "could not verify automatically; check live" — NEVER red.
-- GOOGLE SCOPE: a Google Business Profile only carries active presence, hours, photos, rating/reviews, and the website link. For rows it does NOT carry (pricing, concessions, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature". Never put amber/red in those Google cells.
+- GOOGLE SCOPE: a Google Business Profile carries active presence, hours, photos, rating/reviews, the website link, AND time-limited "Offer" / "What's new" posts (which CAN surface a concession or special in search and the knowledge panel). For rows Google genuinely does NOT carry (pricing, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature", and never put amber/red in those cells.
+- CONCESSIONS ON GOOGLE: because a concession CAN be promoted via a Google Business Profile Offer post, do NOT mark the "Concessions listed" Google cell "na". Mark it "green" only if you can actually see a live offer/post advertising the current special; otherwise mark it "amber" with note "No offer post live on the Google profile; special only visible on the website and Apartments.com". A recommendation to add a Google concession/offer post is only valid when this cell is amber, and must never appear while the cell is green or na.
 - OFFICE HOURS = CONSISTENCY CHECK. First, normalize the values: a day shown as "12 AM to 12 AM" (or "12:00 AM to 12:00 AM" / "00:00 to 00:00") is a ZERO-LENGTH window that means CLOSED, not open 24 hours. Treat it as Closed. Then compare the hours across platforms day by day. Only flag a genuine difference in OPEN/CLOSE TIMES on a day both platforms are open (e.g. "Google shows weekdays starting at 10 AM, but the website and Apartments.com show 9 AM, and Google shows Saturday closing at 4 PM vs 2 PM elsewhere"). Mark conflicting cells AMBER with that plain-English note. Do NOT flag "12 AM to 12 AM" as open 24 hours, a data-entry error, or a conflict — it just means Closed. Mark hours GREEN when they match (treating 12 AM-12 AM as Closed). Write plainly; never use jargon like "structurally invalid".
 - PHOTOS = QUALITY, NOT PRESENCE. Mark GREEN only when the content shows genuinely professional, high-quality photos (a real gallery with sharp interior/amenity/exterior images). The mere existence of photos is NOT enough. If you can only confirm photos exist but cannot judge quality (e.g. a Google profile that "has photos", or just a count), mark AMBER "photos present, quality not assessed". Never mark photos GREEN from presence alone.
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy. Different tracking numbers are intentional for lead-source attribution.
@@ -3544,80 +3545,6 @@ function MarketingAuditResultView({ results, property }: { results: MarketingAud
         </>
       )}
 
-      {/* Progress Since Last Audit — deterministic diff vs the prior run */}
-      {property.marketingAuditPrev &&
-        (() => {
-          const prog = computeAuditProgress(
-            property.marketingAuditPrev,
-            results.consistency,
-            property.checklistStatuses ?? {}
-          );
-          const resolved = [...prog.fixed, ...prog.completed];
-          const regressedAll = [...prog.regressed, ...prog.slipped];
-          const empty =
-            resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
-          const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
-            month: "long",
-            day: "numeric",
-            year: "numeric",
-          });
-          const groupLabel: React.CSSProperties = {
-            fontFamily: "'Barlow Condensed',sans-serif",
-            fontWeight: 700,
-            fontSize: 13,
-            letterSpacing: "0.04em",
-            margin: "10px 0 4px",
-          };
-          const item: React.CSSProperties = {
-            fontFamily: "'Josefin Sans',sans-serif",
-            fontSize: 12.5,
-            color: "#333",
-            lineHeight: 1.5,
-            marginBottom: 2,
-          };
-          return (
-            <>
-              <div style={sectionTitle}>Progress Since Last Audit</div>
-              <p style={{ ...para, marginBottom: 10 }}>
-                Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open,{" "}
-                {regressedAll.length} regressed.
-              </p>
-              {empty ? (
-                <p style={{ ...para, color: "#9aa3ad", fontStyle: "italic" }}>
-                  No changes in tracked findings since the last audit.
-                </p>
-              ) : (
-                <div style={{ marginBottom: 8 }}>
-                  {resolved.length > 0 && (
-                    <div>
-                      <div style={{ ...groupLabel, color: "#15803d" }}>✓ Resolved</div>
-                      {resolved.map((s, i) => (
-                        <div key={`f${i}`} style={item}>{s}</div>
-                      ))}
-                    </div>
-                  )}
-                  {prog.stillOpen.length > 0 && (
-                    <div>
-                      <div style={{ ...groupLabel, color: "#9a7200" }}>⚠ Still open</div>
-                      {prog.stillOpen.map((s, i) => (
-                        <div key={`o${i}`} style={item}>{s}</div>
-                      ))}
-                    </div>
-                  )}
-                  {regressedAll.length > 0 && (
-                    <div>
-                      <div style={{ ...groupLabel, color: B.tangelo }}>✗ Regressed</div>
-                      {regressedAll.map((s, i) => (
-                        <div key={`r${i}`} style={item}>{s}</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          );
-        })()}
-
       {/* Website Findings */}
       {results.websiteFindings.length > 0 && (
         <>
@@ -3699,6 +3626,82 @@ function MarketingAuditResultView({ results, property }: { results: MarketingAud
           <RecommendationsBlock recs={results.recommendations} />
         </>
       )}
+
+      {/* Progress Since Last Audit — accountability recap, kept at the bottom
+          so the report leads with findings + actions and closes with what
+          moved since the prior run. Deterministic diff vs the prior run. */}
+      {property.marketingAuditPrev &&
+        (() => {
+          const prog = computeAuditProgress(
+            property.marketingAuditPrev,
+            results.consistency,
+            property.checklistStatuses ?? {}
+          );
+          const resolved = [...prog.fixed, ...prog.completed];
+          const regressedAll = [...prog.regressed, ...prog.slipped];
+          const empty =
+            resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
+          const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          });
+          const groupLabel: React.CSSProperties = {
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            letterSpacing: "0.04em",
+            margin: "10px 0 4px",
+          };
+          const item: React.CSSProperties = {
+            fontFamily: "'Josefin Sans',sans-serif",
+            fontSize: 12.5,
+            color: "#333",
+            lineHeight: 1.5,
+            marginBottom: 2,
+          };
+          return (
+            <>
+              <div style={sectionTitle}>Progress Since Last Audit</div>
+              <p style={{ ...para, marginBottom: 10 }}>
+                Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open,{" "}
+                {regressedAll.length} regressed.
+              </p>
+              {empty ? (
+                <p style={{ ...para, color: "#9aa3ad", fontStyle: "italic" }}>
+                  No changes in tracked findings since the last audit.
+                </p>
+              ) : (
+                <div style={{ marginBottom: 8 }}>
+                  {resolved.length > 0 && (
+                    <div>
+                      <div style={{ ...groupLabel, color: "#15803d" }}>✓ Resolved</div>
+                      {resolved.map((s, i) => (
+                        <div key={`f${i}`} style={item}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                  {prog.stillOpen.length > 0 && (
+                    <div>
+                      <div style={{ ...groupLabel, color: "#9a7200" }}>⚠ Still open</div>
+                      {prog.stillOpen.map((s, i) => (
+                        <div key={`o${i}`} style={item}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                  {regressedAll.length > 0 && (
+                    <div>
+                      <div style={{ ...groupLabel, color: B.tangelo }}>✗ Regressed</div>
+                      {regressedAll.map((s, i) => (
+                        <div key={`r${i}`} style={item}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
     </div>
   );
 }
@@ -5224,69 +5227,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               </div>
             )}
 
-            {/* Progress Since Last Audit — deterministic diff vs the prior run */}
-            {property.marketingAuditPrev &&
-              (() => {
-                const prog = computeAuditProgress(
-                  property.marketingAuditPrev,
-                  mkt.consistency,
-                  property.checklistStatuses ?? {}
-                );
-                const resolved = [...prog.fixed, ...prog.completed];
-                const regressedAll = [...prog.regressed, ...prog.slipped];
-                const empty =
-                  resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
-                const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                });
-                const grp: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.03em", margin: "6px 0 2px" };
-                const li: React.CSSProperties = { ...bodyP, margin: "0 0 2px 0", fontSize: 10.5 };
-                return (
-                  <div className="pb-avoid" style={{ marginBottom: 16 }}>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                      Progress Since Last Audit
-                    </div>
-                    <p style={{ ...bodyP, marginBottom: 6 }}>
-                      Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open, {regressedAll.length} regressed.
-                    </p>
-                    {empty ? (
-                      <p style={{ ...bodyP, color: PRINT_MUTED, fontStyle: "italic" }}>
-                        No changes in tracked findings since the last audit.
-                      </p>
-                    ) : (
-                      <>
-                        {resolved.length > 0 && (
-                          <div>
-                            <div style={{ ...grp, color: "#15803d" }}>✓ Resolved</div>
-                            {resolved.map((s, i) => (
-                              <p key={`f${i}`} style={li}>{s}</p>
-                            ))}
-                          </div>
-                        )}
-                        {prog.stillOpen.length > 0 && (
-                          <div>
-                            <div style={{ ...grp, color: "#9a7200" }}>⚠ Still open</div>
-                            {prog.stillOpen.map((s, i) => (
-                              <p key={`o${i}`} style={li}>{s}</p>
-                            ))}
-                          </div>
-                        )}
-                        {regressedAll.length > 0 && (
-                          <div>
-                            <div style={{ ...grp, color: PRINT_ORANGE }}>✗ Regressed</div>
-                            {regressedAll.map((s, i) => (
-                              <p key={`r${i}`} style={li}>{s}</p>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
-
             {/* Website Findings */}
             {mkt.websiteFindings.length > 0 && (
               <div style={{ marginBottom: 16 }}>
@@ -5381,6 +5321,71 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 ))}
               </div>
             )}
+
+            {/* Progress Since Last Audit — accountability recap, kept at the
+                bottom so the report leads with findings + actions and closes
+                with what moved since the prior run. Deterministic diff. */}
+            {property.marketingAuditPrev &&
+              (() => {
+                const prog = computeAuditProgress(
+                  property.marketingAuditPrev,
+                  mkt.consistency,
+                  property.checklistStatuses ?? {}
+                );
+                const resolved = [...prog.fixed, ...prog.completed];
+                const regressedAll = [...prog.regressed, ...prog.slipped];
+                const empty =
+                  resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
+                const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                });
+                const grp: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.03em", margin: "6px 0 2px" };
+                const li: React.CSSProperties = { ...bodyP, margin: "0 0 2px 0", fontSize: 10.5 };
+                return (
+                  <div className="pb-avoid" style={{ marginBottom: 16 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                      Progress Since Last Audit
+                    </div>
+                    <p style={{ ...bodyP, marginBottom: 6 }}>
+                      Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open, {regressedAll.length} regressed.
+                    </p>
+                    {empty ? (
+                      <p style={{ ...bodyP, color: PRINT_MUTED, fontStyle: "italic" }}>
+                        No changes in tracked findings since the last audit.
+                      </p>
+                    ) : (
+                      <>
+                        {resolved.length > 0 && (
+                          <div>
+                            <div style={{ ...grp, color: "#15803d" }}>✓ Resolved</div>
+                            {resolved.map((s, i) => (
+                              <p key={`f${i}`} style={li}>{s}</p>
+                            ))}
+                          </div>
+                        )}
+                        {prog.stillOpen.length > 0 && (
+                          <div>
+                            <div style={{ ...grp, color: "#9a7200" }}>⚠ Still open</div>
+                            {prog.stillOpen.map((s, i) => (
+                              <p key={`o${i}`} style={li}>{s}</p>
+                            ))}
+                          </div>
+                        )}
+                        {regressedAll.length > 0 && (
+                          <div>
+                            <div style={{ ...grp, color: PRINT_ORANGE }}>✗ Regressed</div>
+                            {regressedAll.map((s, i) => (
+                              <p key={`r${i}`} style={li}>{s}</p>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
           </section>
         )}
