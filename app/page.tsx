@@ -1981,16 +1981,23 @@ Recommendation rules (STRICT):
    - LONG-TAIL: niche query optimization with lower competition
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.`;
 
-      const rResp = await callAI({
-        prompt: recsPrompt,
-        system: buildSystemPrompt(currentProperty),
-        maxTokens: 4000,
-      });
-
-      // Parse the structured JSON. parseRecCards recovers complete cards even
-      // if the model's JSON is truncated, so we never dump raw JSON to the UI.
-      const rawText = rResp.content?.[0]?.text || "";
-      const recommendations: AuditRecommendations = parseRecCards(rawText);
+      // Recommendations are non-fatal: if this call blips (e.g. a transient
+      // 502 from the host), still save the ranks + comp-set instead of failing
+      // the whole audit. The user can re-run to refill recommendations.
+      let recommendations: AuditRecommendations = [];
+      try {
+        const rResp = await callAI({
+          prompt: recsPrompt,
+          system: buildSystemPrompt(currentProperty),
+          maxTokens: 4000,
+        });
+        // parseRecCards recovers complete cards even if the JSON is truncated,
+        // so we never dump raw JSON to the UI.
+        const rawText = rResp.content?.[0]?.text || "";
+        recommendations = parseRecCards(rawText);
+      } catch {
+        /* keep recommendations empty; the audit still saves */
+      }
 
       const finalResults: SEOAuditResults = {
         queries,
