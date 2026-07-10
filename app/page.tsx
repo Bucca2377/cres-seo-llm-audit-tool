@@ -16,6 +16,7 @@ import {
   type RecommendationPriority,
   type MarketingAuditResult,
   type MarketingStatus,
+  type MarketingConsistencyRow,
   type ReviewAuditResult,
   type ReviewPeriod,
   type ReviewSnapshot,
@@ -2398,6 +2399,79 @@ const MK_STATUS: Record<MarketingStatus, { bg: string; fg: string; label: string
   na: { bg: "#f4f6f8", fg: "#9aa3ad", label: "N/A" },
 };
 
+/** Uppercase status label for the progress diff strings (GOOD/CHECK/ISSUE/N/A). */
+const MK_STATUS_WORD: Record<MarketingStatus, string> = {
+  green: "GOOD",
+  amber: "CHECK",
+  red: "ISSUE",
+  na: "N/A",
+};
+
+/**
+ * Deterministic diff between the previous Marketing Audit snapshot and the
+ * current run — no AI. Compares the consistency grid (per row/platform) and
+ * the optimization checklist so a client can see accountability run-to-run.
+ *
+ * A consistency cell is a "problem" when red (ISSUE) or amber (CHECK); "ok"
+ * when green (GOOD) or na (N/A).
+ */
+function computeAuditProgress(
+  prev: { consistency: MarketingConsistencyRow[]; checklistStatuses: Record<string, ChecklistStatus>; timestamp: string },
+  currConsistency: MarketingConsistencyRow[],
+  currChecklist: Record<string, ChecklistStatus>
+): {
+  fixed: string[];
+  stillOpen: string[];
+  regressed: string[];
+  completed: string[];
+  slipped: string[];
+  sinceTimestamp: string;
+} {
+  const fixed: string[] = [];
+  const stillOpen: string[] = [];
+  const regressed: string[] = [];
+  const completed: string[] = [];
+  const slipped: string[] = [];
+
+  const isProblem = (s: MarketingStatus) => s === "red" || s === "amber";
+  const isOk = (s: MarketingStatus) => s === "green" || s === "na";
+
+  const platforms: Array<{ key: "apartments" | "google" | "website"; label: string }> = [
+    { key: "apartments", label: "Apartments.com" },
+    { key: "google", label: "Google" },
+    { key: "website", label: "Website" },
+  ];
+
+  const currByLabel = new Map(currConsistency.map((r) => [r.label, r]));
+  for (const prevRow of prev.consistency) {
+    const currRow = currByLabel.get(prevRow.label);
+    if (!currRow) continue; // only rows present in BOTH
+    for (const { key, label } of platforms) {
+      const p = prevRow[key]?.status;
+      const c = currRow[key]?.status;
+      if (!p || !c) continue;
+      const desc = `${prevRow.label} — ${label}: ${MK_STATUS_WORD[p]} → ${MK_STATUS_WORD[c]}`;
+      if (isProblem(p) && c === "green") fixed.push(desc);
+      else if (isOk(p) && isProblem(c)) regressed.push(desc);
+      else if (isProblem(p) && isProblem(c)) stillOpen.push(desc);
+    }
+  }
+
+  // Checklist items — match by id, compare prev vs current status.
+  for (const item of LLM_ITEMS) {
+    const id = String(item.id);
+    const p = prev.checklistStatuses[id];
+    const c = currChecklist[id];
+    if (!p || !c) continue;
+    const wasIncomplete = p === "missing" || p === "partial";
+    const nowIncomplete = c === "missing" || c === "partial";
+    if (wasIncomplete && c === "complete") completed.push(item.label);
+    else if (p === "complete" && nowIncomplete) slipped.push(item.label);
+  }
+
+  return { fixed, stillOpen, regressed, completed, slipped, sinceTimestamp: prev.timestamp };
+}
+
 function MkStatusCell({ cell }: { cell: { status: MarketingStatus; note: string } }) {
   const s = MK_STATUS[cell.status] || MK_STATUS.amber;
   return (
@@ -2988,6 +3062,17 @@ function MarketingAuditTab({
       setError("Add the property website URL first.");
       return;
     }
+    // Capture the PRIOR run BEFORE any fetching or property mutation. The
+    // checklistStatuses snapshotted here are the OLD ones (before this run
+    // overwrites them), which is what the "Progress Since Last Audit" diff
+    // compares against. Deterministic — no AI involved.
+    const prevSnapshot = property.marketingAudit
+      ? {
+          consistency: property.marketingAudit.consistency,
+          checklistStatuses: { ...(property.checklistStatuses ?? {}) },
+          timestamp: property.marketingAudit.timestamp,
+        }
+      : undefined;
     setStage("running");
     setResults(null);
 
@@ -3233,7 +3318,11 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         timestamp: new Date().toISOString(),
       };
 
-      current = { ...current, marketingAudit: result };
+      current = {
+        ...current,
+        marketingAudit: result,
+        marketingAuditPrev: prevSnapshot ?? property.marketingAuditPrev,
+      };
       onUpdateProperty(current);
       setResults(result);
 
@@ -3376,13 +3465,13 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       )}
 
       {results && (
-        <MarketingAuditResultView results={results} />
+        <MarketingAuditResultView results={results} property={property} />
       )}
     </div>
   );
 }
 
-function MarketingAuditResultView({ results }: { results: MarketingAuditResult }) {
+function MarketingAuditResultView({ results, property }: { results: MarketingAuditResult; property: Property }) {
   const sectionTitle: React.CSSProperties = {
     fontFamily: "'Barlow Condensed',sans-serif",
     fontWeight: 700,
@@ -3421,6 +3510,80 @@ function MarketingAuditResultView({ results }: { results: MarketingAuditResult }
           ))}
         </>
       )}
+
+      {/* Progress Since Last Audit — deterministic diff vs the prior run */}
+      {property.marketingAuditPrev &&
+        (() => {
+          const prog = computeAuditProgress(
+            property.marketingAuditPrev,
+            results.consistency,
+            property.checklistStatuses ?? {}
+          );
+          const resolved = [...prog.fixed, ...prog.completed];
+          const regressedAll = [...prog.regressed, ...prog.slipped];
+          const empty =
+            resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
+          const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          });
+          const groupLabel: React.CSSProperties = {
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            letterSpacing: "0.04em",
+            margin: "10px 0 4px",
+          };
+          const item: React.CSSProperties = {
+            fontFamily: "'Josefin Sans',sans-serif",
+            fontSize: 12.5,
+            color: "#333",
+            lineHeight: 1.5,
+            marginBottom: 2,
+          };
+          return (
+            <>
+              <div style={sectionTitle}>Progress Since Last Audit</div>
+              <p style={{ ...para, marginBottom: 10 }}>
+                Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open,{" "}
+                {regressedAll.length} regressed.
+              </p>
+              {empty ? (
+                <p style={{ ...para, color: "#9aa3ad", fontStyle: "italic" }}>
+                  No changes in tracked findings since the last audit.
+                </p>
+              ) : (
+                <div style={{ marginBottom: 8 }}>
+                  {resolved.length > 0 && (
+                    <div>
+                      <div style={{ ...groupLabel, color: "#15803d" }}>✓ Resolved</div>
+                      {resolved.map((s, i) => (
+                        <div key={`f${i}`} style={item}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                  {prog.stillOpen.length > 0 && (
+                    <div>
+                      <div style={{ ...groupLabel, color: "#9a7200" }}>⚠ Still open</div>
+                      {prog.stillOpen.map((s, i) => (
+                        <div key={`o${i}`} style={item}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                  {regressedAll.length > 0 && (
+                    <div>
+                      <div style={{ ...groupLabel, color: B.tangelo }}>✗ Regressed</div>
+                      {regressedAll.map((s, i) => (
+                        <div key={`r${i}`} style={item}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
       {/* Website Findings */}
       {results.websiteFindings.length > 0 && (
@@ -5023,6 +5186,69 @@ function PrintableReport({ property }: { property: Property }) {
                 ))}
               </div>
             )}
+
+            {/* Progress Since Last Audit — deterministic diff vs the prior run */}
+            {property.marketingAuditPrev &&
+              (() => {
+                const prog = computeAuditProgress(
+                  property.marketingAuditPrev,
+                  mkt.consistency,
+                  property.checklistStatuses ?? {}
+                );
+                const resolved = [...prog.fixed, ...prog.completed];
+                const regressedAll = [...prog.regressed, ...prog.slipped];
+                const empty =
+                  resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
+                const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                });
+                const grp: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.03em", margin: "6px 0 2px" };
+                const li: React.CSSProperties = { ...bodyP, margin: "0 0 2px 0", fontSize: 10.5 };
+                return (
+                  <div className="pb-avoid" style={{ marginBottom: 16 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                      Progress Since Last Audit
+                    </div>
+                    <p style={{ ...bodyP, marginBottom: 6 }}>
+                      Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open, {regressedAll.length} regressed.
+                    </p>
+                    {empty ? (
+                      <p style={{ ...bodyP, color: PRINT_MUTED, fontStyle: "italic" }}>
+                        No changes in tracked findings since the last audit.
+                      </p>
+                    ) : (
+                      <>
+                        {resolved.length > 0 && (
+                          <div>
+                            <div style={{ ...grp, color: "#15803d" }}>✓ Resolved</div>
+                            {resolved.map((s, i) => (
+                              <p key={`f${i}`} style={li}>{s}</p>
+                            ))}
+                          </div>
+                        )}
+                        {prog.stillOpen.length > 0 && (
+                          <div>
+                            <div style={{ ...grp, color: "#9a7200" }}>⚠ Still open</div>
+                            {prog.stillOpen.map((s, i) => (
+                              <p key={`o${i}`} style={li}>{s}</p>
+                            ))}
+                          </div>
+                        )}
+                        {regressedAll.length > 0 && (
+                          <div>
+                            <div style={{ ...grp, color: PRINT_ORANGE }}>✗ Regressed</div>
+                            {regressedAll.map((s, i) => (
+                              <p key={`r${i}`} style={li}>{s}</p>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
             {/* Website Findings */}
             {mkt.websiteFindings.length > 0 && (

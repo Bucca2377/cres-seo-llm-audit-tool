@@ -123,6 +123,17 @@ export interface Property {
     location?: string;
   };
   marketingAudit?: MarketingAuditResult;
+  /**
+   * Snapshot of the PREVIOUS Marketing Audit run, captured at the start of a
+   * re-run before the property is mutated. Powers the deterministic "Progress
+   * Since Last Audit" diff (no new AI call). `checklistStatuses` here are the
+   * OLD ones — the statuses in effect before this run overwrote them.
+   */
+  marketingAuditPrev?: {
+    consistency: MarketingConsistencyRow[];
+    checklistStatuses: Record<string, ChecklistStatus>;
+    timestamp: string;
+  };
   reviewAudit?: ReviewAuditResult;
   /** One entry per Review Audit run; powers the rating + volume trend. */
   reviewSnapshots?: ReviewSnapshot[];
