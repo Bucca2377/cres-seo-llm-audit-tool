@@ -60,9 +60,21 @@ textarea {
     display: none !important;
   }
 
-  /* Show only the printable report */
+  /* Show only the printable report. The horizontal padding is a safety
+     gutter: if the browser's print dialog has margins set to "None" or
+     "Minimum", the @page margin is ignored and content would otherwise run
+     into the printer's unprintable edge (numbers / last words get clipped).
+     Element padding always applies, so this guarantees breathing room
+     regardless of the dialog setting. box-sizing keeps the padding inside
+     the page width instead of widening the report. */
   .printable-report {
     display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 0.3in !important;
+    padding-right: 0.3in !important;
+    background: white !important;
   }
 
   * {
