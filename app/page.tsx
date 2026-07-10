@@ -4841,18 +4841,18 @@ function ReviewAuditReport({ property }: { property: Property }) {
                 <p style={bodyP}>No new reviews were posted during {ra.periodLabel}, so there is no new-review breakdown for this period.</p>
               )
             ) : (
-              <div style={{ marginBottom: 14 }}>
+              <div className="pb-avoid" style={{ marginBottom: 10 }}>
                 {(["s5", "s4", "s3", "s2", "s1"] as const).map((key, idx) => {
                   const count = ra.starBreakdown[key];
                   const maxC = Math.max(1, ra.starBreakdown.s1, ra.starBreakdown.s2, ra.starBreakdown.s3, ra.starBreakdown.s4, ra.starBreakdown.s5);
                   const colors = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"];
                   return (
-                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                      <span style={{ width: 48, fontSize: 10, color: "#555" }}>{5 - idx} Star</span>
-                      <div style={{ flex: 1, background: "#f0f2f4", height: 18, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                      <span style={{ width: 44, fontSize: 9.5, color: "#555" }}>{5 - idx} Star</span>
+                      <div style={{ flex: 1, background: "#f0f2f4", height: 11, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
                         <div style={{ width: `${(count / maxC) * 100}%`, background: colors[idx], height: "100%", minWidth: count > 0 ? 4 : 0, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
                       </div>
-                      <span style={{ width: 20, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: PRINT_NAVY }}>{count}</span>
+                      <span style={{ width: 18, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, color: PRINT_NAVY }}>{count}</span>
                     </div>
                   );
                 })}
