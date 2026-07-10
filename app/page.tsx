@@ -1555,6 +1555,122 @@ Return ONLY a JSON object:
 }
 
 /* ================= SEO TAB ======================================== */
+/**
+ * Competitor comp-set — "who's beating you," aggregated purely from data the
+ * SEO/LLM audit ALREADY stored (seoAudit.ranks map-pack + organic, and the AI
+ * rank check's named communities). No new API calls. Shows each competitor,
+ * how often they outrank the property, and where (Map Pack / organic / AI).
+ */
+function CompetitorCompSet({ property }: { property: Property }) {
+  const seo = property.seoAudit;
+  const llm = property.llmRank;
+
+  const cardStyle: React.CSSProperties = { background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", marginTop: 20 };
+  const headerStyle: React.CSSProperties = { fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 4 };
+  const subStyle: React.CSSProperties = { fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 16 };
+
+  if (!seo && !llm) {
+    return (
+      <div style={cardStyle}>
+        <div style={headerStyle}>Competitor Comp Set</div>
+        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888" }}>
+          Run the SEO / LLM Audit above and this will show which communities are outranking you across Google and AI — built from that audit's data, no extra searches.
+        </div>
+      </div>
+    );
+  }
+
+  const norm = (s: string) =>
+    (s || "").toLowerCase().replace(/\b(apartments?|apartment homes?|the|lofts?|residences?|townhomes?|community|communities|at)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+  type Comp = { name: string; mapPack: number; organic: number; ai: boolean };
+  const map = new Map<string, Comp>();
+  const bump = (rawName: string, kind: "mapPack" | "organic" | "ai") => {
+    const clean = (rawName || "").trim();
+    if (!clean || nameMatches(clean, property.name)) return; // skip blanks + ourselves
+    const key = norm(clean);
+    if (!key) return;
+    let c = map.get(key);
+    if (!c) { c = { name: clean, mapPack: 0, organic: 0, ai: false }; map.set(key, c); }
+    if (clean.length > c.name.length) c.name = clean; // keep the fullest display name
+    if (kind === "ai") c.ai = true;
+    else if (kind === "mapPack") c.mapPack += 1;
+    else c.organic += 1;
+  };
+
+  let mapPackQueries = 0;
+  if (seo) {
+    for (const r of seo.ranks) {
+      if (r.top_map_pack && r.top_map_pack.length) {
+        mapPackQueries += 1;
+        for (const nm of r.top_map_pack) bump(nm, "mapPack");
+      }
+      for (const o of r.top_organic || []) {
+        if (AGGREGATOR_DOMAINS.some((d) => (o.domain || "").includes(d))) continue; // skip Zillow/Apts.com etc.
+        bump(o.name, "organic");
+      }
+    }
+  }
+  if (llm) for (const m of llm.models) for (const nm of m.namedProperties || []) bump(nm, "ai");
+
+  const comps = Array.from(map.values())
+    .map((c) => ({ ...c, score: c.mapPack * 2 + c.organic + (c.ai ? 2 : 0) }))
+    .filter((c) => c.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+
+  if (comps.length === 0) {
+    return (
+      <div style={cardStyle}>
+        <div style={headerStyle}>Competitor Comp Set</div>
+        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888" }}>
+          No competing communities were captured in the last SEO / LLM Audit — you may be dominating your searches, or re-run the audit to refresh.
+        </div>
+      </div>
+    );
+  }
+
+  const cellTh: React.CSSProperties = { padding: "8px 10px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: "white", background: B.oxford };
+  return (
+    <div style={cardStyle}>
+      <div style={headerStyle}>Competitor Comp Set</div>
+      <div style={subStyle}>Who&apos;s outranking you — from your last SEO / LLM Audit. No extra searches.</div>
+      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#444", lineHeight: 1.55, margin: "0 0 14px" }}>
+        <strong>{comps.length}</strong> competing {comps.length === 1 ? "community" : "communities"} show up ahead of you across your Google and AI searches. <strong>{comps[0].name}</strong> is the most dominant.
+      </p>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={cellTh}>Competitor</th>
+            <th style={{ ...cellTh, textAlign: "center", width: 110 }}>Map Pack</th>
+            <th style={{ ...cellTh, textAlign: "center", width: 90 }}>Organic</th>
+            <th style={{ ...cellTh, textAlign: "center", width: 70 }}>AI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {comps.map((c, i) => (
+            <tr key={i} style={{ background: i % 2 ? "#fafafa" : "white" }}>
+              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#222", fontWeight: 600 }}>{c.name}</td>
+              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", textAlign: "center", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: c.mapPack ? B.oxford : "#ccc" }}>
+                {c.mapPack ? `${c.mapPack} of ${mapPackQueries}` : "—"}
+              </td>
+              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", textAlign: "center", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: c.organic ? B.oxford : "#ccc" }}>
+                {c.organic || "—"}
+              </td>
+              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", textAlign: "center", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: c.ai ? "#15803d" : "#ccc", fontWeight: 700 }}>
+                {c.ai ? "✓" : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#bbb", marginTop: 8 }}>
+        Map Pack = # of your searches where they hold a top-3 Google Maps spot · Organic = # of your searches where they rank on page 1 · AI = named by the AI assistant. Ratings/reviews side-by-side can be added (needs a few extra lookups).
+      </div>
+    </div>
+  );
+}
+
 function SEOTab({
   property,
   onUpdateProperty,
@@ -1565,6 +1681,7 @@ function SEOTab({
   return (
     <div>
       <SEOAudit property={property} onUpdateProperty={onUpdateProperty} />
+      <CompetitorCompSet property={property} />
       <RankCheck property={property} />
       <AskAiQuestion property={property} />
     </div>
