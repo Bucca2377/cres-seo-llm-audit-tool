@@ -1556,135 +1556,25 @@ Return ONLY a JSON object:
 
 /* ================= SEO TAB ======================================== */
 /**
- * Competitor comp-set, organized BY KEYWORD — for each competitive search, your
- * position and exactly which communities are beating you there. Built purely
- * from data the SEO/LLM audit already stored (seoAudit.ranks). No new API calls.
+ * For a single query's rank data, return the competitor communities ranking
+ * ahead of the property — combining Map Pack and page-1 organic, dropping the
+ * property itself and listing-site aggregators, deduped by normalized name.
  */
-function CompetitorCompSet({ property }: { property: Property }) {
-  const seo = property.seoAudit;
-
-  const cardStyle: React.CSSProperties = { background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", marginTop: 20 };
-  const headerStyle: React.CSSProperties = { fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 4 };
-  const subStyle: React.CSSProperties = { fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 16 };
-
-  if (!seo) {
-    return (
-      <div style={cardStyle}>
-        <div style={headerStyle}>Competitor Comp Set — by Keyword</div>
-        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888" }}>
-          Run the SEO / LLM Audit above and this will show, for each search, who&apos;s beating you — built from that audit&apos;s data, no extra searches.
-        </div>
-      </div>
-    );
-  }
-
-  const norm = (s: string) =>
-    (s || "").toLowerCase().replace(/\b(apartments?|apartment homes?|the|lofts?|residences?|townhomes?|community|communities|at)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+function competitorsBeating(
+  property: Property,
+  r: { map_pack_rank: number | null; expanded_map_pack_rank?: number | null; map_pack_appeared: boolean; top_map_pack: string[]; organic_rank: number | null; top_organic: Array<{ name: string; domain: string }> }
+): string[] {
+  const norm = (s: string) => (s || "").toLowerCase().replace(/\b(apartments?|apartment homes?|the|lofts?|residences?|townhomes?|community|communities|at)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
   const isSelf = (n: string) => nameMatches(n || "", property.name);
   const isAgg = (dom: string) => AGGREGATOR_DOMAINS.some((d) => (dom || "").includes(d));
-
-  const beatTally = new Map<string, { name: string; count: number }>();
-
-  const rows = seo.queries
-    .map((q, i) => ({ q, r: seo.ranks[i] }))
-    .filter(({ q }) => !isBrandedQuery(q, property)) // competitive searches only
-    .map(({ q, r }) => {
-      const inPack = !!(r.map_pack_rank && r.map_pack_rank <= 3);
-      // Map-pack competitors ahead of you (order ≈ rank).
-      const packAll = (r.top_map_pack || []).filter((n) => !isSelf(n));
-      const packBeating = inPack ? packAll.slice(0, (r.map_pack_rank as number) - 1) : packAll.slice(0, 3);
-      // Organic competitor communities ahead of you (drop aggregators + self).
-      const orgAll = (r.top_organic || []).filter((o) => !isAgg(o.domain) && !isSelf(o.name)).map((o) => o.name);
-      const orgBeating = r.organic_rank && r.organic_rank <= 3 ? [] : orgAll;
-      // Dedupe the combined list.
-      const seen = new Set<string>();
-      const beating: string[] = [];
-      for (const n of [...packBeating, ...orgBeating]) {
-        const k = norm(n);
-        if (!k || seen.has(k)) continue;
-        seen.add(k);
-        beating.push(n);
-      }
-      beating.forEach((n) => {
-        const k = norm(n);
-        const t = beatTally.get(k) || { name: n, count: 0 };
-        if (n.length > t.name.length) t.name = n;
-        t.count += 1;
-        beatTally.set(k, t);
-      });
-      const posParts: string[] = [];
-      posParts.push(
-        r.map_pack_rank
-          ? `Map Pack #${r.map_pack_rank}`
-          : r.expanded_map_pack_rank
-          ? `Pack #${r.expanded_map_pack_rank}`
-          : r.map_pack_appeared
-          ? "Pack: not top 3"
-          : "No Map Pack"
-      );
-      if (r.organic_rank) posParts.push(`Organic #${r.organic_rank}`);
-      else posParts.push("Not on page 1");
-      return { q, winning: inPack, position: posParts.join(" · "), beating };
-    })
-    .sort((a, b) => Number(a.winning) - Number(b.winning)); // where you're losing first
-
-  if (rows.length === 0) {
-    return (
-      <div style={cardStyle}>
-        <div style={headerStyle}>Competitor Comp Set — by Keyword</div>
-        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888" }}>
-          No competitive keywords captured yet — run the SEO / LLM Audit above.
-        </div>
-      </div>
-    );
-  }
-
-  const losing = rows.filter((r) => !r.winning).length;
-  const topBeater = Array.from(beatTally.values()).sort((a, b) => b.count - a.count)[0];
-  const cellTh: React.CSSProperties = { padding: "8px 10px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: "white", background: B.oxford };
-
-  return (
-    <div style={cardStyle}>
-      <div style={headerStyle}>Competitor Comp Set — by Keyword</div>
-      <div style={subStyle}>For each search, where you stand and who&apos;s ahead of you — from your last SEO / LLM Audit. No extra searches.</div>
-      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#444", lineHeight: 1.55, margin: "0 0 14px" }}>
-        You&apos;re outside the Map Pack top 3 on <strong>{losing}</strong> of <strong>{rows.length}</strong> competitive searches.
-        {topBeater ? <> <strong>{topBeater.name}</strong> beats you on the most ({topBeater.count}).</> : null}
-      </p>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th style={cellTh}>Keyword</th>
-            <th style={{ ...cellTh, width: 190 }}>Your Position</th>
-            <th style={cellTh}>Who&apos;s Beating You</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} style={{ background: i % 2 ? "#fafafa" : "white" }}>
-              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#222", fontWeight: 600, verticalAlign: "top" }}>
-                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: row.winning ? "#22c55e" : B.tangelo, marginRight: 7 }} />
-                {row.q}
-              </td>
-              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: row.winning ? "#15803d" : "#9a5b3a", verticalAlign: "top" }}>
-                {row.position}
-              </td>
-              <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#444", lineHeight: 1.5, verticalAlign: "top" }}>
-                {row.beating.length
-                  ? row.beating.slice(0, 4).join(", ") + (row.beating.length > 4 ? ` +${row.beating.length - 4} more` : "")
-                  : row.winning
-                  ? "— (you hold a top spot)"
-                  : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#bbb", marginTop: 8 }}>
-        Green dot = you hold a Map Pack top-3 spot for that search · orange = you don&apos;t. &ldquo;Who&apos;s beating you&rdquo; = communities ranking ahead of you in the Map Pack or page-1 organic (listing sites like Zillow/Apartments.com excluded).
-      </div>
-    </div>
-  );
+  const inPack = !!(r.map_pack_rank && r.map_pack_rank <= 3);
+  const packAll = (r.top_map_pack || []).filter((n) => !isSelf(n));
+  const packBeating = inPack ? packAll.slice(0, (r.map_pack_rank as number) - 1) : packAll.slice(0, 3);
+  const orgAll = (r.top_organic || []).filter((o) => !isAgg(o.domain) && !isSelf(o.name)).map((o) => o.name);
+  const orgBeating = r.organic_rank && r.organic_rank <= 3 ? [] : orgAll;
+  const seen = new Set<string>(); const out: string[] = [];
+  for (const n of [...packBeating, ...orgBeating]) { const k = norm(n); if (!k || seen.has(k)) continue; seen.add(k); out.push(n); }
+  return out;
 }
 
 function SEOTab({
@@ -2398,7 +2288,7 @@ Recommendation rules (STRICT):
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: B.oxford }}>
-                  {["Query", "GBP Map Pack", "Website in Organic", "Who's Winning"].map((h) => (
+                  {["Query", "GBP Map Pack", "Website in Organic", "Who's Beating You"].map((h) => (
                     <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "white" }}>
                       {h}
                     </th>
@@ -2467,7 +2357,11 @@ Recommendation rules (STRICT):
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px", color: "#666", fontSize: 11 }}>
-                        {r.top_map_pack[0] || r.top_organic[0]?.name || "—"}
+                        {(() => {
+                          const b = competitorsBeating(property, r);
+                          if (b.length) return b.slice(0, 3).join(", ") + (b.length > 3 ? ` +${b.length - 3} more` : "");
+                          return r.map_pack_rank && r.map_pack_rank <= 3 ? "You lead" : "—";
+                        })()}
                       </td>
                     </tr>
                   );
@@ -2507,9 +2401,6 @@ Recommendation rules (STRICT):
               )}
             </div>
           )}
-
-          {/* Competitor comp-set (by keyword) — above the recommendations */}
-          <CompetitorCompSet property={property} />
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
@@ -5562,7 +5453,7 @@ function PrintableReport({ property }: { property: Property }) {
                   <th style={findingsTh}>Query</th>
                   <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>GBP Map Pack</th>
                   <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Website in Organic</th>
-                  <th style={findingsTh}>Who&rsquo;s Winning</th>
+                  <th style={findingsTh}>Who&rsquo;s Beating You</th>
                 </tr>
               </thead>
               <tbody>
@@ -5613,7 +5504,11 @@ function PrintableReport({ property }: { property: Property }) {
                         {orgText}
                       </td>
                       <td style={{ ...findingsTd, fontSize: 10, color: "#555" }}>
-                        {r.top_map_pack[0] || r.top_organic[0]?.name || "—"}
+                        {(() => {
+                          const b = competitorsBeating(property, r);
+                          if (b.length) return b.slice(0, 3).join(", ") + (b.length > 3 ? ` +${b.length - 3} more` : "");
+                          return r.map_pack_rank && r.map_pack_rank <= 3 ? "You lead" : "—";
+                        })()}
                       </td>
                     </tr>
                   );
