@@ -3318,6 +3318,23 @@ function MarketingAuditTab({
           .filter((u: string) => /^https?:\/\//i.test(u) && !/serpapi\.com/i.test(u))
           .map((u: string) => u.replace(/=w\d+-h\d+/i, "=w512-h512"))
           .slice(0, 8);
+        // The google_maps SEARCH result only carries photos when it resolves to
+        // a single place; when it returns a list (common), place.images is empty
+        // even though ground truth was matched. Fall back to the dedicated
+        // photos endpoint keyed by the place's data_id so the vision grade still
+        // runs instead of degrading to "quality not assessed".
+        if (googlePhotos.length < 2 && gbp?.dataId) {
+          try {
+            const photoData = await callSerp({ engine: "google_maps_photos", data_id: gbp.dataId });
+            googlePhotos = (Array.isArray(photoData?.photos) ? photoData.photos : [])
+              .map((p: any) => p?.thumbnail || p?.image || "")
+              .filter((u: string) => /^https?:\/\//i.test(u))
+              .map((u: string) => u.replace(/=w\d+-h\d+/i, "=w512-h512"))
+              .slice(0, 8);
+          } catch {
+            /* best-effort; grading falls back to "quality not assessed" */
+          }
+        }
         if (gbp || place) {
           const rating = gbp?.rating ?? (typeof place?.rating === "number" ? place.rating : null);
           const reviewCount = gbp?.reviewCount ?? (typeof place?.reviews === "number" ? place.reviews : null);
@@ -3393,8 +3410,7 @@ ${gbpBlock}
 RULES (apply strictly):
 - WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
 - APARTMENTS.COM: fetch the URL above with your tool. If it returns the listing (units, pricing, photos, specials), mark "currently advertising / active" GREEN and report the real data. Only mark "not advertising" red if it LITERALLY says "not currently advertising". If your fetch errors or returns nothing, mark the Apartments.com rows AMBER "could not verify automatically; check live" — NEVER red.
-- GOOGLE SCOPE: a Google Business Profile carries active presence, hours, photos, rating/reviews, the website link, AND time-limited "Offer" / "What's new" posts (which CAN surface a concession or special in search and the knowledge panel). For rows Google genuinely does NOT carry (pricing, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature", and never put amber/red in those cells.
-- CONCESSIONS ON GOOGLE: because a concession CAN be promoted via a Google Business Profile Offer post, do NOT mark the "Concessions listed" Google cell "na". Mark it "green" only if you can actually see a live offer/post advertising the current special; otherwise mark it "amber" with note "No offer post live on the Google profile; special only visible on the website and Apartments.com". A recommendation to add a Google concession/offer post is only valid when this cell is amber, and must never appear while the cell is green or na.
+- GOOGLE SCOPE: a Google Business Profile only carries active presence, hours, photos, rating/reviews, and the website link. For rows it does NOT carry (pricing, concessions, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature". Never put amber/red in those Google cells. Because these are not Google listing features, NEVER write a recommendation to add them to the Google Business Profile — in particular, do not recommend posting the concession/special to Google. That would contradict the consistency table.
 - OFFICE HOURS = CONSISTENCY CHECK. First, normalize the values: a day shown as "12 AM to 12 AM" (or "12:00 AM to 12:00 AM" / "00:00 to 00:00") is a ZERO-LENGTH window that means CLOSED, not open 24 hours. Treat it as Closed. Then compare the hours across platforms day by day. Only flag a genuine difference in OPEN/CLOSE TIMES on a day both platforms are open (e.g. "Google shows weekdays starting at 10 AM, but the website and Apartments.com show 9 AM, and Google shows Saturday closing at 4 PM vs 2 PM elsewhere"). Mark conflicting cells AMBER with that plain-English note. Do NOT flag "12 AM to 12 AM" as open 24 hours, a data-entry error, or a conflict — it just means Closed. Mark hours GREEN when they match (treating 12 AM-12 AM as Closed). Write plainly; never use jargon like "structurally invalid".
 - PHOTOS = QUALITY, NOT PRESENCE. Mark GREEN only when the content shows genuinely professional, high-quality photos (a real gallery with sharp interior/amenity/exterior images). The mere existence of photos is NOT enough. If you can only confirm photos exist but cannot judge quality (e.g. a Google profile that "has photos", or just a count), mark AMBER "photos present, quality not assessed". Never mark photos GREEN from presence alone.
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy. Different tracking numbers are intentional for lead-source attribution.

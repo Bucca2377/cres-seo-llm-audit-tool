@@ -653,7 +653,7 @@ function emitSpend(detail: {
 export async function callSerp(opts: {
   query?: string;
   location?: string;
-  engine?: "google" | "google_maps" | "google_maps_reviews";
+  engine?: "google" | "google_maps" | "google_maps_reviews" | "google_maps_photos";
   data_id?: string;
   sort_by?: string;
   next_page_token?: string;

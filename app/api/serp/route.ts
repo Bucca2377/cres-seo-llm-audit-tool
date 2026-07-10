@@ -6,13 +6,16 @@ export const maxDuration = 30;
 interface SerpRequest {
   query?: string;
   location?: string;
-  engine?: "google" | "google_maps" | "google_maps_reviews";
+  engine?: "google" | "google_maps" | "google_maps_reviews" | "google_maps_photos";
   data_id?: string;
   /** google_maps_reviews: "newestFirst" | "mostRelevant" | "highestRating" | "lowestRating". */
   sort_by?: string;
   /** google_maps_reviews: pagination cursor from serpapi_pagination.next_page_token. */
   next_page_token?: string;
 }
+
+/** Engines that identify a place by data_id instead of a text query. */
+const DATA_ID_ENGINES = new Set(["google_maps_reviews", "google_maps_photos"]);
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.SERPAPI_KEY;
@@ -35,11 +38,11 @@ export async function POST(req: NextRequest) {
 
   const engine = body.engine || "google";
 
-  // google_maps_reviews uses data_id instead of q
-  if (engine === "google_maps_reviews") {
+  // google_maps_reviews / google_maps_photos identify a place by data_id, not q
+  if (DATA_ID_ENGINES.has(engine)) {
     if (!body.data_id) {
       return NextResponse.json(
-        { error: "Missing 'data_id' field (required for google_maps_reviews)" },
+        { error: `Missing 'data_id' field (required for ${engine})` },
         { status: 400 }
       );
     }
@@ -54,9 +57,11 @@ export async function POST(req: NextRequest) {
     api_key: apiKey,
     engine,
   };
-  if (engine === "google_maps_reviews") {
+  if (DATA_ID_ENGINES.has(engine)) {
     baseParams.data_id = body.data_id as string;
     baseParams.hl = "en";
+    // sort_by / pagination only apply to reviews, but passing them through is
+    // harmless for photos (SerpAPI ignores unknown params for the engine).
     if (body.sort_by) baseParams.sort_by = body.sort_by;
     if (body.next_page_token) baseParams.next_page_token = body.next_page_token;
   } else {
