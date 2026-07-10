@@ -42,6 +42,23 @@ export interface RecommendationCard {
 export type AuditRecommendations = string | RecommendationCard[];
 
 /**
+ * A recommendation the user has reviewed and consciously chosen NOT to pursue
+ * (not feasible, not worth it, or already handled). Persisted per-property and
+ * keyed by a normalized topic key so a reworded version of the same idea in a
+ * later audit is still recognized and kept out of the active list. Set-aside
+ * items are shown in a small "Considered & Set Aside" recap and are fed back
+ * into the audit prompt so the model stops re-suggesting them.
+ */
+export interface SetAsideRec {
+  key: string;                    // normalized topic key for cross-run matching
+  title: string;                  // the rec title, for display in the recap
+  reason: string;                 // "Not feasible" | "Not worth it" | "Already handled" | custom
+  note?: string;                  // optional free-text detail
+  audit: "marketing" | "seo";     // which audit surfaced it (for display grouping)
+  setAsideAt: string;             // ISO timestamp
+}
+
+/**
  * Type guard — true when recommendations are in the new structured format,
  * false when they are the legacy plain-text format. Used by all renderers
  * to switch between card layout and the old numbered-list fallback.
@@ -149,6 +166,13 @@ export interface Property {
       note: string;
     }>;
   };
+  /**
+   * Recommendation cards the user has reviewed and chosen not to pursue. See
+   * {@link SetAsideRec}. Filtered out of the active recommendations (shown in a
+   * "Considered & Set Aside" recap instead) and fed back into audit prompts so
+   * they are not re-suggested on later runs.
+   */
+  setAsideRecs?: SetAsideRec[];
 }
 
 /* ---- Review Audit types ---- */

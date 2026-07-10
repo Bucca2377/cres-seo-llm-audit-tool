@@ -14,6 +14,7 @@ import {
   type AuditRecommendations,
   type RecommendationCard,
   type RecommendationPriority,
+  type SetAsideRec,
   type MarketingAuditResult,
   type MarketingStatus,
   type MarketingConsistencyRow,
@@ -122,7 +123,15 @@ function PriorityChip({ priority }: { priority: RecommendationPriority }) {
   );
 }
 
-function RecCard({ card }: { card: RecommendationCard }) {
+function RecCard({
+  card,
+  onSetAside,
+}: {
+  card: RecommendationCard;
+  /** When provided, renders a "Set aside" control that reports the chosen reason. */
+  onSetAside?: (card: RecommendationCard, reason: string) => void;
+}) {
+  const [choosing, setChoosing] = useState(false);
   // Combine the action + rationale into one short paragraph. Keeps a space
   // between them and avoids a doubled period when `what` already ends in one.
   const body = [card.what?.trim(), card.why?.trim()].filter(Boolean).join(" ");
@@ -152,7 +161,54 @@ function RecCard({ card }: { card: RecommendationCard }) {
         >
           {card.title}
         </div>
+        {onSetAside && (
+          <button
+            onClick={() => setChoosing((v) => !v)}
+            title="Set this recommendation aside if it isn't feasible or worth it"
+            style={{
+              flexShrink: 0,
+              background: "transparent",
+              border: "1px solid #d4d8dd",
+              borderRadius: 20,
+              padding: "2px 10px",
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 11,
+              color: choosing ? B.tangelo : "#8a909a",
+              cursor: "pointer",
+            }}
+          >
+            {choosing ? "Cancel" : "Set aside"}
+          </button>
+        )}
       </div>
+      {choosing && onSetAside && (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+          <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#8a909a" }}>
+            Reason:
+          </span>
+          {SET_ASIDE_REASONS.map((r) => (
+            <button
+              key={r}
+              onClick={() => {
+                onSetAside(card, r);
+                setChoosing(false);
+              }}
+              style={{
+                background: "#faf5ee",
+                border: "1px solid #e6d9c6",
+                borderRadius: 20,
+                padding: "3px 12px",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11.5,
+                color: B.oxford,
+                cursor: "pointer",
+              }}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      )}
       <div
         style={{
           fontFamily: "'Josefin Sans',sans-serif",
@@ -225,14 +281,136 @@ function parseRecCards(rawText: string): RecommendationCard[] {
   return cards;
 }
 
-function RecommendationsBlock({ recs }: { recs: AuditRecommendations | null | undefined }) {
+/**
+ * Collapsed recap of recommendations the user has set aside. Shows the title,
+ * the reason, and a Restore control so a set-aside item can be brought back.
+ */
+function SetAsideRecap({
+  items,
+  onRestore,
+}: {
+  items: SetAsideRec[];
+  onRestore?: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (items.length === 0) return null;
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        border: "1px dashed #d4d8dd",
+        borderRadius: 8,
+        padding: "10px 14px",
+        background: "#fafbfc",
+      }}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          fontFamily: "'Barlow Condensed',sans-serif",
+          fontWeight: 700,
+          fontSize: 13,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          color: "#8a909a",
+          cursor: "pointer",
+        }}
+      >
+        {open ? "▾" : "▸"} Considered &amp; Set Aside ({items.length})
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {items.map((s) => (
+            <div
+              key={s.key}
+              style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7 }}
+            >
+              <span
+                style={{
+                  fontFamily: "'Josefin Sans',sans-serif",
+                  fontSize: 13,
+                  color: "#8a909a",
+                  textDecoration: "line-through",
+                  flex: 1,
+                  lineHeight: 1.4,
+                }}
+              >
+                {s.title}
+              </span>
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontFamily: "'Josefin Sans',sans-serif",
+                  fontSize: 11,
+                  color: "#8a909a",
+                  background: "#eef0f2",
+                  borderRadius: 20,
+                  padding: "2px 10px",
+                }}
+              >
+                {s.reason}
+              </span>
+              {onRestore && (
+                <button
+                  onClick={() => onRestore(s.key)}
+                  title="Bring this recommendation back into the active list"
+                  style={{
+                    flexShrink: 0,
+                    background: "transparent",
+                    border: "1px solid #d4d8dd",
+                    borderRadius: 20,
+                    padding: "2px 10px",
+                    fontFamily: "'Josefin Sans',sans-serif",
+                    fontSize: 11,
+                    color: B.caribbean,
+                    cursor: "pointer",
+                  }}
+                >
+                  Restore
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecommendationsBlock({
+  recs,
+  setAsideList,
+  audit,
+  onSetAside,
+  onRestore,
+}: {
+  recs: AuditRecommendations | null | undefined;
+  /** The property's full set-aside list (used to filter + build the recap). */
+  setAsideList?: SetAsideRec[];
+  /** Which audit this block belongs to; scopes the recap to that audit. */
+  audit?: "marketing" | "seo";
+  onSetAside?: (card: RecommendationCard, reason: string) => void;
+  onRestore?: (key: string) => void;
+}) {
   if (!recs) return null;
   if (isStructuredRecs(recs)) {
+    const keys = new Set((setAsideList ?? []).map((s) => s.key));
+    const active = recs.filter((c) => !isSetAside(c, keys));
+    const recap = (setAsideList ?? []).filter((s) => !audit || s.audit === audit);
     return (
       <div>
-        {recs.map((card, i) => (
-          <RecCard key={i} card={card} />
+        {active.map((card, i) => (
+          <RecCard key={i} card={card} onSetAside={onSetAside} />
         ))}
+        {active.length === 0 && recap.length > 0 && (
+          <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#8a909a", fontStyle: "italic" }}>
+            All recommendations from this audit have been set aside.
+          </p>
+        )}
+        <SetAsideRecap items={recap} onRestore={onRestore} />
       </div>
     );
   }
@@ -1869,7 +2047,7 @@ Recommendation rules (STRICT):
    - CONTENT: requires writing pages, FAQs, blog posts
    - STRATEGIC: > 1 week, multi-month positioning (backlink outreach, review campaigns)
    - LONG-TAIL: niche query optimization with lower competition
-12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.`;
+12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
       // 502 from the host), still save the ranks + comp-set instead of failing
@@ -2410,7 +2588,13 @@ Recommendation rules (STRICT):
                 Recommendations (ranked by ROI)
               </span>
             </div>
-            <RecommendationsBlock recs={results.recommendations} />
+            <RecommendationsBlock
+              recs={results.recommendations}
+              setAsideList={property.setAsideRecs}
+              audit="seo"
+              onSetAside={(card, reason) => onUpdateProperty(withSetAside(property, card, reason, "seo"))}
+              onRestore={(key) => onUpdateProperty(withRestored(property, key))}
+            />
           </div>
         </>
       )}
@@ -3266,7 +3450,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 - COUNT: aim for 5 recommendations; use up to 7 ONLY if there are more distinct critical issues / red gaps than 5 to cover. Never leave a critical issue uncovered just to hit a number.
 - "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
-- Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.`;
+- Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.${setAsidePromptNote(current)}`;
 
       // Website content is provided (Playwright); Apartments.com is fetched by
       // Claude's web_fetch (which penetrates it where Playwright is 403'd).
@@ -3499,13 +3683,13 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       )}
 
       {results && (
-        <MarketingAuditResultView results={results} property={property} />
+        <MarketingAuditResultView results={results} property={property} onUpdateProperty={onUpdateProperty} />
       )}
     </div>
   );
 }
 
-function MarketingAuditResultView({ results, property }: { results: MarketingAuditResult; property: Property }) {
+function MarketingAuditResultView({ results, property, onUpdateProperty }: { results: MarketingAuditResult; property: Property; onUpdateProperty: (p: Property) => void }) {
   const sectionTitle: React.CSSProperties = {
     fontFamily: "'Barlow Condensed',sans-serif",
     fontWeight: 700,
@@ -3623,7 +3807,13 @@ function MarketingAuditResultView({ results, property }: { results: MarketingAud
       {isStructuredRecs(results.recommendations) && (
         <>
           <div style={sectionTitle}>Recommendations to Drive More Leases</div>
-          <RecommendationsBlock recs={results.recommendations} />
+          <RecommendationsBlock
+            recs={results.recommendations}
+            setAsideList={property.setAsideRecs}
+            audit="marketing"
+            onSetAside={(card, reason) => onUpdateProperty(withSetAside(property, card, reason, "marketing"))}
+            onRestore={(key) => onUpdateProperty(withRestored(property, key))}
+          />
         </>
       )}
 
@@ -4714,6 +4904,61 @@ function dedupeRecCards(cards: RecommendationCard[]): RecommendationCard[] {
   return kept;
 }
 
+/* ================= SET-ASIDE RECOMMENDATIONS ==================== */
+/** Preset reasons a user can pick when setting a recommendation aside. */
+const SET_ASIDE_REASONS = ["Not feasible", "Not worth it", "Already handled"] as const;
+
+/**
+ * Stable key used to recognize the "same" recommendation across audit re-runs,
+ * even when the model rewords it. Prefers the coarse topic key (so any
+ * review/FAQ/schema/amenities/listings card matches its set-aside twin) and
+ * falls back to a normalized title for everything else.
+ */
+function setAsideKey(card: RecommendationCard): string {
+  return recTopicKey(card) || (card.title || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** True when a card has been set aside (matched against the property's list). */
+function isSetAside(card: RecommendationCard, keys: Set<string>): boolean {
+  return keys.has(setAsideKey(card));
+}
+
+/**
+ * Prompt fragment appended to the Marketing + SEO audit prompts so the model
+ * stops re-proposing recommendations the client has already declined. Belt to
+ * the client-side filter's suspenders: even if the model ignores it, the
+ * matching filter keeps the card out of the active list.
+ */
+function setAsidePromptNote(property: Property): string {
+  const list = property.setAsideRecs ?? [];
+  if (list.length === 0) return "";
+  const lines = list.map((s) => `- ${s.title} (client reason: ${s.reason})`).join("\n");
+  return `\n\nALREADY DECLINED BY THE CLIENT — DO NOT RECOMMEND THESE AGAIN (they have reviewed and set them aside; do not re-propose them even reworded):\n${lines}`;
+}
+
+/** Return a copy of `property` with `card` added to the set-aside list (dedup by key). */
+function withSetAside(
+  property: Property,
+  card: RecommendationCard,
+  reason: string,
+  audit: "marketing" | "seo"
+): Property {
+  const key = setAsideKey(card);
+  const rest = (property.setAsideRecs ?? []).filter((s) => s.key !== key);
+  return {
+    ...property,
+    setAsideRecs: [
+      ...rest,
+      { key, title: card.title, reason, audit, setAsideAt: new Date().toISOString() },
+    ],
+  };
+}
+
+/** Return a copy of `property` with the set-aside entry for `key` removed. */
+function withRestored(property: Property, key: string): Property {
+  return { ...property, setAsideRecs: (property.setAsideRecs ?? []).filter((s) => s.key !== key) };
+}
+
 /** Standalone printed Resident Review Audit (its own PDF, not combined). */
 function ReviewAuditReport({ property }: { property: Property }) {
   const ra = property.reviewAudit;
@@ -5070,6 +5315,14 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   const structuredLlmRecs = isStructuredRecs(llmRecs) ? llmRecs : null;
   const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
 
+  // Recommendations the client has set aside are dropped from the active
+  // printed lists and instead summarized in a "Considered & Set Aside" recap.
+  const setAsideList = property.setAsideRecs ?? [];
+  const setAsideKeys = new Set(setAsideList.map((s) => s.key));
+  // In SEO-only mode the recap shows just the SEO-sourced items; the combined
+  // report shows all of them.
+  const setAsideForPrint = mode === "seo" ? setAsideList.filter((s) => s.audit === "seo") : setAsideList;
+
   // Merge LLM-audit + SEO-audit cards, dropping topical duplicates (both
   // audits independently cover reviews / FAQ / schema / amenities, so the
   // raw concatenation showed each topic twice in the printed report).
@@ -5079,7 +5332,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     mode === "seo"
       ? [...(structuredSeoRecs || [])]
       : [...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
-  );
+  ).filter((c) => !isSetAside(c, setAsideKeys));
 
   // Group cards into priority bands for the printed report. The order
   // is intentional: foundational and quick wins come before strategic
@@ -5310,17 +5563,21 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
             )}
 
             {/* Marketing Recommendations — same card format as SEO/LLM, kept
-                as its own section (not merged into the combined card block). */}
-            {isStructuredRecs(mkt.recommendations) && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Recommendations to Drive More Leases
+                as its own section (not merged into the combined card block).
+                Set-aside cards are dropped here and recapped at the bottom. */}
+            {isStructuredRecs(mkt.recommendations) &&
+              mkt.recommendations.some((c) => !isSetAside(c, setAsideKeys)) && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                    Recommendations to Drive More Leases
+                  </div>
+                  {mkt.recommendations
+                    .filter((c) => !isSetAside(c, setAsideKeys))
+                    .map((card, i) => (
+                      <PrintRecCard key={i} card={card} />
+                    ))}
                 </div>
-                {mkt.recommendations.map((card, i) => (
-                  <PrintRecCard key={i} card={card} />
-                ))}
-              </div>
-            )}
+              )}
 
             {/* Progress Since Last Audit — accountability recap, kept at the
                 bottom so the report leads with findings + actions and closes
@@ -5675,6 +5932,28 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </ul>
               </>
             )}
+          </section>
+        )}
+
+        {/* ============ CONSIDERED & SET ASIDE ============ */}
+        {/* Recommendations the client reviewed and chose not to pursue, with
+            the reason — kept for accountability so the report shows what was
+            evaluated and consciously deprioritized. */}
+        {setAsideForPrint.length > 0 && (
+          <section className="pb-avoid">
+            <PrintSectionHeader>Considered &amp; Set Aside</PrintSectionHeader>
+            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 12 }}>
+              These recommendations were reviewed and set aside this cycle. They are documented
+              here for transparency and can be revisited in a future audit.
+            </p>
+            {setAsideForPrint.map((s) => (
+              <div key={s.key} className="pb-avoid" style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
+                <span style={{ ...bodyP, margin: 0, flex: 1, color: "#555" }}>{s.title}</span>
+                <span style={{ flexShrink: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 9.5, letterSpacing: "0.04em", textTransform: "uppercase", color: PRINT_MUTED }}>
+                  {s.reason}
+                </span>
+              </div>
+            ))}
           </section>
         )}
 
