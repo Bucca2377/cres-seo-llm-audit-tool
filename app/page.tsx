@@ -4966,7 +4966,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
   );
 }
 
-function PrintableReport({ property }: { property: Property }) {
+function PrintableReport({ property, mode = "combined" }: { property: Property; mode?: "combined" | "seo" }) {
   const llmRecs = property.llmAuditRecommendations;
   const llmTs = property.llmAuditTimestamp;
   const seo = property.seoAudit;
@@ -5070,10 +5070,13 @@ function PrintableReport({ property }: { property: Property }) {
   // Merge LLM-audit + SEO-audit cards, dropping topical duplicates (both
   // audits independently cover reviews / FAQ / schema / amenities, so the
   // raw concatenation showed each topic twice in the printed report).
-  const allStructuredCards: RecommendationCard[] = dedupeRecCards([
-    ...(structuredLlmRecs || []),
-    ...(structuredSeoRecs || []),
-  ]);
+  // In SEO-only mode the checklist (LLM-audit) recs belong to the Marketing
+  // report, so only the SEO/LLM-rank cards are carried through.
+  const allStructuredCards: RecommendationCard[] = dedupeRecCards(
+    mode === "seo"
+      ? [...(structuredSeoRecs || [])]
+      : [...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
+  );
 
   // Group cards into priority bands for the printed report. The order
   // is intentional: foundational and quick wins come before strategic
@@ -5096,7 +5099,7 @@ function PrintableReport({ property }: { property: Property }) {
   const llmRecLines = useLegacyTextRecs ? splitRecommendations(typeof llmRecs === "string" ? llmRecs : "") : [];
   const seoRecLines = useLegacyTextRecs ? splitRecommendations(typeof seo?.recommendations === "string" ? seo!.recommendations : "") : [];
   const allRecs: ParsedRec[] = [
-    ...llmRecLines.map(categorizeRecommendation),
+    ...(mode === "seo" ? [] : llmRecLines.map(categorizeRecommendation)),
     ...seoRecLines.map(categorizeRecommendation),
   ];
   const recImmediate = allRecs.filter((r) => r.category === "immediate" || r.category === "other").slice(0, 5);
@@ -5177,7 +5180,7 @@ function PrintableReport({ property }: { property: Property }) {
               margin: 0,
             }}
           >
-            Marketing Audit &amp; SEO / LLM Audit
+            {mode === "seo" ? "SEO / LLM Audit" : "Marketing Audit & SEO / LLM Audit"}
           </h1>
           <div style={{ marginBottom: 28 }} />
           <div
@@ -5201,7 +5204,8 @@ function PrintableReport({ property }: { property: Property }) {
         </section>
 
         {/* ============ MARKETING AUDIT FINDINGS ============ */}
-        {mkt && (
+        {/* Skipped when printing the SEO / LLM audit on its own. */}
+        {mode !== "seo" && mkt && (
           <section className="pb-before">
             <PrintSectionHeader>Marketing Audit</PrintSectionHeader>
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
@@ -5518,8 +5522,9 @@ function PrintableReport({ property }: { property: Property }) {
           </section>
         )}
 
-        {/* ============ LLM VISIBILITY FINDINGS ============ */}
-        {(llmTs || llmRecs) && (
+        {/* ============ OPTIMIZATION CHECKLIST ============ */}
+        {/* Part of the Marketing report; skipped in SEO / LLM-only print. */}
+        {mode !== "seo" && (llmTs || llmRecs) && (
           <section className="pb-before">
             <PrintSectionHeader>Optimization Checklist</PrintSectionHeader>
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
@@ -5619,7 +5624,7 @@ function PrintableReport({ property }: { property: Property }) {
         )}
 
         {/* ============ RECOMMENDATIONS ============ */}
-        {(llmRecs || seo?.recommendations) && (
+        {(mode === "seo" ? seo?.recommendations : llmRecs || seo?.recommendations) && (
           <section className="pb-before">
             <PrintSectionHeader>Recommendations to Drive Visibility</PrintSectionHeader>
 
@@ -5702,12 +5707,12 @@ export default function MarketingHub() {
   // Which report to print: the combined Marketing/SEO/LLM doc, or the
   // standalone Review Audit. Set just before window.print() so only the
   // targeted .printable-report is in the DOM.
-  const [printTarget, setPrintTarget] = useState<"combined" | "review">("combined");
+  const [printTarget, setPrintTarget] = useState<"combined" | "seo" | "review">("combined");
   const [printNonce, setPrintNonce] = useState(0);
   useEffect(() => {
     if (printNonce > 0) window.print();
   }, [printNonce]);
-  const doPrint = (target: "combined" | "review") => {
+  const doPrint = (target: "combined" | "seo" | "review") => {
     setPrintTarget(target);
     setPrintNonce((n) => n + 1);
   };
@@ -5923,7 +5928,7 @@ export default function MarketingHub() {
             <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#22c55e" }}>Live AI</span>
           </div>
           <button
-            onClick={() => doPrint(tab === "reviews" ? "review" : "combined")}
+            onClick={() => doPrint(tab === "reviews" ? "review" : tab === "seo" ? "seo" : "combined")}
             style={{
               background: "rgba(255,255,255,0.1)",
               border: "1px solid rgba(255,255,255,0.15)",
@@ -5940,10 +5945,12 @@ export default function MarketingHub() {
             title={
               tab === "reviews"
                 ? "Print the Resident Review Audit as its own PDF. Choose 'Save as PDF' as the destination."
-                : "Open the browser print dialog. Choose 'Save as PDF' to download a PDF of the Marketing / SEO / LLM findings."
+                : tab === "seo"
+                ? "Print the SEO / LLM Audit on its own. Choose 'Save as PDF' as the destination."
+                : "Print the Marketing Audit (includes the SEO / LLM Audit). Choose 'Save as PDF' as the destination."
             }
           >
-            <span>📄</span> {tab === "reviews" ? "Print Review Audit" : "Print Report"}
+            <span>📄</span> {tab === "reviews" ? "Print Review Audit" : tab === "seo" ? "Print SEO / LLM Audit" : "Print Marketing Audit"}
           </button>
           <button onClick={() => setSettingsOpen(true)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>⚙</span> Edit
@@ -5968,7 +5975,7 @@ export default function MarketingHub() {
       {printTarget === "review" ? (
         <ReviewAuditReport property={property} />
       ) : (
-        <PrintableReport property={property} />
+        <PrintableReport property={property} mode={printTarget === "seo" ? "seo" : "combined"} />
       )}
 
       <PropertySettings
