@@ -4981,7 +4981,7 @@ function PrintableReport({ property }: { property: Property }) {
               margin: 0,
             }}
           >
-            SEO / LLM Audit
+            Marketing Audit &amp; SEO / LLM Audit
           </h1>
           <div style={{ marginBottom: 28 }} />
           <div
