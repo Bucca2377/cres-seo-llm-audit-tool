@@ -1697,7 +1697,6 @@ function SEOTab({
   return (
     <div>
       <SEOAudit property={property} onUpdateProperty={onUpdateProperty} />
-      <CompetitorCompSet property={property} />
       <RankCheck property={property} />
       <AskAiQuestion property={property} />
     </div>
@@ -2501,6 +2500,9 @@ Recommendation rules (STRICT):
               )}
             </div>
           )}
+
+          {/* Competitor comp-set (by keyword) — above the recommendations */}
+          <CompetitorCompSet property={property} />
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
