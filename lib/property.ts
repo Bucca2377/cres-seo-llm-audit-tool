@@ -67,6 +67,26 @@ export function isStructuredRecs(r: AuditRecommendations | undefined | null): r 
   return Array.isArray(r) && r.length > 0 && typeof (r[0] as RecommendationCard).title === "string";
 }
 
+/** On-page SEO facts pulled from a single rendered page during the crawl. */
+export interface PageSeo {
+  url: string;
+  status: number | null;
+  title: string;
+  metaDescription: string;
+  h1Count: number;
+  h1Text: string; // first H1 (for reference in the report)
+  hasCanonical: boolean;
+  hasSchema: boolean; // any JSON-LD <script> present
+  internalLinks: number;
+  wordCount: number;
+}
+
+/** Technical / on-page SEO health captured across the crawled pages. */
+export interface TechnicalSeoResult {
+  pages: PageSeo[];
+  timestamp: string;
+}
+
 export interface Property {
   id: string;
   name: string;
@@ -138,6 +158,8 @@ export interface Property {
     recommendations: AuditRecommendations;
     timestamp: string;
     location?: string;
+    /** Technical / on-page SEO health from the site crawl (optional). */
+    technicalSeo?: TechnicalSeoResult;
   };
   marketingAudit?: MarketingAuditResult;
   /**
@@ -687,7 +709,11 @@ export async function callFetch(opts: {
   url: string;
   follow?: boolean;
   maxPages?: number;
-}): Promise<{ pages: { url: string; status: number | null; text: string }[]; images?: string[]; error?: string }> {
+}): Promise<{
+  pages: { url: string; status: number | null; text: string; seo?: Omit<PageSeo, "url" | "status"> }[];
+  images?: string[];
+  error?: string;
+}> {
   const r = await fetch("/api/fetch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -51,6 +51,18 @@ interface FetchRequest {
   maxPages?: number;
 }
 
+/** On-page SEO facts extracted per rendered page (see the render() evaluate). */
+type PageSeoData = {
+  title: string;
+  metaDescription: string;
+  h1Count: number;
+  h1Text: string;
+  hasCanonical: boolean;
+  hasSchema: boolean;
+  internalLinks: number;
+  wordCount: number;
+};
+
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -118,7 +130,7 @@ export async function POST(req: NextRequest) {
       error: `Headless browser failed to launch after 4 attempts: ${msg}. Run "npx playwright install chromium" and restart the dev server.`,
     });
   }
-  const pages: { url: string; status: number | null; text: string }[] = [];
+  const pages: { url: string; status: number | null; text: string; seo?: PageSeoData }[] = [];
   const imageSet = new Set<string>();
   const MAX_IMAGES = 12;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -173,7 +185,37 @@ export async function POST(req: NextRequest) {
           });
           return out;
         });
-        return { status: resp ? resp.status() : null, text: text.slice(0, PAGE_TEXT_CAP), links, images };
+        // On-page SEO facts for the technical audit (title, meta description,
+        // H1s, canonical, JSON-LD schema, internal-link count, word count).
+        const seo = await page.evaluate(() => {
+          const host = location.host;
+          const md =
+            document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
+          const h1s = Array.from(document.querySelectorAll("h1"))
+            .map((h) => (h.textContent || "").trim())
+            .filter(Boolean);
+          let internal = 0;
+          document.querySelectorAll("a[href]").forEach((a) => {
+            try {
+              if (new URL((a as HTMLAnchorElement).href).host === host) internal++;
+            } catch {
+              /* ignore unparseable href */
+            }
+          });
+          const words = (document.body?.innerText || "").trim().split(/\s+/).filter(Boolean).length;
+          return {
+            title: (document.title || "").trim(),
+            metaDescription: md.trim(),
+            h1Count: h1s.length,
+            h1Text: h1s[0] || "",
+            hasCanonical: !!document.querySelector('link[rel="canonical"]'),
+            hasSchema:
+              document.querySelectorAll('script[type="application/ld+json"]').length > 0,
+            internalLinks: internal,
+            wordCount: words,
+          };
+        });
+        return { status: resp ? resp.status() : null, text: text.slice(0, PAGE_TEXT_CAP), links, images, seo };
       } finally {
         await ctx.close();
       }
@@ -189,7 +231,13 @@ export async function POST(req: NextRequest) {
     // Retry the homepage render too: a launch can succeed but the first nav
     // still flake. An empty homepage blanks the entire website column, so it's
     // worth a second attempt before giving up.
-    let home: { status: number | null; text: string; links: { href: string; text: string }[]; images: string[] } = {
+    let home: {
+      status: number | null;
+      text: string;
+      links: { href: string; text: string }[];
+      images: string[];
+      seo?: PageSeoData;
+    } = {
       status: null,
       text: "",
       links: [],
@@ -204,7 +252,7 @@ export async function POST(req: NextRequest) {
         /* retry once */
       }
     }
-    pages.push({ url: start, status: home.status, text: home.text });
+    pages.push({ url: start, status: home.status, text: home.text, seo: home.seo });
     collectImages(home.images);
 
     if (body.follow && maxPages > 1) {
@@ -235,7 +283,7 @@ export async function POST(req: NextRequest) {
         await sleep(1500); // space out navigations so the site doesn't 403 the session
         try {
           const r = await render(c, false);
-          pages.push({ url: c, status: r.status, text: r.text });
+          pages.push({ url: c, status: r.status, text: r.text, seo: r.seo });
           collectImages(r.images);
         } catch {
           pages.push({ url: c, status: null, text: "" });

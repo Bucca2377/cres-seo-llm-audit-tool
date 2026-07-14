@@ -15,6 +15,8 @@ import {
   type RecommendationCard,
   type RecommendationPriority,
   type SetAsideRec,
+  type PageSeo,
+  type TechnicalSeoResult,
   type MarketingAuditResult,
   type MarketingStatus,
   type MarketingConsistencyRow,
@@ -1806,6 +1808,123 @@ interface SEOAuditResults {
   timestamp: string;
   /** The search origin used for ranks (Map Pack is hyper-local). */
   location?: string;
+  /** Technical / on-page SEO health from the site crawl (optional). */
+  technicalSeo?: TechnicalSeoResult;
+}
+
+/** Strip protocol + trailing slash for compact display of a page URL. */
+function shortUrl(u: string): string {
+  return (u || "").replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
+/**
+ * Derive the technical/on-page SEO issue lists from a crawl. Shared by the
+ * on-screen panel, the printed report, and the recommendation prompt so all
+ * three agree on what counts as a problem.
+ */
+function computeTechnicalIssues(tech: TechnicalSeoResult | undefined) {
+  const pages = tech?.pages ?? [];
+  return {
+    total: pages.length,
+    missingMeta: pages.filter((p) => !p.metaDescription),
+    poorMeta: pages.filter(
+      (p) => p.metaDescription && (p.metaDescription.length < 70 || p.metaDescription.length > 160)
+    ),
+    missingH1: pages.filter((p) => p.h1Count === 0),
+    multiH1: pages.filter((p) => p.h1Count > 1),
+    missingTitle: pages.filter((p) => !p.title),
+    thinContent: pages.filter((p) => p.wordCount > 0 && p.wordCount < 150),
+    anySchema: pages.some((p) => p.hasSchema),
+    schemaPages: pages.filter((p) => p.hasSchema),
+  };
+}
+
+/** Plain-text technical-SEO summary fed into the recommendations prompt. */
+function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string {
+  const i = computeTechnicalIssues(tech);
+  if (!tech || i.total === 0) {
+    return "TECHNICAL / ON-PAGE SEO: the site could not be crawled this run (no on-page data).";
+  }
+  const lines: string[] = [`Crawled ${i.total} page(s) with a real browser.`];
+  if (i.missingTitle.length) lines.push(`${i.missingTitle.length} page(s) have no <title>.`);
+  if (i.missingMeta.length)
+    lines.push(
+      `${i.missingMeta.length}/${i.total} page(s) missing a meta description: ${i.missingMeta.slice(0, 5).map((p) => shortUrl(p.url)).join(", ")}.`
+    );
+  if (i.poorMeta.length) lines.push(`${i.poorMeta.length} page(s) have a too-short/too-long meta description.`);
+  if (i.missingH1.length)
+    lines.push(`${i.missingH1.length} page(s) have NO H1 heading: ${i.missingH1.slice(0, 5).map((p) => shortUrl(p.url)).join(", ")}.`);
+  if (i.multiH1.length) lines.push(`${i.multiH1.length} page(s) have multiple H1 headings.`);
+  lines.push(
+    i.anySchema
+      ? `JSON-LD structured data present on ${i.schemaPages.length}/${i.total} page(s).`
+      : `NO JSON-LD structured data (schema) found on any crawled page.`
+  );
+  if (i.thinContent.length) lines.push(`${i.thinContent.length} page(s) have thin content (<150 words).`);
+  return "TECHNICAL / ON-PAGE SEO (from a live crawl):\n" + lines.map((l) => `- ${l}`).join("\n");
+}
+
+/** On-screen technical / on-page SEO health panel (SEO tab). */
+function TechnicalSeoPanel({ tech }: { tech: TechnicalSeoResult | undefined }) {
+  if (!tech || tech.pages.length === 0) return null;
+  const i = computeTechnicalIssues(tech);
+  const metaOk = i.total - i.missingMeta.length;
+  const h1Ok = tech.pages.filter((p) => p.h1Count === 1).length;
+  const th: React.CSSProperties = { padding: "7px 10px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#fff", background: B.oxford };
+  const td: React.CSSProperties = { padding: "7px 10px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", borderBottom: "1px solid #eef0f2", whiteSpace: "nowrap" };
+  const yes = <span style={{ color: "#15803d", fontWeight: 700 }}>✓</span>;
+  const no = <span style={{ color: B.tangelo, fontWeight: 700 }}>✗</span>;
+  const kpis: [string, string, boolean][] = [
+    ["Pages crawled", String(i.total), true],
+    ["Meta descriptions", `${metaOk}/${i.total}`, i.missingMeta.length === 0],
+    ["Single clean H1", `${h1Ok}/${i.total}`, h1Ok === i.total],
+    ["Schema (JSON-LD)", i.anySchema ? "Present" : "None", i.anySchema],
+  ];
+  return (
+    <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <span style={{ color: B.caribbean }}>🩺</span>
+        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>
+          Technical / On-Page SEO
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {kpis.map(([label, val, ok]) => (
+          <div key={label} style={{ flex: "1 1 120px", minWidth: 110, border: "1px solid #e6e9ec", borderLeft: `3px solid ${ok ? "#15803d" : B.tangelo}`, borderRadius: 6, padding: "8px 12px" }}>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "#999" }}>{label}</div>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 18, fontWeight: 700, color: B.oxford }}>{val}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={th}>Page</th>
+              <th style={th}>Meta&nbsp;desc</th>
+              <th style={th}>H1</th>
+              <th style={th}>Schema</th>
+              <th style={th}>Words</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tech.pages.map((p, idx) => (
+              <tr key={idx}>
+                <td style={{ ...td, whiteSpace: "normal", maxWidth: 320 }}>{shortUrl(p.url)}</td>
+                <td style={td}>{p.metaDescription ? yes : no}</td>
+                <td style={td}>{p.h1Count === 1 ? yes : <span style={{ color: B.tangelo, fontWeight: 700 }}>{p.h1Count === 0 ? "✗ none" : `${p.h1Count}×`}</span>}</td>
+                <td style={td}>{p.hasSchema ? yes : no}</td>
+                <td style={td}>{p.wordCount || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 8 }}>
+        Crawled {new Date(tech.timestamp).toLocaleString()} · homepage + up to 5 key pages. A missing meta description, a missing/duplicate H1, or absent schema is an easy on-page fix.
+      </p>
+    </div>
+  );
 }
 
 function SEOAudit({
@@ -2001,12 +2120,32 @@ Return ONLY a JSON array of 6 strings, no prose:
         ? `AI ASSISTANT VISIBILITY — asked Claude "${llmRankResult.query}": Claude ${llmRankResult.models[0].mentionsTarget ? "NAMES" : "does NOT name"} ${currentProperty.name}. Communities Claude recommended: ${llmRankResult.models[0].namedProperties.join(", ") || "(none returned)"}. ${llmRankResult.models[0].note}`
         : "AI ASSISTANT VISIBILITY: could not be checked this run.";
 
+      // Technical / on-page crawl — read the real site (title, meta, H1s,
+      // schema, internal links) so the audit can flag on-page SEO gaps. Adds
+      // ~60-90s but is best-effort: if the site can't be rendered we simply
+      // skip the technical section instead of failing the audit.
+      let technicalSeo: TechnicalSeoResult | undefined;
+      if (currentProperty.website) {
+        setProgress("Crawling the site for technical / on-page SEO…");
+        try {
+          const crawl = await callFetch({ url: currentProperty.website, follow: true, maxPages: 6 });
+          const pages: PageSeo[] = (crawl.pages || [])
+            .filter((p) => p.seo)
+            .map((p) => ({ url: p.url, status: p.status, ...(p.seo as Omit<PageSeo, "url" | "status">) }));
+          if (pages.length) technicalSeo = { pages, timestamp: new Date().toISOString() };
+        } catch {
+          /* best-effort — technical section is skipped if the crawl fails */
+        }
+      }
+
       const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
 
 GOOGLE SEARCH RANK DATA:
 ${queryRankSummary}
 
 ${aiSummary}
+
+${technicalSeoPromptSummary(technicalSeo)}
 
 Based on BOTH the Google rank data AND the AI-assistant visibility above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s visibility across Google search AND AI assistants (ChatGPT/Claude/Gemini). Order by highest ROI first.
 
@@ -2047,7 +2186,8 @@ Recommendation rules (STRICT):
    - CONTENT: requires writing pages, FAQs, blog posts
    - STRATEGIC: > 1 week, multi-month positioning (backlink outreach, review campaigns)
    - LONG-TAIL: niche query optimization with lower competition
-12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.${setAsidePromptNote(currentProperty)}`;
+12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
+13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
       // 502 from the host), still save the ranks + comp-set instead of failing
@@ -2073,6 +2213,7 @@ Recommendation rules (STRICT):
         recommendations,
         timestamp: new Date().toISOString(),
         location: extractLocation(currentProperty.address) || extractCity(currentProperty.address),
+        technicalSeo,
       };
       setResults(finalResults);
       onUpdateProperty({ ...currentProperty, seoAudit: finalResults, llmRank: llmRankResult ?? currentProperty.llmRank });
@@ -2579,6 +2720,9 @@ Recommendation rules (STRICT):
               )}
             </div>
           )}
+
+          {/* Technical / On-Page SEO health (from the site crawl) */}
+          <TechnicalSeoPanel tech={results.technicalSeo} />
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
@@ -5798,6 +5942,46 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 })}
               </tbody>
             </table>
+
+            {seo.technicalSeo && seo.technicalSeo.pages.length > 0 && (() => {
+              const tech = seo.technicalSeo;
+              const ti = computeTechnicalIssues(tech);
+              const cell = (good: boolean, label: string) => (
+                <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: good ? "#15803d" : "#b14a2a" }}>{label}</td>
+              );
+              return (
+                <div className="pb-avoid" style={{ marginTop: 18 }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                    Technical / On-Page SEO
+                  </div>
+                  <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
+                    Crawled {tech.pages.length} page(s). {ti.missingMeta.length} missing a meta description, {ti.missingH1.length} with no H1, {ti.multiH1.length} with multiple H1s; JSON-LD schema {ti.anySchema ? "present" : "absent"}.
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={findingsTh}>Page</th>
+                        <th style={{ ...findingsTh, width: 55, textAlign: "center" }}>Meta</th>
+                        <th style={{ ...findingsTh, width: 55, textAlign: "center" }}>H1</th>
+                        <th style={{ ...findingsTh, width: 60, textAlign: "center" }}>Schema</th>
+                        <th style={{ ...findingsTh, width: 55, textAlign: "center" }}>Words</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tech.pages.map((p, i) => (
+                        <tr key={i} className="pb-avoid">
+                          <td style={findingsTd}>{shortUrl(p.url)}</td>
+                          {cell(!!p.metaDescription, p.metaDescription ? "Yes" : "No")}
+                          {cell(p.h1Count === 1, p.h1Count === 0 ? "None" : String(p.h1Count))}
+                          {cell(p.hasSchema, p.hasSchema ? "Yes" : "No")}
+                          <td style={{ ...findingsTd, textAlign: "center" }}>{p.wordCount || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </section>
         )}
 
