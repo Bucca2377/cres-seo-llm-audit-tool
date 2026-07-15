@@ -6478,7 +6478,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         {/* ============ SEO RANK FINDINGS ============ */}
         {seo && (
           <section className="pb-before">
-            <PrintSectionHeader>SEO &amp; Rank Check Findings</PrintSectionHeader>
+            <PrintSectionHeader>SEO &amp; Online Presence</PrintSectionHeader>
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
               Audited {new Date(seo.timestamp).toLocaleString()}. {seo.queries.length} queries
               checked against live Google data via SerpAPI.
@@ -6626,8 +6626,55 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               </tbody>
             </table>
 
+            {seo.citations && seo.citations.sources.length > 0 && (() => {
+              const rows = citationNetworkRows(seo.citations);
+              return (
+                <div className="pb-avoid" style={{ marginTop: 18 }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                    Local Citations / Directory Presence
+                  </div>
+                  <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
+                    Appears on {rows.filter((r) => r.present).length} of {rows.length} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={findingsTh}>Directory network</th>
+                        <th style={{ ...findingsTh, width: 120, textAlign: "center" }}>Listing found</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} className="pb-avoid">
+                          <td style={findingsTd}>
+                            {r.network}
+                            {r.present && r.foundSites.length > 0 && (
+                              <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
+                            )}
+                          </td>
+                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: r.present ? "#15803d" : "#9a6a2a" }}>
+                            {r.present ? "Yes" : "Verify"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </section>
+        )}
+
+        {/* ============ WEBSITE OPTIMIZATION ============ */}
+        {seo && (seo.pageSpeed || seo.technicalSeo) && (
+          <section className="pb-before">
+            <PrintSectionHeader>Website Optimization</PrintSectionHeader>
+            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
+              How the property&rsquo;s own website performs and reads to search engines and AI.
+            </p>
+
             {seo.pageSpeed && seo.pageSpeed.strategies.some((s) => s.score != null) && (
-              <div className="pb-avoid" style={{ marginTop: 18 }}>
+              <div className="pb-avoid" style={{ marginTop: 4 }}>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
                   Page Speed / Core Web Vitals
                 </div>
@@ -6713,42 +6760,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               );
             })()}
 
-            {seo.citations && seo.citations.sources.length > 0 && (() => {
-              const rows = citationNetworkRows(seo.citations);
-              return (
-                <div className="pb-avoid" style={{ marginTop: 18 }}>
-                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                    Local Citations / Directory Presence
-                  </div>
-                  <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                    Appears on {rows.filter((r) => r.present).length} of {rows.length} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.
-                  </p>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={findingsTh}>Directory network</th>
-                        <th style={{ ...findingsTh, width: 120, textAlign: "center" }}>Listing found</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((r, i) => (
-                        <tr key={i} className="pb-avoid">
-                          <td style={findingsTd}>
-                            {r.network}
-                            {r.present && r.foundSites.length > 0 && (
-                              <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
-                            )}
-                          </td>
-                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: r.present ? "#15803d" : "#9a6a2a" }}>
-                            {r.present ? "Yes" : "Verify"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
           </section>
         )}
 
