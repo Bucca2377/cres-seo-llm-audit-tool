@@ -6024,7 +6024,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
   );
 }
 
-function PrintableReport({ property, mode = "combined" }: { property: Property; mode?: "combined" | "seo" }) {
+function PrintableReport({ property, mode = "combined" }: { property: Property; mode?: "combined" | "seo" | "marketing" }) {
   const llmRecs = property.llmAuditRecommendations;
   const llmTs = property.llmAuditTimestamp;
   const seo = property.seoAudit;
@@ -6074,7 +6074,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     size: letter;
     margin: 0.85in 0.65in 0.75in 0.65in;
     @top-left {
-      content: "CRES  |  SEO Audit  |  ${cssName}  |  ${monthYear}";
+      content: "CRES  |  ${mode === "seo" ? "SEO Audit" : mode === "marketing" ? "Marketing Audit" : "Marketing & SEO Audit"}  |  ${cssName}  |  ${monthYear}";
       font-family: 'Josefin Sans', sans-serif;
       font-size: 8.5pt;
       color: #062347;
@@ -6131,7 +6131,12 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   const setAsideKeys = new Set(setAsideList.map((s) => s.key));
   // In SEO-only mode the recap shows just the SEO-sourced items; the combined
   // report shows all of them.
-  const setAsideForPrint = mode === "seo" ? setAsideList.filter((s) => s.audit === "seo") : setAsideList;
+  const setAsideForPrint =
+    mode === "seo"
+      ? setAsideList.filter((s) => s.audit === "seo")
+      : mode === "marketing"
+      ? setAsideList.filter((s) => s.audit === "marketing")
+      : setAsideList;
 
   // Merge LLM-audit + SEO-audit cards, dropping topical duplicates (both
   // audits independently cover reviews / FAQ / schema / amenities, so the
@@ -6141,6 +6146,8 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   const allStructuredCards: RecommendationCard[] = dedupeRecCards(
     mode === "seo"
       ? [...(structuredSeoRecs || [])]
+      : mode === "marketing"
+      ? [...(structuredLlmRecs || [])]
       : [...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
   ).filter((c) => !isSetAside(c, setAsideKeys));
 
@@ -6166,7 +6173,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   const seoRecLines = useLegacyTextRecs ? splitRecommendations(typeof seo?.recommendations === "string" ? seo!.recommendations : "") : [];
   const allRecs: ParsedRec[] = [
     ...(mode === "seo" ? [] : llmRecLines.map(categorizeRecommendation)),
-    ...seoRecLines.map(categorizeRecommendation),
+    ...(mode === "marketing" ? [] : seoRecLines.map(categorizeRecommendation)),
   ];
   const recImmediate = allRecs.filter((r) => r.category === "immediate" || r.category === "other").slice(0, 5);
   const recHigh = allRecs.filter((r) => r.category === "high").slice(0, 6);
@@ -6246,7 +6253,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               margin: 0,
             }}
           >
-            {mode === "seo" ? "SEO Audit" : "Marketing Audit & SEO Audit"}
+            {mode === "seo" ? "SEO Audit" : mode === "marketing" ? "Marketing Audit" : "Marketing Audit & SEO Audit"}
           </h1>
           <div style={{ marginBottom: 28 }} />
           <div
@@ -6484,7 +6491,8 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         )}
 
         {/* ============ SEO RANK FINDINGS ============ */}
-        {seo && (
+        {/* Skipped when printing the Marketing Audit on its own. */}
+        {mode !== "marketing" && seo && (
           <section className="pb-before">
             <PrintSectionHeader>SEO &amp; Online Presence</PrintSectionHeader>
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
@@ -6674,7 +6682,8 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         )}
 
         {/* ============ WEBSITE OPTIMIZATION ============ */}
-        {seo && (seo.pageSpeed || seo.technicalSeo) && (
+        {/* Skipped when printing the Marketing Audit on its own. */}
+        {mode !== "marketing" && seo && (seo.pageSpeed || seo.technicalSeo) && (
           <section className="pb-before">
             <PrintSectionHeader>Website Optimization</PrintSectionHeader>
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
@@ -6873,7 +6882,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         )}
 
         {/* ============ RECOMMENDATIONS ============ */}
-        {(mode === "seo" ? seo?.recommendations : llmRecs || seo?.recommendations) && (
+        {(mode === "seo" ? seo?.recommendations : mode === "marketing" ? llmRecs : llmRecs || seo?.recommendations) && (
           <section className="pb-before">
             <PrintSectionHeader>Recommendations to Drive Visibility</PrintSectionHeader>
 
@@ -6978,13 +6987,15 @@ export default function MarketingHub() {
   // Which report to print: the combined Marketing/SEO/LLM doc, or the
   // standalone Review Audit. Set just before window.print() so only the
   // targeted .printable-report is in the DOM.
-  const [printTarget, setPrintTarget] = useState<"combined" | "seo" | "review">("combined");
+  const [printTarget, setPrintTarget] = useState<"combined" | "seo" | "review" | "marketing">("combined");
   const [printNonce, setPrintNonce] = useState(0);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
   useEffect(() => {
     if (printNonce > 0) window.print();
   }, [printNonce]);
-  const doPrint = (target: "combined" | "seo" | "review") => {
+  const doPrint = (target: "combined" | "seo" | "review" | "marketing") => {
     setPrintTarget(target);
+    setPrintMenuOpen(false);
     setPrintNonce((n) => n + 1);
   };
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -7198,31 +7209,63 @@ export default function MarketingHub() {
             <span style={{ width: 6, height: 6, background: "#22c55e", borderRadius: "50%", animation: "lp 2s infinite", display: "inline-block" }} />
             <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#22c55e" }}>Live AI</span>
           </div>
-          <button
-            onClick={() => doPrint(tab === "reviews" ? "review" : tab === "seo" ? "seo" : "combined")}
-            style={{
-              background: "rgba(255,255,255,0.1)",
-              border: "1px solid rgba(255,255,255,0.15)",
-              borderRadius: 20,
-              padding: "4px 14px",
-              fontFamily: "'Josefin Sans',sans-serif",
-              fontSize: 11,
-              color: "white",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-            title={
-              tab === "reviews"
-                ? "Print the Resident Review Audit as its own PDF. Choose 'Save as PDF' as the destination."
-                : tab === "seo"
-                ? "Print the SEO Audit on its own. Choose 'Save as PDF' as the destination."
-                : "Print the Marketing Audit (includes the SEO Audit). Choose 'Save as PDF' as the destination."
-            }
-          >
-            <span>📄</span> {tab === "reviews" ? "Print Review Audit" : tab === "seo" ? "Print SEO Audit" : "Print Marketing Audit"}
-          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setPrintMenuOpen((v) => !v)}
+              style={{
+                background: "rgba(255,255,255,0.1)",
+                border: "1px solid rgba(255,255,255,0.15)",
+                borderRadius: 20,
+                padding: "4px 14px",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11,
+                color: "white",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+              title="Print an audit as a PDF. Choose 'Save as PDF' as the destination."
+            >
+              <span>📄</span> Print <span style={{ fontSize: 9 }}>▼</span>
+            </button>
+            {printMenuOpen && (
+              <>
+                <div onClick={() => setPrintMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, background: "white", borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.18)", border: "1px solid #e6e9ec", overflow: "hidden", minWidth: 280 }}>
+                  <div style={{ padding: "7px 16px 3px", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9aa3ad" }}>
+                    Print standalone
+                  </div>
+                  {([
+                    ["marketing", "Marketing Audit"],
+                    ["seo", "SEO & Website Optimization"],
+                    ["review", "Review Audit"],
+                  ] as const).map(([target, label]) => (
+                    <button
+                      key={target}
+                      onClick={() => doPrint(target)}
+                      style={{ display: "block", width: "100%", textAlign: "left", background: "white", border: "none", padding: "9px 16px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.oxford, cursor: "pointer", whiteSpace: "nowrap" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f7f9")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
+                    >
+                      📄 {label}
+                    </button>
+                  ))}
+                  <div style={{ padding: "7px 16px 3px", borderTop: "1px solid #eef0f2", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "#9aa3ad" }}>
+                    Print together
+                  </div>
+                  <button
+                    onClick={() => doPrint("combined")}
+                    style={{ display: "block", width: "100%", textAlign: "left", background: "white", border: "none", padding: "9px 16px 11px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.oxford, cursor: "pointer", whiteSpace: "nowrap" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f7f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
+                  >
+                    🖨 Marketing + SEO &amp; Website Optimization
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={() => setSettingsOpen(true)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>⚙</span> Edit
           </button>
@@ -7246,7 +7289,10 @@ export default function MarketingHub() {
       {printTarget === "review" ? (
         <ReviewAuditReport property={property} />
       ) : (
-        <PrintableReport property={property} mode={printTarget === "seo" ? "seo" : "combined"} />
+        <PrintableReport
+          property={property}
+          mode={printTarget === "seo" ? "seo" : printTarget === "marketing" ? "marketing" : "combined"}
+        />
       )}
 
       <PropertySettings
