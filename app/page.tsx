@@ -2318,20 +2318,20 @@ function TechnicalSeoPanel({ tech }: { tech: TechnicalSeoResult | undefined }) {
           <thead>
             <tr>
               <th style={th}>Page</th>
-              <th style={th}>Meta&nbsp;desc</th>
-              <th style={th}>H1</th>
-              <th style={th}>Schema</th>
-              <th style={th}>Words</th>
+              <th style={{ ...th, textAlign: "center", width: 90 }}>Meta&nbsp;desc</th>
+              <th style={{ ...th, textAlign: "center", width: 70 }}>H1</th>
+              <th style={{ ...th, textAlign: "center", width: 80 }}>Schema</th>
+              <th style={{ ...th, textAlign: "center", width: 70 }}>Words</th>
             </tr>
           </thead>
           <tbody>
             {tech.pages.map((p, idx) => (
               <tr key={idx}>
                 <td style={{ ...td, whiteSpace: "normal", maxWidth: 320 }}>{shortUrl(p.url)}</td>
-                <td style={td}>{p.metaDescription ? yes : no}</td>
-                <td style={td}>{p.h1Count === 1 ? yes : <span style={{ color: B.tangelo, fontWeight: 700 }}>{p.h1Count === 0 ? "✗ none" : `${p.h1Count}×`}</span>}</td>
-                <td style={td}>{p.hasSchema ? yes : no}</td>
-                <td style={td}>{p.wordCount || "—"}</td>
+                <td style={{ ...td, textAlign: "center" }}>{p.metaDescription ? yes : no}</td>
+                <td style={{ ...td, textAlign: "center" }}>{p.h1Count === 1 ? yes : <span style={{ color: B.tangelo, fontWeight: 700 }}>{p.h1Count === 0 ? "✗ none" : `${p.h1Count}×`}</span>}</td>
+                <td style={{ ...td, textAlign: "center" }}>{p.hasSchema ? yes : no}</td>
+                <td style={{ ...td, textAlign: "center" }}>{p.wordCount || "—"}</td>
               </tr>
             ))}
           </tbody>
