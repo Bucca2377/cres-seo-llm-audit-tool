@@ -1981,6 +1981,41 @@ type DialResult = {
   ringSeconds?: number | null;
 };
 
+/**
+ * US state → primary IANA timezone. Used to show the dial-test time in the
+ * PROPERTY's local zone (what matters for judging office hours), not the
+ * viewer's browser zone. Multi-zone states use their dominant zone.
+ */
+const STATE_TZ: Record<string, string> = {
+  CT: "America/New_York", DE: "America/New_York", DC: "America/New_York", FL: "America/New_York", GA: "America/New_York", IN: "America/New_York", KY: "America/New_York", ME: "America/New_York", MD: "America/New_York", MA: "America/New_York", MI: "America/New_York", NH: "America/New_York", NJ: "America/New_York", NY: "America/New_York", NC: "America/New_York", OH: "America/New_York", PA: "America/New_York", RI: "America/New_York", SC: "America/New_York", VT: "America/New_York", VA: "America/New_York", WV: "America/New_York",
+  AL: "America/Chicago", AR: "America/Chicago", IL: "America/Chicago", IA: "America/Chicago", KS: "America/Chicago", LA: "America/Chicago", MN: "America/Chicago", MS: "America/Chicago", MO: "America/Chicago", NE: "America/Chicago", ND: "America/Chicago", OK: "America/Chicago", SD: "America/Chicago", TN: "America/Chicago", TX: "America/Chicago", WI: "America/Chicago",
+  AZ: "America/Phoenix", CO: "America/Denver", ID: "America/Denver", MT: "America/Denver", NM: "America/Denver", UT: "America/Denver", WY: "America/Denver",
+  CA: "America/Los_Angeles", NV: "America/Los_Angeles", OR: "America/Los_Angeles", WA: "America/Los_Angeles",
+  AK: "America/Anchorage", HI: "Pacific/Honolulu",
+};
+
+/** Pull the 2-letter state code from the end of an address ("…, MD 21804"). */
+function extractStateCode(address: string): string {
+  const m = (address || "").match(/,?\s*([A-Za-z]{2})\s*\d{0,5}\s*$/);
+  return m ? m[1].toUpperCase() : "";
+}
+
+/**
+ * Format the dial-test timestamp in the PROPERTY's local timezone (with the
+ * zone abbreviation, e.g. "EDT") so a voicemail result can be judged against
+ * the office's posted hours — not the viewer's clock.
+ */
+function formatDialTime(iso: string, address: string): string {
+  const tz = STATE_TZ[extractStateCode(address)];
+  try {
+    const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+    if (tz) return new Date(iso).toLocaleString("en-US", { ...opts, timeZone: tz, timeZoneName: "short" });
+    return new Date(iso).toLocaleString("en-US", opts) + " (viewer's local time — property state unknown)";
+  } catch {
+    return new Date(iso).toLocaleString();
+  }
+}
+
 /** 10-digit key for de-duping a phone number regardless of formatting. */
 function normalizePhone(s: string): string {
   const d = (s || "").replace(/\D/g, "");
@@ -4620,7 +4655,7 @@ function PhoneInventoryPanel({
       </table>
       {phones.dialTested && phones.dialTestedAt && (
         <p style={{ ...para, fontSize: 11.5, color: "#9a7200", background: "#fdf6ee", border: "1px solid #f0e2cd", borderRadius: 6, padding: "7px 12px", margin: "0 0 10px 0" }}>
-          Dial-tested {new Date(phones.dialTestedAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.
+          Dial-tested {formatDialTime(phones.dialTestedAt, property.address)} (property&rsquo;s local time).
           A "Voicemail" result is only a lead-leak signal if this landed during the property's posted office hours (see the Office hours row above) — after-hours voicemail is expected.
         </p>
       )}
@@ -6538,7 +6573,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
                   Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
                   {mkt.phones.dialTested && mkt.phones.dialTestedAt
-                    ? ` Dial-tested ${new Date(mkt.phones.dialTestedAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}; a "Voicemail" result only signals a lead leak if the call landed during posted office hours.`
+                    ? ` Dial-tested ${formatDialTime(mkt.phones.dialTestedAt, property.address)} (property's local time); a "Voicemail" result only signals a lead leak if the call landed during posted office hours.`
                     : mkt.phones.dialTested
                     ? " Each number was dial-tested with an automated call."
                     : ""}
