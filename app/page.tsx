@@ -5448,7 +5448,7 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
 /* ================= MAIN APP ======================================= */
 const TABS = [
   { id: "marketing", label: "Marketing Audit" },
-  { id: "seo", label: "SEO / LLM Rank Check" },
+  { id: "seo", label: "SEO & Online Presence / Website Optimization" },
   { id: "reviews", label: "Review Audit" },
 ];
 
