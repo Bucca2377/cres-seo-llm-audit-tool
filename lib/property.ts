@@ -86,11 +86,18 @@ export interface TechnicalSeoResult {
   pages: PageSeo[];
   timestamp: string;
   /**
-   * True when the crawler was blocked / bot-challenged (e.g. Cloudflare 403)
-   * and only got a thin shell — the per-page tags are NOT reliable, so the UI
-   * shows a "verify live" note instead of presenting them as findings.
+   * True when BOTH readers failed (crawler bot-challenged AND the web_fetch
+   * fallback couldn't read it) — the UI shows a "verify live" note instead of
+   * presenting unreliable tags as findings.
    */
   blocked?: boolean;
+  /**
+   * Which reader produced this data. "crawl" = the headless browser (full DOM,
+   * schema/canonical reliable). "webfetch" = the Claude web_fetch fallback used
+   * when the crawler was bot-blocked (meta/H1/word counts reliable; schema
+   * detection is best-effort). Drives the "read via fallback" caveat note.
+   */
+  source?: "crawl" | "webfetch";
 }
 
 /** PageSpeed / Core Web Vitals for one strategy (mobile or desktop). */

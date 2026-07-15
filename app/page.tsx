@@ -2021,6 +2021,43 @@ function computeTechnicalIssues(tech: TechnicalSeoResult | undefined) {
   };
 }
 
+/**
+ * Fallback on-page reader for bot-protected sites: Claude's web_fetch
+ * penetrates Cloudflare where the headless crawler is 403'd. Reliable for
+ * title / meta description / H1s / word count; schema detection is best-effort
+ * (web_fetch may not expose raw JSON-LD), so hasSchema is only true when Claude
+ * can literally see a structured-data block.
+ */
+async function fetchTechnicalSeoViaWebFetch(website: string): Promise<PageSeo[] | null> {
+  const url = website.startsWith("http") ? website : `https://${website}`;
+  const prompt = `Use your web_fetch tool to load ${url} and its main same-domain nav pages (floor plans, amenities, photos/tour, contact — up to 5 pages total). For EACH page you actually read, report on-page SEO facts. Return ONLY JSON, no prose:
+{"pages":[{"url":"page URL","title":"the <title>","metaDescription":"the meta description text, or empty string if there is none","h1Count":<number of H1 headings on the page>,"h1Text":"the main H1 text","hasSchema":<true ONLY if you can literally see a JSON-LD / schema.org structured-data block in the page source; otherwise false>,"internalLinks":<approx count of same-site links>,"wordCount":<approx visible word count>}]}
+Omit any page you cannot read. Never invent values.`;
+  const resp = await callAI({ prompt, webFetch: true, maxTokens: 1500 });
+  const text = (resp.content || []).filter((b: { type: string }) => b.type === "text").map((b: { text?: string }) => b.text || "").join("\n");
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let parsed: { pages?: Array<Record<string, unknown>> };
+  try {
+    parsed = JSON.parse(m[0]);
+  } catch {
+    return null;
+  }
+  const pages: PageSeo[] = (parsed.pages || []).map((p) => ({
+    url: String(p.url || url),
+    status: 200,
+    title: String(p.title || ""),
+    metaDescription: String(p.metaDescription || ""),
+    h1Count: Number(p.h1Count) || 0,
+    h1Text: String(p.h1Text || ""),
+    hasCanonical: false, // not reliably visible via web_fetch
+    hasSchema: !!p.hasSchema,
+    internalLinks: Number(p.internalLinks) || 0,
+    wordCount: Number(p.wordCount) || 0,
+  }));
+  return pages.length ? pages : null;
+}
+
 /** Plain-text technical-SEO summary fed into the recommendations prompt. */
 function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string {
   const i = computeTechnicalIssues(tech);
@@ -2030,7 +2067,11 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
   if (tech.blocked) {
     return "TECHNICAL / ON-PAGE SEO: the site's bot protection (e.g. Cloudflare) blocked our crawler, so on-page tags could NOT be read. Do NOT assume missing meta descriptions / H1s / schema — recommend verifying on-page SEO live rather than reporting gaps.";
   }
-  const lines: string[] = [`Crawled ${i.total} page(s) with a real browser.`];
+  const lines: string[] = [
+    tech.source === "webfetch"
+      ? `Read ${i.total} page(s) via the web_fetch fallback (the site blocked the crawler). Meta/H1/word counts are reliable; schema detection is best-effort, so do NOT claim schema is missing on the strength of this alone.`
+      : `Crawled ${i.total} page(s) with a real browser.`,
+  ];
   if (i.missingTitle.length) lines.push(`${i.missingTitle.length} page(s) have no <title>.`);
   if (i.missingMeta.length)
     lines.push(
@@ -2298,6 +2339,9 @@ function TechnicalSeoPanel({ tech }: { tech: TechnicalSeoResult | undefined }) {
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 8 }}>
         Crawled {new Date(tech.timestamp).toLocaleString()} · homepage + up to 5 key pages. A missing meta description, a missing/duplicate H1, or absent schema is an easy on-page fix.
+        {tech.source === "webfetch" && (
+          <> The site blocked our crawler, so this was read via the web_fetch fallback — title, meta, H1s, and word counts are reliable; <strong>schema detection is best-effort</strong>, so confirm schema before treating it as absent.</>
+        )}
       </p>
     </div>
   );
@@ -2532,14 +2576,30 @@ Return ONLY a JSON array of 6 strings, no prose:
           const pages: PageSeo[] = (crawl.pages || [])
             .filter((p) => p.seo)
             .map((p) => ({ url: p.url, status: p.status, ...(p.seo as Omit<PageSeo, "url" | "status">) }));
-          // If we only got a single thin page (typical of a Cloudflare/bot
-          // challenge), the tags aren't real on-page data — flag it as blocked
-          // so the UI says "verify live" instead of reporting fake findings.
+          // A single thin page (typical of a Cloudflare/bot challenge) means the
+          // crawler didn't reach the real site.
           const gotRealContent = pages.some(
             (p) => (p.status === 200 || p.status === null) && p.wordCount >= 80
           );
-          const blocked = pages.length > 0 && !gotRealContent;
-          if (pages.length) technicalSeo = { pages, timestamp: new Date().toISOString(), blocked };
+          if (pages.length && gotRealContent) {
+            technicalSeo = { pages, timestamp: new Date().toISOString(), source: "crawl" };
+          } else {
+            // Crawler blocked → fall back to Claude web_fetch (penetrates
+            // Cloudflare like the Marketing Audit does). If that also fails,
+            // keep whatever thin pages we have and flag them blocked.
+            setProgress("Site blocked our crawler — reading it via web_fetch…");
+            let wf: PageSeo[] | null = null;
+            try {
+              wf = await fetchTechnicalSeoViaWebFetch(currentProperty.website);
+            } catch {
+              /* fallback best-effort */
+            }
+            if (wf && wf.length) {
+              technicalSeo = { pages: wf, timestamp: new Date().toISOString(), source: "webfetch" };
+            } else if (pages.length) {
+              technicalSeo = { pages, timestamp: new Date().toISOString(), blocked: true };
+            }
+          }
         } catch {
           /* best-effort — technical section is skipped if the crawl fails */
         }
@@ -6621,7 +6681,8 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     Technical / On-Page SEO
                   </div>
                   <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                    Crawled {tech.pages.length} page(s). {ti.missingMeta.length} missing a meta description, {ti.missingH1.length} with no H1, {ti.multiH1.length} with multiple H1s; JSON-LD schema {ti.anySchema ? "present" : "absent"}.
+                    {tech.source === "webfetch" ? "Read" : "Crawled"} {tech.pages.length} page(s). {ti.missingMeta.length} missing a meta description, {ti.missingH1.length} with no H1, {ti.multiH1.length} with multiple H1s; JSON-LD schema {ti.anySchema ? "present" : "absent"}.
+                    {tech.source === "webfetch" && " Read via the web_fetch fallback (site blocked the crawler); schema detection is best-effort."}
                   </p>
                   <table>
                     <thead>
