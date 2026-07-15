@@ -2352,14 +2352,16 @@ Amenities: ${amenitiesStr}
 
 CRITICAL: This is a "${unitType}" community. Use that product word ("${unitWord}") in the queries — do NOT default to the generic word "apartments" unless the type genuinely is apartments. Search the way a renter looking for THIS kind of home would.
 
+Favor WINNABLE, specific/local searches over broad metro-level head terms. Anchor queries to the property's TOWN, suburb, neighborhood, county, or a nearby landmark/employer/university/district — NOT the big metro name. Broad head terms like "${unitWord} for rent in <big city>" are the most expensive and slowest to rank and are NOT the near-term opportunity, so include at most ONE of them.
+
 Mix the 6 queries as follows:
 - 1 brand query (just the property name or a slight variant)
-- 1 type + city query (e.g. "${unitWord} for rent in <city>")
+- 1 type + specific-locale query using the exact town/suburb/neighborhood, not the metro (e.g. "${unitWord} in <town or neighborhood>")
 - ${bedroomTypes
-        ? `1 bedroom-specific query using a real bedroom count from "${bedroomTypes}" (e.g. "3 bedroom ${unitWord} for rent in <city>")`
-        : `1 bedroom-count query (e.g. "2 bedroom ${unitWord} in <city>")`}
-- 2 amenity-based queries combining a key amenity with the city
-- 1 high-volume head query for the local rental market
+        ? `1 bedroom-specific query using a real bedroom count from "${bedroomTypes}" tied to the town/neighborhood (e.g. "3 bedroom ${unitWord} in <town>")`
+        : `1 bedroom-count query tied to the town/neighborhood (e.g. "2 bedroom ${unitWord} in <town>")`}
+- 2 long-tail queries combining a key amenity with the specific town/neighborhood
+- 1 "near <local landmark / employer / university / district>" query
 
 Return ONLY a JSON array of 6 strings, no prose:
 ["query 1", "query 2", "query 3", "query 4", "query 5", "query 6"]`;
@@ -2524,6 +2526,7 @@ Recommendation rules (STRICT):
 8. PLAIN ENGLISH: titles, "what", and "why" are read by a property manager, not an SEO specialist. Never use the jargon "NAP", "GBP", "SERP", or "ILS" in card text — say "name/address/phone", "Google listing", "search results", "listing sites" instead. (You may keep "Map Pack" and "organic" — those are clear in context.)
 9. CRES PLAYBOOK GROUNDING: if a recommendation touches reviews, lead follow-up, or the tour/sales process, describe the specific CRES tactic from the playbook above plainly (e.g. "text residents a direct Google review link", "Hug a Building visits", "call + text + email daily for the first 7 days") rather than generic advice. Do NOT fabricate branded program names like "CRES text-message review protocol" — only "Hug a Building" is a named program.
 10. KEY-PHRASE COPY: At least ONE recommendation MUST address putting the EXACT phrases the property fails to rank for (the queries above where it is absent or below the top 3) into its own copy — the page title, H1, and body of the most relevant page, the meta description, AND the Google Business Profile description/services. Name the specific phrases verbatim (e.g. 'weave "townhomes for rent in Salisbury" and "3 bedroom townhomes Salisbury MD" into the homepage title tag, H1, and the Google listing description'). This is the cheapest win when the property HAS the feature but never says the phrase. Only skip it if the property already ranks top-3 for every competitive query.
+10a. WINNABLE FIRST: prioritize the SPECIFIC / local phrases the property is CLOSEST to winning (town, suburb, neighborhood, county, or near-a-landmark terms — especially ones already in the expanded Map Pack or ranking page 2-3) over broad metro-level head terms like "apartments for rent in <big city>". Broad heads are the slowest and most expensive to move, so if you mention one at all, frame it as a longer-term play, never the top near-term recommendation.
 11. Priority assignment guide:
    - QUICK WIN: ≤ 4 hours, near-term measurable impact
    - MAP PACK: local 3-pack / Google-listing-driven visibility (the most distinctive SEO category)
@@ -2636,6 +2639,14 @@ Recommendation rules (STRICT):
     let strongestScore = -1;
     let weakestIdx = -1;
     let weakestScore = Infinity;
+    // The "biggest opportunity" is the most WINNABLE competitive query — one
+    // where the property already shows traction (in the expanded Map Pack, or
+    // ranking page 2-3) and just needs a push — NOT the query it's furthest
+    // from (usually a broad, hyper-competitive head term that's the slowest
+    // and most expensive to win). Fall back to the weakest only if nothing is
+    // close.
+    let opportunityIdx = -1;
+    let oppScore = -1;
     compIdx.forEach((i) => {
       const r = ranks[i];
       const mpScore = r.map_pack_rank ? 100 - r.map_pack_rank * 10 : 0;
@@ -2649,7 +2660,20 @@ Recommendation rules (STRICT):
         weakestScore = score;
         weakestIdx = i;
       }
+      // Winnable proximity: already top-3 in the pack = already winning (skip).
+      if (r.map_pack_rank && r.map_pack_rank <= 3) return;
+      let prox = 0;
+      if (r.expanded_map_pack_rank) prox = Math.max(prox, 100 - r.expanded_map_pack_rank);
+      else if (r.map_pack_appeared) prox = Math.max(prox, 45);
+      if (r.organic_rank && r.organic_rank <= 30) prox = Math.max(prox, 60 - r.organic_rank);
+      if (prox > oppScore) {
+        oppScore = prox;
+        opportunityIdx = i;
+      }
     });
+    // Prefer a winnable query; fall back to the weakest if nothing is close.
+    const oppIsWinnable = opportunityIdx >= 0 && oppScore > 0;
+    const finalOppIdx = oppIsWinnable ? opportunityIdx : weakestIdx;
 
     return {
       total: queries.length,
@@ -2666,6 +2690,10 @@ Recommendation rules (STRICT):
       strongestQuery: strongestIdx >= 0 && strongestScore > 0 ? queries[strongestIdx] : null,
       strongestRank: strongestIdx >= 0 && strongestScore > 0 ? ranks[strongestIdx] : null,
       weakestQuery: weakestIdx >= 0 ? queries[weakestIdx] : null,
+      // The winnable opportunity (or weakest fallback) surfaced in the callout.
+      opportunityQuery: finalOppIdx >= 0 ? queries[finalOppIdx] : null,
+      opportunityRank: finalOppIdx >= 0 ? ranks[finalOppIdx] : null,
+      opportunityWinnable: oppIsWinnable,
     };
   })();
 
@@ -2944,16 +2972,26 @@ Recommendation rules (STRICT):
                   )}
                 </div>
               )}
-              {summary.weakestQuery && (
+              {summary.opportunityQuery && (
                 <div style={{ padding: "12px 14px", background: "#feeee7", borderRadius: 8, borderLeft: `4px solid ${B.tangelo}` }}>
                   <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: B.tangelo, marginBottom: 4 }}>
-                    Weakest query
+                    {summary.opportunityWinnable ? "Biggest opportunity (winnable)" : "Longer-term target"}
                   </div>
                   <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#333", marginBottom: 3 }}>
-                    &ldquo;{summary.weakestQuery}&rdquo;
+                    &ldquo;{summary.opportunityQuery}&rdquo;
                   </div>
                   <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: B.tangelo }}>
-                    Not ranking — biggest opportunity
+                    {(() => {
+                      const r = summary.opportunityRank;
+                      if (!r) return "";
+                      if (summary.opportunityWinnable) {
+                        if (r.expanded_map_pack_rank) return `In the expanded Map Pack (#${r.expanded_map_pack_rank}) — push into the top 3`;
+                        if (r.organic_rank) return `Organic #${r.organic_rank} (P${r.organic_page}) — close; winnable to page 1`;
+                        if (r.map_pack_appeared) return "Appears in the Map Pack — push into the top 3";
+                        return "Close — winnable with focused work";
+                      }
+                      return "Not ranking yet — longer-term target (broad term)";
+                    })()}
                   </div>
                 </div>
               )}
@@ -2990,7 +3028,7 @@ Recommendation rules (STRICT):
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: B.oxford }}>
-                  {["Query", "GBP Map Pack", "Website in Organic", "Who's Beating You"].map((h) => (
+                  {["Query", "GBP Map Pack", "Website in Organic", "Since Start", "Who's Beating You"].map((h) => (
                     <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "white" }}>
                       {h}
                     </th>
@@ -3050,11 +3088,6 @@ Recommendation rules (STRICT):
                             ? "Not in top 20"
                             : "No pack"}
                         </span>
-                        {mpMv.label && (
-                          <div style={{ fontSize: 10.5, fontWeight: 700, color: moveToneColor(mpMv.tone), marginTop: 2 }} title="Map Pack change vs the first tracked audit">
-                            {mpMv.label}
-                          </div>
-                        )}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span
@@ -3065,11 +3098,18 @@ Recommendation rules (STRICT):
                         >
                           {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : "Property not ranking"}
                         </span>
-                        {orgMv.label && (
-                          <div style={{ fontSize: 10.5, fontWeight: 700, color: moveToneColor(orgMv.tone), marginTop: 2 }} title="Organic-rank change vs the first tracked audit">
-                            {orgMv.label}
-                          </div>
-                        )}
+                      </td>
+                      <td style={{ padding: "10px 12px", fontSize: 11 }} title="Rank change vs the first tracked audit (baseline)">
+                        {(() => {
+                          if (!rankBaseline(property.seoRankSnapshots)) return <span style={{ color: "#9aa3ad" }}>baseline set</span>;
+                          const line = (lbl: string, mv: { label: string; tone: "up" | "down" | "neutral" }) => (
+                            <div style={{ color: mv.label ? moveToneColor(mv.tone) : "#9aa3ad", fontWeight: mv.label ? 700 : 400 }}>
+                              <span style={{ color: "#9aa3ad", fontWeight: 400 }}>{lbl} </span>
+                              {mv.label || "no change"}
+                            </div>
+                          );
+                          return (<>{line("Org", orgMv)}{line("Map", mpMv)}</>);
+                        })()}
                       </td>
                       <td style={{ padding: "10px 12px", color: "#666", fontSize: 11 }}>
                         {(() => {
@@ -6369,8 +6409,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               <thead>
                 <tr>
                   <th style={findingsTh}>Query</th>
-                  <th style={{ ...findingsTh, width: 100, textAlign: "center" }}>GBP Map Pack</th>
-                  <th style={{ ...findingsTh, width: 120, textAlign: "center" }}>Website in Organic</th>
+                  <th style={{ ...findingsTh, width: 80, textAlign: "center" }}>GBP Map Pack</th>
+                  <th style={{ ...findingsTh, width: 95, textAlign: "center" }}>Website in Organic</th>
+                  <th style={{ ...findingsTh, width: 95 }}>Since Start</th>
                   <th style={findingsTh}>Who&rsquo;s Beating You</th>
                 </tr>
               </thead>
@@ -6414,9 +6455,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                         }}
                       >
                         {mapText}
-                        {mpMv.label && (
-                          <div style={{ fontSize: 8.5, fontWeight: 700, color: printMoveColor(mpMv.tone) }}>{mpMv.label}</div>
-                        )}
                       </td>
                       <td
                         style={{
@@ -6427,8 +6465,15 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                         }}
                       >
                         {orgText}
-                        {orgMv.label && (
-                          <div style={{ fontSize: 8.5, fontWeight: 700, color: printMoveColor(orgMv.tone) }}>{orgMv.label}</div>
+                      </td>
+                      <td style={{ ...findingsTd, fontSize: 8.5 }}>
+                        {rankBaseline(property.seoRankSnapshots) ? (
+                          <>
+                            <div style={{ fontWeight: 700, color: printMoveColor(orgMv.tone) }}>Org {orgMv.label || "no change"}</div>
+                            <div style={{ fontWeight: 700, color: printMoveColor(mpMv.tone) }}>Map {mpMv.label || "no change"}</div>
+                          </>
+                        ) : (
+                          <span style={{ color: "#888" }}>baseline set</span>
                         )}
                       </td>
                       <td style={{ ...findingsTd, fontSize: 10, color: "#555" }}>
