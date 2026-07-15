@@ -87,6 +87,24 @@ export interface TechnicalSeoResult {
   timestamp: string;
 }
 
+/** PageSpeed / Core Web Vitals for one strategy (mobile or desktop). */
+export interface PageSpeedStrategyResult {
+  strategy: "mobile" | "desktop";
+  score: number | null; // Lighthouse performance score 0-100
+  lcp: string; // Largest Contentful Paint (display value, e.g. "2.4 s")
+  cls: string; // Cumulative Layout Shift
+  fcp: string; // First Contentful Paint
+  tbt: string; // Total Blocking Time
+  error?: string;
+}
+
+/** PageSpeed Insights result across the strategies we checked. */
+export interface PageSpeedResult {
+  url: string;
+  checkedAt: string;
+  strategies: PageSpeedStrategyResult[];
+}
+
 /** Whether the property was detected on one directory / citation source. */
 export interface CitationSourceResult {
   name: string;
@@ -192,6 +210,8 @@ export interface Property {
     technicalSeo?: TechnicalSeoResult;
     /** Local-citation / directory presence check (optional). */
     citations?: CitationResult;
+    /** PageSpeed / Core Web Vitals (optional). */
+    pageSpeed?: PageSpeedResult;
   };
   marketingAudit?: MarketingAuditResult;
   /**

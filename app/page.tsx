@@ -19,6 +19,7 @@ import {
   type TechnicalSeoResult,
   type SeoRankSnapshot,
   type CitationResult,
+  type PageSpeedResult,
   type MarketingAuditResult,
   type MarketingStatus,
   type MarketingConsistencyRow,
@@ -1814,6 +1815,54 @@ interface SEOAuditResults {
   technicalSeo?: TechnicalSeoResult;
   /** Local-citation / directory presence check (optional). */
   citations?: CitationResult;
+  /** PageSpeed / Core Web Vitals (optional). */
+  pageSpeed?: PageSpeedResult;
+}
+
+/**
+ * Run PageSpeed Insights for mobile + desktop in parallel. Best-effort: a
+ * strategy that errors is returned with its error and a null score, and a
+ * total failure returns undefined so the audit skips the section.
+ */
+async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> {
+  if (!url) return undefined;
+  try {
+    const strategies = await Promise.all(
+      (["mobile", "desktop"] as const).map(async (strategy) => {
+        try {
+          const r = await fetch("/api/pagespeed", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url, strategy }),
+          });
+          const d = await r.json();
+          if (!r.ok || d.error) {
+            return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", error: d.error || `failed (${r.status})` };
+          }
+          return { strategy, score: d.score ?? null, lcp: d.lcp || "—", cls: d.cls || "—", fcp: d.fcp || "—", tbt: d.tbt || "—" };
+        } catch {
+          return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", error: "request failed" };
+        }
+      })
+    );
+    // Return the result even when both strategies failed (e.g. the free
+    // keyless PSI quota is exhausted) so the panel can show a helpful hint
+    // instead of silently rendering nothing.
+    return { url, checkedAt: new Date().toISOString(), strategies };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Plain-text PageSpeed summary fed into the recommendations prompt. */
+function pageSpeedPromptSummary(ps: PageSpeedResult | undefined): string {
+  if (!ps) return "PAGE SPEED / CORE WEB VITALS: not checked this run.";
+  const parts = ps.strategies.map((s) =>
+    s.score == null
+      ? `${s.strategy}: could not measure`
+      : `${s.strategy} performance score ${s.score}/100 (LCP ${s.lcp}, CLS ${s.cls}, TBT ${s.tbt})`
+  );
+  return `PAGE SPEED / CORE WEB VITALS (Google PageSpeed Insights): ${parts.join("; ")}.`;
 }
 
 /**
@@ -2087,6 +2136,75 @@ function CitationsPanel({ citations }: { citations: CitationResult | undefined }
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
         Based on a brand search; a "✗" means the listing didn&apos;t surface (verify / build it). Consistent listings across directories strengthen local ranking and trust.
+      </p>
+    </div>
+  );
+}
+
+/** Color a Lighthouse performance score (Google's thresholds). */
+function pageSpeedColor(s: number | null): string {
+  if (s == null) return "#9aa3ad";
+  return s >= 90 ? "#15803d" : s >= 50 ? "#9a7200" : B.tangelo;
+}
+
+/** On-screen PageSpeed / Core Web Vitals panel (SEO tab). */
+function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
+  if (!ps || ps.strategies.length === 0) return null;
+  const allFailed = ps.strategies.every((s) => s.score == null);
+  if (allFailed) {
+    return (
+      <div style={{ background: "#fdf6ee", border: "1px solid #e6d9c6", borderRadius: 8, padding: "12px 18px" }}>
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9a6a2a", marginBottom: 4 }}>
+          ⚡ Page Speed / Core Web Vitals
+        </div>
+        <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#7a5a2a", margin: 0, lineHeight: 1.5 }}>
+          Couldn&apos;t measure this run — Google&apos;s free keyless quota is limited and was exhausted. Add a free{" "}
+          <strong>PAGESPEED_API_KEY</strong> in Railway (Google Cloud → enable &ldquo;PageSpeed Insights API&rdquo; → create an API key), then re-run. It&apos;s free and takes ~2 minutes.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <span style={{ color: B.caribbean }}>⚡</span>
+        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>
+          Page Speed / Core Web Vitals
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        {ps.strategies.map((s) => (
+          <div key={s.strategy} style={{ flex: "1 1 240px", minWidth: 220, border: "1px solid #e6e9ec", borderRadius: 8, padding: "12px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666" }}>
+                {s.strategy}
+              </span>
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 30, lineHeight: 1, color: pageSpeedColor(s.score) }}>
+                {s.score == null ? "—" : s.score}
+                {s.score != null && <span style={{ fontSize: 13, color: "#aaa" }}> /100</span>}
+              </span>
+            </div>
+            {s.error ? (
+              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9aa3ad" }}>Could not measure this run.</div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                {[
+                  ["LCP", s.lcp],
+                  ["CLS", s.cls],
+                  ["TBT", s.tbt],
+                  ["FCP", s.fcp],
+                ].map(([k, v]) => (
+                  <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
+                    <strong style={{ color: "#333" }}>{k}</strong> {v}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
+        Google PageSpeed Insights · {new Date(ps.checkedAt).toLocaleString()}. 90+ is good, 50–89 needs work, under 50 is poor. Mobile is what Google ranks on.
       </p>
     </div>
   );
@@ -2370,6 +2488,13 @@ Return ONLY a JSON array of 6 strings, no prose:
       setProgress("Checking directory / citation presence…");
       const citations = await checkCitations(currentProperty);
 
+      // PageSpeed / Core Web Vitals — Google PageSpeed Insights (mobile + desktop).
+      let pageSpeed: PageSpeedResult | undefined;
+      if (currentProperty.website) {
+        setProgress("Measuring page speed (Core Web Vitals)…");
+        pageSpeed = await callPageSpeed(currentProperty.website);
+      }
+
       const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
 
 GOOGLE SEARCH RANK DATA:
@@ -2378,6 +2503,8 @@ ${queryRankSummary}
 ${aiSummary}
 
 ${technicalSeoPromptSummary(technicalSeo)}
+
+${pageSpeedPromptSummary(pageSpeed)}
 
 ${citationsPromptSummary(citations)}
 
@@ -2422,7 +2549,8 @@ Recommendation rules (STRICT):
    - LONG-TAIL: niche query optimization with lower competition
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
 13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.
-14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on major directories (e.g. Yelp, Zillow, ApartmentGuide, Facebook), include at least ONE "FOUNDATIONAL" recommendation to claim/build those listings with consistent name/address/phone — name the specific missing directories. Skip if it already appears on the major ones.${setAsidePromptNote(currentProperty)}`;
+14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on major directories (e.g. Yelp, Zillow, ApartmentGuide, Facebook), include at least ONE "FOUNDATIONAL" recommendation to claim/build those listings with consistent name/address/phone — name the specific missing directories. Skip if it already appears on the major ones.
+15. PAGE SPEED: if the mobile PageSpeed score above is below 50 (poor) or 50-89 (needs work), include ONE recommendation to improve it — cite the actual mobile score and the weakest Core Web Vital (e.g. 'mobile score 38/100, LCP 6.2s'), and give concrete fixes (compress/next-gen images, defer offscreen images, reduce render-blocking scripts, enable caching/CDN). Skip if mobile scores 90+.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
       // 502 from the host), still save the ranks + comp-set instead of failing
@@ -2450,6 +2578,7 @@ Recommendation rules (STRICT):
         location: extractLocation(currentProperty.address) || extractCity(currentProperty.address),
         technicalSeo,
         citations,
+        pageSpeed,
       };
       setResults(finalResults);
 
@@ -2980,6 +3109,9 @@ Recommendation rules (STRICT):
               )}
             </div>
           )}
+
+          {/* Page speed / Core Web Vitals */}
+          <PageSpeedPanel ps={results.pageSpeed} />
 
           {/* Keyword rank movement vs the baseline run (before/after) */}
           <RankMovementPanel snapshots={property.seoRankSnapshots} />
@@ -6208,6 +6340,41 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 })}
               </tbody>
             </table>
+
+            {seo.pageSpeed && seo.pageSpeed.strategies.some((s) => s.score != null) && (
+              <div className="pb-avoid" style={{ marginTop: 18 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Page Speed / Core Web Vitals
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={findingsTh}>Device</th>
+                      <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>Score</th>
+                      <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>LCP</th>
+                      <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>CLS</th>
+                      <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>TBT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {seo.pageSpeed.strategies.map((s, i) => (
+                      <tr key={i} className="pb-avoid">
+                        <td style={{ ...findingsTd, textTransform: "capitalize" }}>{s.strategy}</td>
+                        <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: s.score == null ? "#888" : s.score >= 90 ? "#15803d" : s.score >= 50 ? "#9a7200" : "#b14a2a" }}>
+                          {s.score == null ? "—" : `${s.score}/100`}
+                        </td>
+                        <td style={{ ...findingsTd, textAlign: "center" }}>{s.lcp}</td>
+                        <td style={{ ...findingsTd, textAlign: "center" }}>{s.cls}</td>
+                        <td style={{ ...findingsTd, textAlign: "center" }}>{s.tbt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 4 }}>
+                  90+ good · 50–89 needs work · under 50 poor. Mobile is Google&apos;s ranking signal.
+                </p>
+              </div>
+            )}
 
             {(() => {
               const m = computeRankMovement(property.seoRankSnapshots);
