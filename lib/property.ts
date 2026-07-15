@@ -87,6 +87,20 @@ export interface TechnicalSeoResult {
   timestamp: string;
 }
 
+/** Whether the property was detected on one directory / citation source. */
+export interface CitationSourceResult {
+  name: string;
+  domain: string;
+  present: boolean;
+  url?: string; // the listing URL when detected
+}
+
+/** Local-citation / directory presence check (from a brand search). */
+export interface CitationResult {
+  sources: CitationSourceResult[];
+  checkedAt: string;
+}
+
 /**
  * One SEO run's per-query ranks, snapshotted so the tool can show before/after
  * movement over time (case-study evidence: "moved these terms from page 3 to
@@ -176,6 +190,8 @@ export interface Property {
     location?: string;
     /** Technical / on-page SEO health from the site crawl (optional). */
     technicalSeo?: TechnicalSeoResult;
+    /** Local-citation / directory presence check (optional). */
+    citations?: CitationResult;
   };
   marketingAudit?: MarketingAuditResult;
   /**

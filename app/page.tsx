@@ -18,6 +18,7 @@ import {
   type PageSeo,
   type TechnicalSeoResult,
   type SeoRankSnapshot,
+  type CitationResult,
   type MarketingAuditResult,
   type MarketingStatus,
   type MarketingConsistencyRow,
@@ -1811,6 +1812,59 @@ interface SEOAuditResults {
   location?: string;
   /** Technical / on-page SEO health from the site crawl (optional). */
   technicalSeo?: TechnicalSeoResult;
+  /** Local-citation / directory presence check (optional). */
+  citations?: CitationResult;
+}
+
+/**
+ * Directory / citation sources a prospect (and search engines) expect a
+ * property to appear on. Presence is a local-SEO ranking + trust signal.
+ */
+const CITATION_SOURCES: { name: string; domain: string }[] = [
+  { name: "Apartments.com", domain: "apartments.com" },
+  { name: "Zillow", domain: "zillow.com" },
+  { name: "ApartmentGuide", domain: "apartmentguide.com" },
+  { name: "Apartment List", domain: "apartmentlist.com" },
+  { name: "Rent.com", domain: "rent.com" },
+  { name: "Trulia", domain: "trulia.com" },
+  { name: "Yelp", domain: "yelp.com" },
+  { name: "Facebook", domain: "facebook.com" },
+  { name: "Yellow Pages", domain: "yellowpages.com" },
+  { name: "Better Business Bureau", domain: "bbb.org" },
+];
+
+/**
+ * Detect which directory/citation sources surface for a brand search. One
+ * SerpAPI call. "Not detected" is a soft signal (the listing may exist but
+ * rank below the results we scan), so it reads as "verify / opportunity".
+ */
+async function checkCitations(property: Property): Promise<CitationResult | undefined> {
+  try {
+    const city = extractCity(property.address) || "";
+    const q = `${property.name} ${city}`.trim();
+    const data = await callSerp({ query: q, engine: "google", location: extractLocation(property.address) });
+    const results: unknown[] = Array.isArray(data?.organic_results) ? data.organic_results : [];
+    const hostOf = (u: string) => {
+      try {
+        return new URL(u).hostname.replace(/^www\./i, "").toLowerCase();
+      } catch {
+        return "";
+      }
+    };
+    const found = results
+      .map((r) => {
+        const link = (r as { link?: string }).link || "";
+        return { host: hostOf(link), url: link };
+      })
+      .filter((f) => f.host);
+    const sources = CITATION_SOURCES.map((s) => {
+      const hit = found.find((f) => f.host === s.domain || f.host.endsWith("." + s.domain));
+      return { name: s.name, domain: s.domain, present: !!hit, url: hit?.url };
+    });
+    return { sources, checkedAt: new Date().toISOString() };
+  } catch {
+    return undefined;
+  }
 }
 
 /** Strip protocol + trailing slash for compact display of a page URL. */
@@ -1974,6 +2028,65 @@ function RankMovementPanel({ snapshots }: { snapshots: SeoRankSnapshot[] | undef
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 8 }}>
         Organic rank vs the first tracked audit. Movement accumulates each time you re-run, building before/after proof over time.
+      </p>
+    </div>
+  );
+}
+
+/** Plain-text citation summary fed into the recommendations prompt. */
+function citationsPromptSummary(c: CitationResult | undefined): string {
+  if (!c) return "LOCAL CITATIONS: not checked this run.";
+  const present = c.sources.filter((s) => s.present).map((s) => s.name);
+  const missing = c.sources.filter((s) => !s.present).map((s) => s.name);
+  return `LOCAL CITATIONS / DIRECTORY PRESENCE (from a brand search):\n- Detected on: ${present.join(", ") || "none"}.\n- NOT detected on: ${missing.join(", ") || "none"} (build/claim these listings for local-SEO trust and consistent name/address/phone).`;
+}
+
+/** On-screen local-citations / directory presence panel (SEO tab). */
+function CitationsPanel({ citations }: { citations: CitationResult | undefined }) {
+  if (!citations || citations.sources.length === 0) return null;
+  const presentCount = citations.sources.filter((s) => s.present).length;
+  return (
+    <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <span style={{ color: B.caribbean }}>📇</span>
+        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>
+          Local Citations / Directory Presence
+        </span>
+      </div>
+      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", marginBottom: 12 }}>
+        Detected on <strong>{presentCount}</strong> of {citations.sources.length} key directories.
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {citations.sources.map((s) => {
+          const chip = (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 12px",
+                borderRadius: 20,
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 12,
+                border: `1px solid ${s.present ? "#bfe3cd" : "#e6d9c6"}`,
+                background: s.present ? "#f0faf4" : "#fdf6ee",
+                color: s.present ? "#15803d" : "#9a6a2a",
+              }}
+            >
+              <span style={{ fontWeight: 700 }}>{s.present ? "✓" : "✗"}</span> {s.name}
+            </span>
+          );
+          return s.present && s.url ? (
+            <a key={s.name} href={s.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+              {chip}
+            </a>
+          ) : (
+            <span key={s.name}>{chip}</span>
+          );
+        })}
+      </div>
+      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
+        Based on a brand search; a "✗" means the listing didn&apos;t surface (verify / build it). Consistent listings across directories strengthen local ranking and trust.
       </p>
     </div>
   );
@@ -2253,6 +2366,10 @@ Return ONLY a JSON array of 6 strings, no prose:
         }
       }
 
+      // Local-citation / directory presence — one SerpAPI brand search.
+      setProgress("Checking directory / citation presence…");
+      const citations = await checkCitations(currentProperty);
+
       const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
 
 GOOGLE SEARCH RANK DATA:
@@ -2261,6 +2378,8 @@ ${queryRankSummary}
 ${aiSummary}
 
 ${technicalSeoPromptSummary(technicalSeo)}
+
+${citationsPromptSummary(citations)}
 
 Based on BOTH the Google rank data AND the AI-assistant visibility above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s visibility across Google search AND AI assistants (ChatGPT/Claude/Gemini). Order by highest ROI first.
 
@@ -2302,7 +2421,8 @@ Recommendation rules (STRICT):
    - STRATEGIC: > 1 week, multi-month positioning (backlink outreach, review campaigns)
    - LONG-TAIL: niche query optimization with lower competition
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
-13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.${setAsidePromptNote(currentProperty)}`;
+13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.
+14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on major directories (e.g. Yelp, Zillow, ApartmentGuide, Facebook), include at least ONE "FOUNDATIONAL" recommendation to claim/build those listings with consistent name/address/phone — name the specific missing directories. Skip if it already appears on the major ones.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
       // 502 from the host), still save the ranks + comp-set instead of failing
@@ -2329,6 +2449,7 @@ Recommendation rules (STRICT):
         timestamp: new Date().toISOString(),
         location: extractLocation(currentProperty.address) || extractCity(currentProperty.address),
         technicalSeo,
+        citations,
       };
       setResults(finalResults);
 
@@ -2865,6 +2986,9 @@ Recommendation rules (STRICT):
 
           {/* Technical / On-Page SEO health (from the site crawl) */}
           <TechnicalSeoPanel tech={results.technicalSeo} />
+
+          {/* Local citations / directory presence */}
+          <CitationsPanel citations={results.citations} />
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
@@ -6165,6 +6289,35 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </div>
               );
             })()}
+
+            {seo.citations && seo.citations.sources.length > 0 && (
+              <div className="pb-avoid" style={{ marginTop: 18 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Local Citations / Directory Presence
+                </div>
+                <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
+                  Detected on {seo.citations.sources.filter((s) => s.present).length} of {seo.citations.sources.length} key directories (from a brand search).
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={findingsTh}>Directory</th>
+                      <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Listing found</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {seo.citations.sources.map((s, i) => (
+                      <tr key={i} className="pb-avoid">
+                        <td style={findingsTd}>{s.name}</td>
+                        <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: s.present ? "#15803d" : "#b14a2a" }}>
+                          {s.present ? "Yes" : "Not found"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
 
