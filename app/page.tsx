@@ -1968,118 +1968,38 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
   return "TECHNICAL / ON-PAGE SEO (from a live crawl):\n" + lines.map((l) => `- ${l}`).join("\n");
 }
 
-/* ---- Keyword rank movement (before/after case-study evidence) ---- */
-interface RankMovementRow {
-  query: string;
-  wasRank: number | null;
-  nowRank: number | null;
-  status: "improved" | "declined" | "same" | "new-ranking" | "lost";
-  reachedPage1: boolean;
-}
-interface RankMovement {
-  baselineDate: string;
-  currentDate: string;
-  rows: RankMovementRow[];
-  improved: number;
-  reachedPage1: number;
-}
+/* ---- Keyword rank movement (before/after, shown inline in the query table) ---- */
 
 /**
- * Compare the latest SEO run to the FIRST snapshot (baseline ≈ when CRES took
- * over) and return per-query organic-rank movement. Returns null until there
- * are at least two runs to compare.
+ * Per-query organic-rank movement vs the baseline (first) snapshot — rendered
+ * as a "Since Start" column in the query table so the before/after evidence
+ * lives next to the current rank instead of in a separate section. Returns a
+ * short label + a semantic tone the caller maps to its own colors.
+ *
+ * `baseline` should be passed only when there are ≥2 runs to compare (else the
+ * cell reads "—", i.e. this run is the baseline).
  */
-function computeRankMovement(snapshots: SeoRankSnapshot[] | undefined): RankMovement | null {
-  if (!snapshots || snapshots.length < 2) return null;
-  const baseline = snapshots[0];
-  const current = snapshots[snapshots.length - 1];
+function queryMovementCell(
+  baseline: SeoRankSnapshot | undefined,
+  query: string,
+  nowRank: number | null
+): { label: string; tone: "up" | "down" | "neutral" } {
+  if (!baseline) return { label: "—", tone: "neutral" };
   const norm = (q: string) => q.trim().toLowerCase();
-  const baseMap = new Map(baseline.ranks.map((r) => [norm(r.query), r]));
-  const rows: RankMovementRow[] = [];
-  for (const cur of current.ranks) {
-    const base = baseMap.get(norm(cur.query));
-    const nowRank = cur.organicRank;
-    const wasRank = base ? base.organicRank : null;
-    if (!base) {
-      if (nowRank == null) continue; // brand-new query that isn't ranking — skip
-      rows.push({ query: cur.query, wasRank: null, nowRank, status: "new-ranking", reachedPage1: nowRank <= 10 });
-      continue;
-    }
-    if (wasRank == null && nowRank == null) continue; // never ranked, still not
-    let status: RankMovementRow["status"];
-    if (wasRank == null) status = "new-ranking";
-    else if (nowRank == null) status = "lost";
-    else if (nowRank < wasRank) status = "improved";
-    else if (nowRank > wasRank) status = "declined";
-    else status = "same";
-    const reachedPage1 = nowRank != null && nowRank <= 10 && !(wasRank != null && wasRank <= 10);
-    rows.push({ query: cur.query, wasRank, nowRank, status, reachedPage1 });
-  }
-  const rankOrder = (r: RankMovementRow) =>
-    r.reachedPage1 ? 0 : r.status === "improved" || r.status === "new-ranking" ? 1 : r.status === "same" ? 2 : 3;
-  rows.sort((a, b) => rankOrder(a) - rankOrder(b));
-  const improved = rows.filter((r) => r.status === "improved" || r.status === "new-ranking").length;
-  const reachedPage1 = rows.filter((r) => r.reachedPage1).length;
-  return { baselineDate: baseline.date, currentDate: current.date, rows, improved, reachedPage1 };
+  const base = baseline.ranks.find((r) => norm(r.query) === norm(query));
+  if (!base) return nowRank != null ? { label: "★ new", tone: "up" } : { label: "—", tone: "neutral" };
+  const was = base.organicRank;
+  if (was == null && nowRank == null) return { label: "—", tone: "neutral" };
+  if (was == null) return { label: "★ new", tone: "up" };
+  if (nowRank == null) return { label: "▼ dropped", tone: "down" };
+  if (nowRank < was) return { label: `▲ from #${was}`, tone: "up" };
+  if (nowRank > was) return { label: `▼ from #${was}`, tone: "down" };
+  return { label: "no change", tone: "neutral" };
 }
 
-/** On-screen keyword rank-movement panel (SEO tab). */
-function RankMovementPanel({ snapshots }: { snapshots: SeoRankSnapshot[] | undefined }) {
-  const m = computeRankMovement(snapshots);
-  if (!m || m.rows.length === 0) return null;
-  const baselineLabel = new Date(m.baselineDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  const th: React.CSSProperties = { padding: "7px 10px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#fff", background: B.oxford };
-  const td: React.CSSProperties = { padding: "7px 10px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", borderBottom: "1px solid #eef0f2" };
-  const fmt = (r: number | null) => (r == null ? "Not ranking" : `#${r}`);
-  const badge = (row: RankMovementRow) => {
-    if (row.status === "improved") return <span style={{ color: "#15803d", fontWeight: 700 }}>▲ improved</span>;
-    if (row.status === "new-ranking") return <span style={{ color: "#15803d", fontWeight: 700 }}>★ new</span>;
-    if (row.status === "declined") return <span style={{ color: B.tangelo, fontWeight: 700 }}>▼ declined</span>;
-    if (row.status === "lost") return <span style={{ color: B.tangelo, fontWeight: 700 }}>✗ lost</span>;
-    return <span style={{ color: "#9aa3ad" }}>no change</span>;
-  };
-  return (
-    <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <span style={{ color: B.caribbean }}>📈</span>
-        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>
-          Keyword Rank Movement
-        </span>
-      </div>
-      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", marginBottom: 12 }}>
-        Since {baselineLabel}: <strong style={{ color: "#15803d" }}>{m.improved}</strong> keyword{m.improved === 1 ? "" : "s"} improved
-        {m.reachedPage1 > 0 && <>, <strong style={{ color: "#15803d" }}>{m.reachedPage1}</strong> reached page 1</>}.
-      </p>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={th}>Query</th>
-              <th style={th}>Was</th>
-              <th style={th}>Now</th>
-              <th style={th}>Movement</th>
-            </tr>
-          </thead>
-          <tbody>
-            {m.rows.map((row, idx) => (
-              <tr key={idx} style={row.reachedPage1 ? { background: "#f0faf4" } : undefined}>
-                <td style={{ ...td, fontWeight: 500 }}>
-                  {row.query}
-                  {row.reachedPage1 && <span style={{ marginLeft: 6, fontSize: 10, color: "#15803d", fontWeight: 700 }}>→ PAGE 1</span>}
-                </td>
-                <td style={{ ...td, color: "#888" }}>{fmt(row.wasRank)}</td>
-                <td style={{ ...td, fontWeight: 700 }}>{fmt(row.nowRank)}</td>
-                <td style={td}>{badge(row)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 8 }}>
-        Organic rank vs the first tracked audit. Movement accumulates each time you re-run, building before/after proof over time.
-      </p>
-    </div>
-  );
+/** The baseline snapshot to compare against — only when ≥2 runs exist. */
+function rankBaseline(snapshots: SeoRankSnapshot[] | undefined): SeoRankSnapshot | undefined {
+  return snapshots && snapshots.length >= 2 ? snapshots[0] : undefined;
 }
 
 /** Plain-text citation summary fed into the recommendations prompt. */
@@ -2996,7 +2916,7 @@ Recommendation rules (STRICT):
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: B.oxford }}>
-                  {["Query", "GBP Map Pack", "Website in Organic", "Who's Beating You"].map((h) => (
+                  {["Query", "GBP Map Pack", "Website in Organic", "Since Start", "Who's Beating You"].map((h) => (
                     <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "white" }}>
                       {h}
                     </th>
@@ -3007,6 +2927,8 @@ Recommendation rules (STRICT):
                 {results.queries.map((q, i) => {
                   const r = results.ranks[i];
                   const branded = isBrandedQuery(q, property);
+                  const mv = queryMovementCell(rankBaseline(property.seoRankSnapshots), q, r.organic_rank);
+                  const mvColor = mv.tone === "up" ? "#15803d" : mv.tone === "down" ? B.tangelo : "#9aa3ad";
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "10px 12px", color: "#333" }}>
@@ -3064,6 +2986,11 @@ Recommendation rules (STRICT):
                           {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : "Property not ranking"}
                         </span>
                       </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <span style={{ color: mvColor, fontWeight: 600, fontSize: 11.5 }} title="Organic-rank change vs the first tracked audit">
+                          {mv.label}
+                        </span>
+                      </td>
                       <td style={{ padding: "10px 12px", color: "#666", fontSize: 11 }}>
                         {(() => {
                           const b = competitorsBeating(property, r);
@@ -3112,9 +3039,6 @@ Recommendation rules (STRICT):
 
           {/* Page speed / Core Web Vitals */}
           <PageSpeedPanel ps={results.pageSpeed} />
-
-          {/* Keyword rank movement vs the baseline run (before/after) */}
-          <RankMovementPanel snapshots={property.seoRankSnapshots} />
 
           {/* Technical / On-Page SEO health (from the site crawl) */}
           <TechnicalSeoPanel tech={results.technicalSeo} />
@@ -6278,12 +6202,15 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                   <th style={findingsTh}>Query</th>
                   <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>GBP Map Pack</th>
                   <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Website in Organic</th>
+                  <th style={{ ...findingsTh, width: 95, textAlign: "center" }}>Since Start</th>
                   <th style={findingsTh}>Who&rsquo;s Beating You</th>
                 </tr>
               </thead>
               <tbody>
                 {seo.queries.map((q, i) => {
                   const r = seo.ranks[i];
+                  const mv = queryMovementCell(rankBaseline(property.seoRankSnapshots), q, r.organic_rank);
+                  const mvColor = mv.tone === "up" ? "#15803d" : mv.tone === "down" ? "#b14a2a" : "#888";
                   const mapText = r.map_pack_rank
                     ? `#${r.map_pack_rank}`
                     : r.expanded_map_pack_rank
@@ -6328,6 +6255,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                       >
                         {orgText}
                       </td>
+                      <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: mvColor }}>{mv.label}</td>
                       <td style={{ ...findingsTd, fontSize: 10, color: "#555" }}>
                         {(() => {
                           const b = competitorsBeating(property, r);
@@ -6375,47 +6303,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </p>
               </div>
             )}
-
-            {(() => {
-              const m = computeRankMovement(property.seoRankSnapshots);
-              if (!m || m.rows.length === 0) return null;
-              const baselineLabel = new Date(m.baselineDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-              const fmt = (r: number | null) => (r == null ? "Not ranking" : `#${r}`);
-              const moveLabel = (row: RankMovementRow) =>
-                row.status === "improved" ? "Improved" : row.status === "new-ranking" ? "New" : row.status === "declined" ? "Declined" : row.status === "lost" ? "Lost" : "No change";
-              const moveColor = (row: RankMovementRow) =>
-                row.reachedPage1 || row.status === "improved" || row.status === "new-ranking" ? "#15803d" : row.status === "declined" || row.status === "lost" ? "#b14a2a" : "#888";
-              return (
-                <div className="pb-avoid" style={{ marginTop: 18 }}>
-                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                    Keyword Rank Movement
-                  </div>
-                  <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                    Since {baselineLabel}: {m.improved} keyword(s) improved{m.reachedPage1 > 0 ? `, ${m.reachedPage1} reached page 1` : ""}. Organic rank vs the first tracked audit.
-                  </p>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={findingsTh}>Query</th>
-                        <th style={{ ...findingsTh, width: 80, textAlign: "center" }}>Was</th>
-                        <th style={{ ...findingsTh, width: 80, textAlign: "center" }}>Now</th>
-                        <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>Movement</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {m.rows.map((row, i) => (
-                        <tr key={i} className="pb-avoid">
-                          <td style={findingsTd}>{row.query}{row.reachedPage1 ? " (→ Page 1)" : ""}</td>
-                          <td style={{ ...findingsTd, textAlign: "center", color: "#888" }}>{fmt(row.wasRank)}</td>
-                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700 }}>{fmt(row.nowRank)}</td>
-                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: moveColor(row) }}>{moveLabel(row)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
 
             {seo.technicalSeo && seo.technicalSeo.pages.length > 0 && (() => {
               const tech = seo.technicalSeo;
