@@ -4300,9 +4300,42 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       if (googlePhone) addPhone(googlePhone, "Google");
       (Array.isArray(aiPhones.google) ? aiPhones.google : []).forEach((p) => addPhone(p, "Google"));
       (Array.isArray(aiPhones.apartments) ? aiPhones.apartments : []).forEach((p) => addPhone(p, "Apartments.com"));
-      const phones: PhoneInventory | undefined = phoneEntries.length
+      let phones: PhoneInventory | undefined = phoneEntries.length
         ? { numbers: phoneEntries, collectedAt: new Date().toISOString() }
         : undefined;
+
+      // Dial-test the numbers as part of the audit (best-effort). If Twilio is
+      // not configured or the call fails, the numbers still show — just without
+      // a Connected/No-connection verdict.
+      if (phones && phones.numbers.length) {
+        setProgress("Dial-testing the tracking numbers…");
+        try {
+          const dialRes = await fetch("/api/dial", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ numbers: phones.numbers.map((n) => n.number) }),
+          });
+          const dialData = await dialRes.json();
+          if (dialRes.ok && Array.isArray(dialData.results)) {
+            const byNum = new Map<string, { status: PhoneNumberEntry["dialStatus"]; detail?: string }>(
+              dialData.results.map((res: { number: string; status: string; detail?: string }) => [
+                normalizePhone(res.number),
+                { status: res.status as PhoneNumberEntry["dialStatus"], detail: res.detail },
+              ])
+            );
+            phones = {
+              ...phones,
+              dialTested: true,
+              numbers: phones.numbers.map((n) => {
+                const res = byNum.get(normalizePhone(n.number));
+                return res ? { ...n, dialStatus: res.status, dialNote: res.detail } : n;
+              }),
+            };
+          }
+        } catch {
+          /* best-effort — leave numbers untested if the dial check fails */
+        }
+      }
 
       const result: MarketingAuditResult = {
         executiveSummary: parsed.executiveSummary || [],
