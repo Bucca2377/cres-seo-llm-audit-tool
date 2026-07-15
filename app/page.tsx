@@ -3012,6 +3012,11 @@ Recommendation rules (STRICT):
 
       {results && summary && (
         <>
+          {/* ===== Group 1: SEO & Online Presence (ranks, AI, citations) ===== */}
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford, borderBottom: `2px solid ${B.caribbean}`, paddingBottom: 6, marginBottom: 16 }}>
+            SEO &amp; Online Presence
+          </div>
+
           {/* Scorecard */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 18 }}>
             <KPI
@@ -3291,11 +3296,14 @@ Recommendation rules (STRICT):
             </div>
           )}
 
-          {/* --- Online presence / SEO: where you show up across the web --- */}
-          {/* Local citations / directory presence */}
+          {/* Local citations / directory presence (still part of online presence) */}
           <CitationsPanel citations={results.citations} />
 
-          {/* --- Property website performance: the site itself --- */}
+          {/* ===== Group 2: Website Optimization (the site itself) ===== */}
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford, borderBottom: `2px solid ${B.caribbean}`, paddingBottom: 6, marginTop: 22, marginBottom: 16 }}>
+            Website Optimization
+          </div>
+
           {/* Page speed / Core Web Vitals */}
           <PageSpeedPanel ps={results.pageSpeed} />
 
