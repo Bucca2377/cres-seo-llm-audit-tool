@@ -1970,36 +1970,49 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
 
 /* ---- Keyword rank movement (before/after, shown inline in the query table) ---- */
 
-/**
- * Per-query organic-rank movement vs the baseline (first) snapshot — rendered
- * as a "Since Start" column in the query table so the before/after evidence
- * lives next to the current rank instead of in a separate section. Returns a
- * short label + a semantic tone the caller maps to its own colors.
- *
- * `baseline` should be passed only when there are ≥2 runs to compare (else the
- * cell reads "—", i.e. this run is the baseline).
- */
-function queryMovementCell(
-  baseline: SeoRankSnapshot | undefined,
-  query: string,
-  nowRank: number | null
-): { label: string; tone: "up" | "down" | "neutral" } {
-  if (!baseline) return { label: "—", tone: "neutral" };
-  const norm = (q: string) => q.trim().toLowerCase();
-  const base = baseline.ranks.find((r) => norm(r.query) === norm(query));
-  if (!base) return nowRank != null ? { label: "★ new", tone: "up" } : { label: "—", tone: "neutral" };
-  const was = base.organicRank;
-  if (was == null && nowRank == null) return { label: "—", tone: "neutral" };
-  if (was == null) return { label: "★ new", tone: "up" };
-  if (nowRank == null) return { label: "▼ dropped", tone: "down" };
-  if (nowRank < was) return { label: `▲ from #${was}`, tone: "up" };
-  if (nowRank > was) return { label: `▼ from #${was}`, tone: "down" };
-  return { label: "no change", tone: "neutral" };
-}
-
 /** The baseline snapshot to compare against — only when ≥2 runs exist. */
 function rankBaseline(snapshots: SeoRankSnapshot[] | undefined): SeoRankSnapshot | undefined {
   return snapshots && snapshots.length >= 2 ? snapshots[0] : undefined;
+}
+
+/**
+ * Movement of a single rank value vs the baseline. Lower = better. Returns a
+ * short label + tone; an empty label means "nothing to show" (no baseline, or
+ * no change) so the caller renders nothing and avoids clutter.
+ * `was === undefined` = no baseline exists; `was === null` = tracked but wasn't
+ * ranking then (so ranking now is "new").
+ */
+function rankMovement(
+  was: number | null | undefined,
+  now: number | null
+): { label: string; tone: "up" | "down" | "neutral" } {
+  if (was === undefined) return { label: "", tone: "neutral" };
+  if (was == null && now == null) return { label: "", tone: "neutral" };
+  if (was == null) return { label: "★ new", tone: "up" };
+  if (now == null) return { label: "▼ dropped", tone: "down" };
+  if (now < was) return { label: `▲ from #${was}`, tone: "up" };
+  if (now > was) return { label: `▼ from #${was}`, tone: "down" };
+  return { label: "", tone: "neutral" }; // no change — render nothing
+}
+
+/** Movement for a query's organic OR map-pack rank vs the baseline snapshot. */
+function movementFor(
+  snapshots: SeoRankSnapshot[] | undefined,
+  query: string,
+  metric: "organicRank" | "mapPackRank",
+  now: number | null
+): { label: string; tone: "up" | "down" | "neutral" } {
+  const baseline = rankBaseline(snapshots);
+  if (!baseline) return { label: "", tone: "neutral" };
+  const norm = (q: string) => q.trim().toLowerCase();
+  const base = baseline.ranks.find((r) => norm(r.query) === norm(query));
+  const was = base ? base[metric] : null;
+  return rankMovement(was, now);
+}
+
+/** Map a movement tone to an on-screen color. */
+function moveToneColor(tone: "up" | "down" | "neutral"): string {
+  return tone === "up" ? "#15803d" : tone === "down" ? B.tangelo : "#9aa3ad";
 }
 
 /** Plain-text citation summary fed into the recommendations prompt. */
@@ -2206,21 +2219,23 @@ function SEOAudit({
   const [error, setError] = useState<string | null>(null);
   const [newQuery, setNewQuery] = useState("");
 
-  const pinnedQueries = property.pinnedQueries || [];
-  const addPinnedQuery = () => {
+  // The sticky tracked set. Fall back to legacy pinnedQueries for display so
+  // existing properties show their pins until the next run migrates them.
+  const trackedQueries = property.trackedQueries ?? property.pinnedQueries ?? [];
+  const addTrackedQuery = () => {
     const q = newQuery.trim();
     if (!q) return;
-    if (pinnedQueries.some((p) => p.toLowerCase() === q.toLowerCase())) {
+    if (trackedQueries.some((p) => p.toLowerCase() === q.toLowerCase())) {
       setNewQuery("");
       return;
     }
-    onUpdateProperty({ ...property, pinnedQueries: [...pinnedQueries, q] });
+    onUpdateProperty({ ...property, trackedQueries: [...trackedQueries, q] });
     setNewQuery("");
   };
-  const removePinnedQuery = (q: string) => {
+  const removeTrackedQuery = (q: string) => {
     onUpdateProperty({
       ...property,
-      pinnedQueries: pinnedQueries.filter((p) => p !== q),
+      trackedQueries: trackedQueries.filter((p) => p !== q),
     });
   };
 
@@ -2268,11 +2283,33 @@ function SEOAudit({
         }
       }
 
-      // Stage 1: generate queries
+      // Stage 1: assemble the query set. STICKY: once a tracked set exists we
+      // reuse it verbatim every run (so keyword-rank movement is comparable),
+      // and only auto-generate on the very first run / migration.
       setStage("queries");
-      setProgress("Generating relevant search queries...");
+      const stickySet = (currentProperty.trackedQueries && currentProperty.trackedQueries.length
+        ? currentProperty.trackedQueries
+        : currentProperty.pinnedQueries || []
+      )
+        .map((q) => q.trim())
+        .filter(Boolean);
 
-      const amenitiesStr = currentProperty.amenities.slice(0, 8).join(", ") || "(none specified)";
+      let queries: string[];
+      if (stickySet.length > 0) {
+        // Reuse the saved set exactly — no AI generation, no drift.
+        setProgress("Loading your tracked search queries…");
+        const seen = new Set<string>();
+        queries = [];
+        for (const q of stickySet) {
+          const key = q.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          queries.push(q);
+        }
+      } else {
+        // First run for this property: auto-generate the starting set.
+        setProgress("Generating relevant search queries...");
+        const amenitiesStr = currentProperty.amenities.slice(0, 8).join(", ") || "(none specified)";
       const unitType = (currentProperty.propertyType || "apartments").trim();
       const unitWord = unitType.toLowerCase();
       const bedroomTypes = (currentProperty.bedroomTypes || "").trim();
@@ -2306,19 +2343,17 @@ Return ONLY a JSON array of 6 strings, no prose:
         throw new Error("No queries returned.");
       }
 
-      // Always include the user's pinned "must-check" queries first, then the
-      // freshly auto-generated set. De-duped case-insensitively so a pinned
-      // query the AI also happened to produce isn't checked twice.
-      const pinned = (currentProperty.pinnedQueries || [])
-        .map((q) => q.trim())
-        .filter(Boolean);
-      const seenQ = new Set<string>();
-      const queries: string[] = [];
-      for (const q of [...pinned, ...autoQueries]) {
-        const key = q.trim().toLowerCase();
-        if (!key || seenQ.has(key)) continue;
-        seenQ.add(key);
-        queries.push(q.trim());
+        // Merge any legacy pins with the generated set (first run only),
+        // de-duped case-insensitively.
+        const pinnedSeed = (currentProperty.pinnedQueries || []).map((q) => q.trim()).filter(Boolean);
+        const seenQ = new Set<string>();
+        queries = [];
+        for (const q of [...pinnedSeed, ...autoQueries]) {
+          const key = q.trim().toLowerCase();
+          if (!key || seenQ.has(key)) continue;
+          seenQ.add(key);
+          queries.push(q.trim());
+        }
       }
 
       // Stage 2: parallel rank checks
@@ -2512,7 +2547,9 @@ Recommendation rules (STRICT):
           query: q,
           organicRank: ranks[i]?.organic_rank ?? null,
           organicPage: ranks[i]?.organic_page ?? null,
-          mapPackRank: ranks[i]?.map_pack_rank ?? null,
+          // Effective Map Pack position: top-3 rank, else the expanded (4-20)
+          // position, so movement like "#8 -> #3" is captured.
+          mapPackRank: (ranks[i]?.map_pack_rank ?? ranks[i]?.expanded_map_pack_rank) ?? null,
         })),
       };
       const priorSnapshots = currentProperty.seoRankSnapshots ?? [];
@@ -2525,6 +2562,9 @@ Recommendation rules (STRICT):
         seoAudit: finalResults,
         llmRank: llmRankResult ?? currentProperty.llmRank,
         seoRankSnapshots: cappedSnapshots,
+        // Persist the exact set we checked so every future run reuses it
+        // (sticky). User add/remove edits this list between runs.
+        trackedQueries: queries,
       });
       setStage("done");
     } catch (e) {
@@ -2648,8 +2688,8 @@ Recommendation rules (STRICT):
         </button>
       </div>
 
-      {/* Pinned "must-check" queries — always included alongside the
-          auto-generated set on every run. */}
+      {/* Tracked search queries — the STICKY set checked on every run. Seeded
+          on the first audit, then reused so rank movement is comparable. */}
       <div
         style={{
           background: "white",
@@ -2670,14 +2710,14 @@ Recommendation rules (STRICT):
             marginBottom: 2,
           }}
         >
-          Must-check queries
+          Tracked search queries
         </div>
         <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa", marginBottom: 10 }}>
-          Always checked every run, on top of the auto-generated queries. Add the searches you care about so they never disappear.
+          The fixed set checked every run, so &ldquo;Since Start&rdquo; movement stays comparable over time. Auto-filled on the first audit — add or remove queries here and the change sticks for all future runs.
         </div>
-        {pinnedQueries.length > 0 && (
+        {trackedQueries.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-            {pinnedQueries.map((q) => (
+            {trackedQueries.map((q) => (
               <span
                 key={q}
                 style={{
@@ -2695,8 +2735,8 @@ Recommendation rules (STRICT):
               >
                 {q}
                 <button
-                  onClick={() => removePinnedQuery(q)}
-                  title="Remove this query"
+                  onClick={() => removeTrackedQuery(q)}
+                  title="Remove this query from the tracked set (permanent — it won't be checked on future runs)"
                   style={{
                     border: "none",
                     background: "transparent",
@@ -2712,6 +2752,10 @@ Recommendation rules (STRICT):
               </span>
             ))}
           </div>
+        ) : (
+          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9aa3ad", fontStyle: "italic", marginBottom: 10 }}>
+            No queries yet — the first audit auto-generates a starting set. Or add your own below to seed it.
+          </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -2720,7 +2764,7 @@ Recommendation rules (STRICT):
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                addPinnedQuery();
+                addTrackedQuery();
               }
             }}
             placeholder="e.g. 3 bed apartments in Salisbury"
@@ -2736,7 +2780,7 @@ Recommendation rules (STRICT):
             }}
           />
           <button
-            onClick={addPinnedQuery}
+            onClick={addTrackedQuery}
             disabled={!newQuery.trim()}
             style={{
               background: newQuery.trim() ? B.caribbean : "#cfd6da",
@@ -2916,7 +2960,7 @@ Recommendation rules (STRICT):
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: B.oxford }}>
-                  {["Query", "GBP Map Pack", "Website in Organic", "Since Start", "Who's Beating You"].map((h) => (
+                  {["Query", "GBP Map Pack", "Website in Organic", "Who's Beating You"].map((h) => (
                     <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "white" }}>
                       {h}
                     </th>
@@ -2927,8 +2971,9 @@ Recommendation rules (STRICT):
                 {results.queries.map((q, i) => {
                   const r = results.ranks[i];
                   const branded = isBrandedQuery(q, property);
-                  const mv = queryMovementCell(rankBaseline(property.seoRankSnapshots), q, r.organic_rank);
-                  const mvColor = mv.tone === "up" ? "#15803d" : mv.tone === "down" ? B.tangelo : "#9aa3ad";
+                  const mpNow = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
+                  const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpNow);
+                  const orgMv = movementFor(property.seoRankSnapshots, q, "organicRank", r.organic_rank);
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "10px 12px", color: "#333" }}>
@@ -2975,6 +3020,11 @@ Recommendation rules (STRICT):
                             ? "Not in top 20"
                             : "No pack"}
                         </span>
+                        {mpMv.label && (
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: moveToneColor(mpMv.tone), marginTop: 2 }} title="Map Pack change vs the first tracked audit">
+                            {mpMv.label}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span
@@ -2985,11 +3035,11 @@ Recommendation rules (STRICT):
                         >
                           {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : "Property not ranking"}
                         </span>
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <span style={{ color: mvColor, fontWeight: 600, fontSize: 11.5 }} title="Organic-rank change vs the first tracked audit">
-                          {mv.label}
-                        </span>
+                        {orgMv.label && (
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: moveToneColor(orgMv.tone), marginTop: 2 }} title="Organic-rank change vs the first tracked audit">
+                            {orgMv.label}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "10px 12px", color: "#666", fontSize: 11 }}>
                         {(() => {
@@ -6200,17 +6250,18 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               <thead>
                 <tr>
                   <th style={findingsTh}>Query</th>
-                  <th style={{ ...findingsTh, width: 90, textAlign: "center" }}>GBP Map Pack</th>
-                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Website in Organic</th>
-                  <th style={{ ...findingsTh, width: 95, textAlign: "center" }}>Since Start</th>
+                  <th style={{ ...findingsTh, width: 100, textAlign: "center" }}>GBP Map Pack</th>
+                  <th style={{ ...findingsTh, width: 120, textAlign: "center" }}>Website in Organic</th>
                   <th style={findingsTh}>Who&rsquo;s Beating You</th>
                 </tr>
               </thead>
               <tbody>
                 {seo.queries.map((q, i) => {
                   const r = seo.ranks[i];
-                  const mv = queryMovementCell(rankBaseline(property.seoRankSnapshots), q, r.organic_rank);
-                  const mvColor = mv.tone === "up" ? "#15803d" : mv.tone === "down" ? "#b14a2a" : "#888";
+                  const mpNow = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
+                  const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpNow);
+                  const orgMv = movementFor(property.seoRankSnapshots, q, "organicRank", r.organic_rank);
+                  const printMoveColor = (t: "up" | "down" | "neutral") => (t === "up" ? "#15803d" : t === "down" ? "#b14a2a" : "#888");
                   const mapText = r.map_pack_rank
                     ? `#${r.map_pack_rank}`
                     : r.expanded_map_pack_rank
@@ -6244,6 +6295,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                         }}
                       >
                         {mapText}
+                        {mpMv.label && (
+                          <div style={{ fontSize: 8.5, fontWeight: 700, color: printMoveColor(mpMv.tone) }}>{mpMv.label}</div>
+                        )}
                       </td>
                       <td
                         style={{
@@ -6254,8 +6308,10 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                         }}
                       >
                         {orgText}
+                        {orgMv.label && (
+                          <div style={{ fontSize: 8.5, fontWeight: 700, color: printMoveColor(orgMv.tone) }}>{orgMv.label}</div>
+                        )}
                       </td>
-                      <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: mvColor }}>{mv.label}</td>
                       <td style={{ ...findingsTd, fontSize: 10, color: "#555" }}>
                         {(() => {
                           const b = competitorsBeating(property, r);

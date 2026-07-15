@@ -181,12 +181,17 @@ export interface Property {
    */
   apartmentsUrl?: string;
   /**
-   * "Must-check" SEO search queries the user has pinned for this property.
-   * These are always included in every SEO audit run alongside the freshly
-   * auto-generated queries, so a query the user cares about (e.g. "3 bed
-   * apartments in Salisbury") never disappears between runs.
+   * Legacy "must-check" pinned queries. Superseded by {@link trackedQueries};
+   * still read once to migrate old properties into the sticky tracked set.
    */
   pinnedQueries?: string[];
+  /**
+   * The STICKY set of SEO search queries checked on every run. Seeded on the
+   * first audit (auto-generated + any legacy pins), then reused verbatim each
+   * run so keyword-rank movement is comparable over time. The user grows it by
+   * adding a query and prunes it by removing one — edits persist here.
+   */
+  trackedQueries?: string[];
   checklistStatuses?: Record<string, ChecklistStatus>;
   checklistEvidence?: Record<string, string>;
   llmAuditRecommendations?: AuditRecommendations;
