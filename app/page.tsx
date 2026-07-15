@@ -3291,14 +3291,16 @@ Recommendation rules (STRICT):
             </div>
           )}
 
+          {/* --- Online presence / SEO: where you show up across the web --- */}
+          {/* Local citations / directory presence */}
+          <CitationsPanel citations={results.citations} />
+
+          {/* --- Property website performance: the site itself --- */}
           {/* Page speed / Core Web Vitals */}
           <PageSpeedPanel ps={results.pageSpeed} />
 
           {/* Technical / On-Page SEO health (from the site crawl) */}
           <TechnicalSeoPanel tech={results.technicalSeo} />
-
-          {/* Local citations / directory presence */}
-          <CitationsPanel citations={results.citations} />
 
           {/* Recommendations */}
           <div style={{ background: "linear-gradient(135deg,#eef7f5,#e4f0ec)", border: `1px solid ${B.cambridge}`, borderLeft: `4px solid ${B.caribbean}`, borderRadius: 8, padding: "14px 20px" }}>
