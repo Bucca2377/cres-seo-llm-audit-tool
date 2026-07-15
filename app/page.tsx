@@ -6507,7 +6507,8 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     flex: 1,
                     padding: "9px 12px",
                     border: "1px solid #cfcfcf",
-                    borderLeft: `3px solid ${PRINT_TEAL}`,
+                    borderTop: `3px solid ${PRINT_TEAL}`,
+                    textAlign: "center",
                   }}
                 >
                   <div
