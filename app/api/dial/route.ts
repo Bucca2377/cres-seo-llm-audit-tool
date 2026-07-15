@@ -71,10 +71,34 @@ export async function POST(req: NextRequest) {
   const base = `https://api.twilio.com/2010-04-01/Accounts/${sid}`;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  const testOne = async (to: string): Promise<{ number: string; status: DialStatus; detail: string }> => {
+  const mapAnsweredBy = (ab: string): "human" | "voicemail" | "fax" | "unknown" | null => {
+    if (!ab) return null;
+    if (ab === "human") return "human";
+    if (ab.startsWith("machine")) return "voicemail";
+    if (ab === "fax") return "fax";
+    return "unknown";
+  };
+
+  const testOne = async (
+    to: string
+  ): Promise<{
+    number: string;
+    status: DialStatus;
+    detail: string;
+    answeredBy: "human" | "voicemail" | "fax" | "unknown" | null;
+    ringSeconds: number | null;
+  }> => {
     try {
-      // Place the call with inline TwiML + a short ring timeout.
-      const form = new URLSearchParams({ To: to, From: from, Twiml: TWIML, Timeout: "15" });
+      // Place the call with inline TwiML, a short ring timeout, and Answering
+      // Machine Detection so we learn whether a live person or voicemail picked up.
+      const form = new URLSearchParams({
+        To: to,
+        From: from,
+        Twiml: TWIML,
+        Timeout: "20",
+        MachineDetection: "Enable",
+        MachineDetectionTimeout: "12",
+      });
       const placeRes = await fetch(`${base}/Calls.json`, {
         method: "POST",
         headers: { Authorization: authHeader, "Content-Type": "application/x-www-form-urlencoded" },
@@ -83,22 +107,32 @@ export async function POST(req: NextRequest) {
       const placed = await placeRes.json();
       if (!placeRes.ok) {
         // 400 here usually means the number is invalid / unreachable.
-        return { number: to, status: "failed", detail: placed?.message || `could not place call (${placeRes.status})` };
+        return { number: to, status: "failed", detail: placed?.message || `could not place call (${placeRes.status})`, answeredBy: null, ringSeconds: null };
       }
       const callSid = placed?.sid as string;
-      if (!callSid) return { number: to, status: "unknown", detail: "no call id returned" };
+      if (!callSid) return { number: to, status: "unknown", detail: "no call id returned", answeredBy: null, ringSeconds: null };
 
-      // Poll the call until it reaches a terminal status (~up to 30s).
+      // Poll to a terminal status. Track ~ring time (place -> answered) and the
+      // answered_by classification. Poll ~1.5s for a usable ring-time estimate.
+      const t0 = Date.now();
       let status = String(placed?.status || "queued");
-      for (let i = 0; i < 12 && !["completed", "busy", "no-answer", "failed", "canceled"].includes(status); i++) {
-        await sleep(2500);
+      let answeredBy = "";
+      let ringSeconds: number | null = null;
+      for (let i = 0; i < 24 && !["completed", "busy", "no-answer", "failed", "canceled"].includes(status); i++) {
+        await sleep(1500);
         const poll = await fetch(`${base}/Calls/${callSid}.json`, { headers: { Authorization: authHeader } });
-        const pj = await poll.json().catch(() => ({}));
-        status = String(pj?.status || status);
+        const pj = await poll.json().catch(() => ({} as Record<string, unknown>));
+        status = String((pj as { status?: string })?.status || status);
+        const ab = String((pj as { answered_by?: string })?.answered_by || "");
+        if (ab) answeredBy = ab;
+        if (ringSeconds === null && ["in-progress", "completed", "busy"].includes(status)) {
+          ringSeconds = Math.max(1, Math.round((Date.now() - t0) / 1000));
+        }
       }
-      return { number: to, status: mapStatus(status), detail: status };
+      if (ringSeconds === null && status === "no-answer") ringSeconds = Math.round((Date.now() - t0) / 1000);
+      return { number: to, status: mapStatus(status), detail: status, answeredBy: mapAnsweredBy(answeredBy), ringSeconds };
     } catch (e) {
-      return { number: to, status: "unknown", detail: e instanceof Error ? e.message : "request failed" };
+      return { number: to, status: "unknown", detail: e instanceof Error ? e.message : "request failed", answeredBy: null, ringSeconds: null };
     }
   };
 

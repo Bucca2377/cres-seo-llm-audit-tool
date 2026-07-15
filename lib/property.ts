@@ -396,9 +396,13 @@ export interface MarketingCriticalIssue {
 export interface PhoneNumberEntry {
   number: string; // display form, e.g. "(314) 555-0142"
   source: "Website" | "Google" | "Apartments.com";
-  /** Dial-test result (populated later by the Twilio check; null = not tested). */
+  /** Dial-test result (populated by the Twilio check; null = not tested). */
   dialStatus?: "connected" | "failed" | "unknown" | null;
   dialNote?: string;
+  /** Who/what answered: live person vs voicemail (Answering Machine Detection). */
+  answeredBy?: "human" | "voicemail" | "fax" | "unknown" | null;
+  /** Approximate seconds the line rang before it was answered / gave up. */
+  ringSeconds?: number | null;
 }
 
 /** All phone/tracking numbers found across the property's platforms. */

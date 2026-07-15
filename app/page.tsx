@@ -1972,6 +1972,15 @@ function shortUrl(u: string): string {
 }
 
 /* ---- Phone / tracking number inventory (Marketing Audit) ---- */
+/** One number's result from the /api/dial Twilio dial-test. */
+type DialResult = {
+  number: string;
+  status: "connected" | "failed" | "unknown";
+  detail?: string;
+  answeredBy?: "human" | "voicemail" | "fax" | "unknown" | null;
+  ringSeconds?: number | null;
+};
+
 /** 10-digit key for de-duping a phone number regardless of formatting. */
 function normalizePhone(s: string): string {
   const d = (s || "").replace(/\D/g, "");
@@ -4317,18 +4326,17 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           });
           const dialData = await dialRes.json();
           if (dialRes.ok && Array.isArray(dialData.results)) {
-            const byNum = new Map<string, { status: PhoneNumberEntry["dialStatus"]; detail?: string }>(
-              dialData.results.map((res: { number: string; status: string; detail?: string }) => [
-                normalizePhone(res.number),
-                { status: res.status as PhoneNumberEntry["dialStatus"], detail: res.detail },
-              ])
+            const byNum = new Map<string, DialResult>(
+              dialData.results.map((res: DialResult) => [normalizePhone(res.number), res])
             );
             phones = {
               ...phones,
               dialTested: true,
               numbers: phones.numbers.map((n) => {
                 const res = byNum.get(normalizePhone(n.number));
-                return res ? { ...n, dialStatus: res.status, dialNote: res.detail } : n;
+                return res
+                  ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds }
+                  : n;
               }),
             };
           }
@@ -4542,15 +4550,14 @@ function PhoneInventoryPanel({
         setTesting(false);
         return;
       }
-      const byNum = new Map<string, { status: PhoneNumberEntry["dialStatus"]; detail?: string }>(
-        (d.results || []).map((res: { number: string; status: string; detail?: string }) => [
-          normalizePhone(res.number),
-          { status: res.status as PhoneNumberEntry["dialStatus"], detail: res.detail },
-        ])
+      const byNum = new Map<string, DialResult>(
+        (d.results || []).map((res: DialResult) => [normalizePhone(res.number), res])
       );
       const updatedNumbers = phones.numbers.map((n) => {
         const res = byNum.get(normalizePhone(n.number));
-        return res ? { ...n, dialStatus: res.status, dialNote: res.detail } : n;
+        return res
+          ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds }
+          : n;
       });
       if (property.marketingAudit) {
         onUpdateProperty({
@@ -4567,9 +4574,20 @@ function PhoneInventoryPanel({
   const badge = (n: PhoneNumberEntry) => {
     if (testing) return <span style={{ color: "#9aa3ad", fontSize: 11 }}>testing…</span>;
     const s = n.dialStatus;
-    if (s === "connected") return <span style={{ color: "#15803d", fontWeight: 700, fontSize: 11.5 }}>✓ Connected</span>;
+    const ring = typeof n.ringSeconds === "number" ? ` · rang ~${n.ringSeconds}s` : "";
     if (s === "failed") return <span style={{ color: B.tangelo, fontWeight: 700, fontSize: 11.5 }}>✗ No connection</span>;
     if (s === "unknown") return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>? Inconclusive</span>;
+    if (s === "connected") {
+      // Connected — refine by who answered (live person is the good outcome).
+      if (n.answeredBy === "human")
+        return <span style={{ color: "#15803d", fontWeight: 700, fontSize: 11.5 }}>✓ Live person{ring}</span>;
+      if (n.answeredBy === "voicemail")
+        return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>⚠ Voicemail{ring}</span>;
+      if (n.answeredBy === "fax")
+        return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>⚠ Fax line{ring}</span>;
+      // Rang a live line but no AMD verdict (e.g. no-answer).
+      return <span style={{ color: "#15803d", fontWeight: 700, fontSize: 11.5 }}>✓ Connected{ring}</span>;
+    }
     return <span style={{ color: "#c3c9cf", fontSize: 11 }}>not tested</span>;
   };
 
@@ -6522,11 +6540,22 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                         <tr key={`${src}-${i}`} className="pb-avoid">
                           <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 120 }}>{i === 0 ? src : ""}</td>
                           <td style={findingsTd}>{n.number}</td>
-                          {mkt.phones!.dialTested && (
-                            <td style={{ ...findingsTd, textAlign: "center", width: 120, fontWeight: 700, color: n.dialStatus === "connected" ? "#15803d" : n.dialStatus === "failed" ? "#b14a2a" : "#9a7200" }}>
-                              {n.dialStatus === "connected" ? "Connected" : n.dialStatus === "failed" ? "No connection" : n.dialStatus === "unknown" ? "Inconclusive" : "—"}
-                            </td>
-                          )}
+                          {mkt.phones!.dialTested && (() => {
+                            const ring = typeof n.ringSeconds === "number" ? ` (~${n.ringSeconds}s)` : "";
+                            let label = "—";
+                            let color = "#9a7200";
+                            if (n.dialStatus === "failed") { label = "No connection"; color = "#b14a2a"; }
+                            else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#9a7200"; }
+                            else if (n.dialStatus === "connected") {
+                              if (n.answeredBy === "human") { label = `Live person${ring}`; color = "#15803d"; }
+                              else if (n.answeredBy === "voicemail") { label = `Voicemail${ring}`; color = "#9a7200"; }
+                              else if (n.answeredBy === "fax") { label = `Fax line${ring}`; color = "#9a7200"; }
+                              else { label = `Connected${ring}`; color = "#15803d"; }
+                            }
+                            return (
+                              <td style={{ ...findingsTd, textAlign: "center", width: 140, fontWeight: 700, color }}>{label}</td>
+                            );
+                          })()}
                         </tr>
                       ));
                     })}
