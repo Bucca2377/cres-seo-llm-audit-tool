@@ -87,6 +87,22 @@ export interface TechnicalSeoResult {
   timestamp: string;
 }
 
+/**
+ * One SEO run's per-query ranks, snapshotted so the tool can show before/after
+ * movement over time (case-study evidence: "moved these terms from page 3 to
+ * page 1"). The FIRST snapshot is the baseline (roughly "when CRES took over").
+ */
+export interface SeoRankSnapshot {
+  date: string; // ISO timestamp of the run
+  location?: string;
+  ranks: Array<{
+    query: string;
+    organicRank: number | null;
+    organicPage: number | null;
+    mapPackRank: number | null;
+  }>;
+}
+
 export interface Property {
   id: string;
   name: string;
@@ -195,6 +211,8 @@ export interface Property {
    * they are not re-suggested on later runs.
    */
   setAsideRecs?: SetAsideRec[];
+  /** One entry per SEO run; powers the before/after keyword-rank movement view. */
+  seoRankSnapshots?: SeoRankSnapshot[];
 }
 
 /* ---- Review Audit types ---- */
