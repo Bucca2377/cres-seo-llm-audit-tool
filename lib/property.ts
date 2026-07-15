@@ -417,6 +417,12 @@ export interface PhoneInventory {
    * it's only a lead-leak signal when the call landed during posted hours.
    */
   dialTestedAt?: string;
+  /**
+   * The property's Google Business Profile hours (day -> "9 AM–5 PM"), captured
+   * at audit time. Used with dialTestedAt + the property's timezone to auto-flag
+   * whether the dial-test landed during or outside office hours.
+   */
+  officeHours?: Record<string, string>;
 }
 
 export interface MarketingAuditResult {

@@ -2016,6 +2016,53 @@ function formatDialTime(iso: string, address: string): string {
   }
 }
 
+/** Parse a GBP hours string ("9 AM–5 PM") into open/close minutes, or a state. */
+function parseHoursRange(s: string): { open: number; close: number } | "closed" | "24h" | null {
+  const t = (s || "").trim().toLowerCase();
+  if (!t || t === "closed") return "closed";
+  if (t.includes("24 hour") || t.includes("open 24")) return "24h";
+  const parts = t.split(/[–—-]/).map((x) => x.trim());
+  if (parts.length !== 2) return null;
+  const toMin = (x: string): number | null => {
+    const m = x.match(/(\d{1,2})(?::(\d{2}))?\s*(a|p)m/i);
+    if (!m) return null;
+    let h = parseInt(m[1], 10);
+    const min = m[2] ? parseInt(m[2], 10) : 0;
+    const pm = m[3].toLowerCase() === "p";
+    if (pm && h !== 12) h += 12;
+    if (!pm && h === 12) h = 0;
+    return h * 60 + min;
+  };
+  const open = toMin(parts[0]);
+  const close = toMin(parts[1]);
+  if (open == null || close == null) return null;
+  if (open === close) return "closed"; // 12 AM–12 AM = closed
+  return { open, close };
+}
+
+/**
+ * Was the property's office open at `iso`? Uses the GBP hours map + the
+ * property's timezone (from its state). Returns null when undeterminable.
+ */
+function officeOpenAt(hours: Record<string, string> | undefined, iso: string | undefined, address: string): boolean | null {
+  const tz = STATE_TZ[extractStateCode(address)];
+  if (!hours || !iso || !tz) return null;
+  try {
+    const d = new Date(iso);
+    const weekday = d.toLocaleString("en-US", { timeZone: tz, weekday: "long" }).toLowerCase();
+    const hm = d.toLocaleString("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
+    const [hh, mm] = hm.split(":").map((x) => parseInt(x, 10));
+    const nowMin = (hh % 24) * 60 + mm;
+    const range = parseHoursRange(hours[weekday]);
+    if (range === "closed") return false;
+    if (range === "24h") return true;
+    if (!range) return null;
+    return nowMin >= range.open && nowMin < range.close;
+  } catch {
+    return null;
+  }
+}
+
 /** 10-digit key for de-duping a phone number regardless of formatting. */
 function normalizePhone(s: string): string {
   const d = (s || "").replace(/\D/g, "");
@@ -4077,6 +4124,7 @@ function MarketingAuditTab({
       let gbpBlock = "GOOGLE BUSINESS PROFILE: could not be verified automatically this run — fetch the provided Google URL if present, otherwise mark Google cells 'Requires Client Verification'.";
       let googlePhotos: string[] = [];
       let googlePhone = "";
+      let officeHours: Record<string, string> | undefined;
       try {
         const serpData = await callSerp({
           query: buildGbpSearchQuery(current),
@@ -4086,6 +4134,16 @@ function MarketingAuditTab({
         const gbp = extractGBP(serpData, current);
         const place = serpData?.place_results;
         googlePhone = (place?.phone || "").toString();
+        // GBP hours (day -> "9 AM–5 PM"), used to auto-flag whether the dial
+        // test landed during office hours. SerpAPI returns an array of {day: hours}.
+        if (Array.isArray(place?.hours)) {
+          const map: Record<string, string> = {};
+          for (const row of place.hours as Record<string, string>[]) {
+            const day = Object.keys(row || {})[0];
+            if (day) map[day.toLowerCase()] = String(row[day]);
+          }
+          if (Object.keys(map).length) officeHours = map;
+        }
         // Google profile photo URLs for the vision pass. Use the direct Google
         // CDN thumbnails (not the serpapi proxy) and downsize to ~512px to keep
         // vision token cost low.
@@ -4345,7 +4403,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       (Array.isArray(aiPhones.google) ? aiPhones.google : []).forEach((p) => addPhone(p, "Google"));
       (Array.isArray(aiPhones.apartments) ? aiPhones.apartments : []).forEach((p) => addPhone(p, "Apartments.com"));
       let phones: PhoneInventory | undefined = phoneEntries.length
-        ? { numbers: phoneEntries, collectedAt: new Date().toISOString() }
+        ? { numbers: phoneEntries, collectedAt: new Date().toISOString(), officeHours }
         : undefined;
 
       // Dial-test the numbers as part of the audit (best-effort). If Twilio is
@@ -4654,12 +4712,18 @@ function PhoneInventoryPanel({
           })}
         </tbody>
       </table>
-      {phones.dialTested && phones.dialTestedAt && (
-        <p style={{ ...para, fontSize: 11.5, color: "#9a7200", background: "#fdf6ee", border: "1px solid #f0e2cd", borderRadius: 6, padding: "7px 12px", margin: "0 0 10px 0" }}>
-          Dial-tested {formatDialTime(phones.dialTestedAt, property.address)} (property&rsquo;s local time).
-          A "Voicemail" result is only a lead-leak signal if this landed during the property's posted office hours (see the Office hours row above) — after-hours voicemail is expected.
-        </p>
-      )}
+      {phones.dialTested && phones.dialTestedAt && (() => {
+        const when = formatDialTime(phones.dialTestedAt, property.address);
+        const openAt = officeOpenAt(phones.officeHours, phones.dialTestedAt, property.address);
+        const box = (bg: string, border: string, color: string, text: string) => (
+          <p style={{ ...para, fontSize: 11.5, color, background: bg, border: `1px solid ${border}`, borderRadius: 6, padding: "7px 12px", margin: "0 0 10px 0" }}>{text}</p>
+        );
+        if (openAt === false)
+          return box("#f0faf4", "#bfe3cd", "#15803d", `Dial-tested ${when} — OUTSIDE the property's office hours, so a no-answer or voicemail is expected, not a finding.`);
+        if (openAt === true)
+          return box("#fdf6ee", "#f0e2cd", "#9a6a2a", `Dial-tested ${when} — DURING the property's office hours, so a no-answer or voicemail here is a real lead-leak signal.`);
+        return box("#fdf6ee", "#f0e2cd", "#9a7200", `Dial-tested ${when} (property's local time). A no-answer / voicemail only signals a problem if it landed during posted office hours (see the Office hours row above) — after-hours is expected.`);
+      })()}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button
           onClick={runDialTest}
@@ -6574,7 +6638,13 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
                   Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
                   {mkt.phones.dialTested && mkt.phones.dialTestedAt
-                    ? ` Dial-tested ${formatDialTime(mkt.phones.dialTestedAt, property.address)} (property's local time); a "Voicemail" result only signals a lead leak if the call landed during posted office hours.`
+                    ? (() => {
+                        const when = formatDialTime(mkt.phones.dialTestedAt, property.address);
+                        const openAt = officeOpenAt(mkt.phones.officeHours, mkt.phones.dialTestedAt, property.address);
+                        if (openAt === false) return ` Dial-tested ${when} — outside posted office hours, so a no-answer or voicemail here is expected, not a finding.`;
+                        if (openAt === true) return ` Dial-tested ${when} — during posted office hours, so a no-answer or voicemail is a real lead-leak signal.`;
+                        return ` Dial-tested ${when} (property's local time); a no-answer/voicemail only signals a lead leak if the call landed during posted office hours.`;
+                      })()
                     : mkt.phones.dialTested
                     ? " Each number was dial-tested with an automated call."
                     : ""}
