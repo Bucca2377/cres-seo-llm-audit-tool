@@ -411,6 +411,12 @@ export interface PhoneInventory {
   collectedAt: string;
   /** True once a dial test (Twilio) has been run against these numbers. */
   dialTested?: boolean;
+  /**
+   * When the dial test ran (ISO). Surfaced as a caveat so a "voicemail" result
+   * can be judged against office hours — after-hours voicemail is expected, so
+   * it's only a lead-leak signal when the call landed during posted hours.
+   */
+  dialTestedAt?: string;
 }
 
 export interface MarketingAuditResult {

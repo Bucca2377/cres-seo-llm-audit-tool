@@ -4332,6 +4332,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
             phones = {
               ...phones,
               dialTested: true,
+              dialTestedAt: new Date().toISOString(),
               numbers: phones.numbers.map((n) => {
                 const res = byNum.get(normalizePhone(n.number));
                 return res
@@ -4562,7 +4563,7 @@ function PhoneInventoryPanel({
       if (property.marketingAudit) {
         onUpdateProperty({
           ...property,
-          marketingAudit: { ...property.marketingAudit, phones: { ...phones, numbers: updatedNumbers, dialTested: true } },
+          marketingAudit: { ...property.marketingAudit, phones: { ...phones, numbers: updatedNumbers, dialTested: true, dialTestedAt: new Date().toISOString() } },
         });
       }
     } catch {
@@ -4617,6 +4618,12 @@ function PhoneInventoryPanel({
           })}
         </tbody>
       </table>
+      {phones.dialTested && phones.dialTestedAt && (
+        <p style={{ ...para, fontSize: 11.5, color: "#9a7200", background: "#fdf6ee", border: "1px solid #f0e2cd", borderRadius: 6, padding: "7px 12px", margin: "0 0 10px 0" }}>
+          Dial-tested {new Date(phones.dialTestedAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.
+          A "Voicemail" result is only a lead-leak signal if this landed during the property's posted office hours (see the Office hours row above) — after-hours voicemail is expected.
+        </p>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button
           onClick={runDialTest}
@@ -6530,7 +6537,11 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
                   Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
-                  {mkt.phones.dialTested ? " Each number was dial-tested with an automated call." : ""}
+                  {mkt.phones.dialTested && mkt.phones.dialTestedAt
+                    ? ` Dial-tested ${new Date(mkt.phones.dialTestedAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}; a "Voicemail" result only signals a lead leak if the call landed during posted office hours.`
+                    : mkt.phones.dialTested
+                    ? " Each number was dial-tested with an automated call."
+                    : ""}
                 </p>
                 <table>
                   <tbody>
