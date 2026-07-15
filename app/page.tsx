@@ -4375,18 +4375,45 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 
   return (
     <div style={{ background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford }}>
-          Marketing Audit
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford }}>
+            Marketing Audit
+          </div>
+          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginTop: 3 }}>
+            Reviews the property website, Apartments.com listing, and Google Business Profile for leasing readiness and cross-platform consistency.
+          </div>
+          {results?.timestamp && (
+            <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: 4 }}>
+              Last audited {new Date(results.timestamp).toLocaleString()}
+            </div>
+          )}
         </div>
-        {results?.timestamp && (
-          <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888" }}>
-            Last audited {new Date(results.timestamp).toLocaleString()}
-          </span>
-        )}
-      </div>
-      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 14 }}>
-        Reviews the property website, Apartments.com listing, and Google Business Profile for leasing readiness and cross-platform consistency.
+        <button
+          onClick={run}
+          disabled={running}
+          style={{
+            background: B.caribbean,
+            border: "none",
+            borderRadius: 8,
+            padding: "11px 20px",
+            color: "white",
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 14,
+            letterSpacing: "0.06em",
+            cursor: running ? "wait" : "pointer",
+            opacity: running ? 0.7 : 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            whiteSpace: "nowrap",
+          }}
+          title="Fetches the website + Apartments.com via Claude and the Google listing via SerpAPI, then writes a client-ready audit."
+        >
+          <span>✦</span>
+          {running ? "Auditing…" : results ? "Re-run Marketing Audit" : "Run Marketing Audit"}
+        </button>
       </div>
 
       {/* URL inputs */}
@@ -4404,31 +4431,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           <input value={gbpUrl} onChange={(e) => setGbpUrl(e.target.value)} style={inputStyle} placeholder="https://www.google.com/maps/place/..." />
         </div>
       </div>
-
-      <button
-        onClick={run}
-        disabled={running}
-        style={{
-          background: B.caribbean,
-          border: "none",
-          borderRadius: 8,
-          padding: "11px 20px",
-          color: "white",
-          fontFamily: "'Barlow Condensed',sans-serif",
-          fontWeight: 700,
-          fontSize: 14,
-          letterSpacing: "0.06em",
-          cursor: running ? "wait" : "pointer",
-          opacity: running ? 0.7 : 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-        title="Fetches the website + Apartments.com via Claude and the Google listing via SerpAPI, then writes a client-ready audit."
-      >
-        <span>✦</span>
-        {running ? "Auditing…" : results ? "Re-run Marketing Audit" : "Run Marketing Audit"}
-      </button>
 
       {running && (
         <div style={{ marginTop: 14, padding: "12px 16px", background: "#f9fafb", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.caribbean, display: "flex", alignItems: "center", gap: 10 }}>
