@@ -2837,7 +2837,7 @@ Recommendation rules (STRICT):
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford }}>
-              SEO / LLM Audit
+              SEO &amp; Website Optimization
             </div>
             <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 20, padding: "2px 10px", display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 6, height: 6, background: "#22c55e", borderRadius: "50%", display: "inline-block", animation: "lp 2s infinite" }} />
@@ -2876,7 +2876,7 @@ Recommendation rules (STRICT):
           title="Web-search audit across the auto-generated queries plus any you've pinned"
         >
           <span>✦</span>
-          {isRunning ? "Auditing..." : results ? "Re-run Audit" : "Run SEO / LLM Audit"}
+          {isRunning ? "Auditing..." : results ? "Re-run Audit" : "Run SEO Audit"}
         </button>
       </div>
 
@@ -5448,7 +5448,7 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
 /* ================= MAIN APP ======================================= */
 const TABS = [
   { id: "marketing", label: "Marketing Audit" },
-  { id: "seo", label: "SEO & Online Presence / Website Optimization" },
+  { id: "seo", label: "SEO & Website Optimization" },
   { id: "reviews", label: "Review Audit" },
 ];
 
@@ -6074,7 +6074,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     size: letter;
     margin: 0.85in 0.65in 0.75in 0.65in;
     @top-left {
-      content: "CRES  |  SEO / LLM Audit  |  ${cssName}  |  ${monthYear}";
+      content: "CRES  |  SEO Audit  |  ${cssName}  |  ${monthYear}";
       font-family: 'Josefin Sans', sans-serif;
       font-size: 8.5pt;
       color: #062347;
@@ -6246,7 +6246,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               margin: 0,
             }}
           >
-            {mode === "seo" ? "SEO / LLM Audit" : "Marketing Audit & SEO / LLM Audit"}
+            {mode === "seo" ? "SEO Audit" : "Marketing Audit & SEO Audit"}
           </h1>
           <div style={{ marginBottom: 28 }} />
           <div
@@ -7217,11 +7217,11 @@ export default function MarketingHub() {
               tab === "reviews"
                 ? "Print the Resident Review Audit as its own PDF. Choose 'Save as PDF' as the destination."
                 : tab === "seo"
-                ? "Print the SEO / LLM Audit on its own. Choose 'Save as PDF' as the destination."
-                : "Print the Marketing Audit (includes the SEO / LLM Audit). Choose 'Save as PDF' as the destination."
+                ? "Print the SEO Audit on its own. Choose 'Save as PDF' as the destination."
+                : "Print the Marketing Audit (includes the SEO Audit). Choose 'Save as PDF' as the destination."
             }
           >
-            <span>📄</span> {tab === "reviews" ? "Print Review Audit" : tab === "seo" ? "Print SEO / LLM Audit" : "Print Marketing Audit"}
+            <span>📄</span> {tab === "reviews" ? "Print Review Audit" : tab === "seo" ? "Print SEO Audit" : "Print Marketing Audit"}
           </button>
           <button onClick={() => setSettingsOpen(true)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>⚙</span> Edit
