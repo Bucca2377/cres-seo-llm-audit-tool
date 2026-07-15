@@ -4471,6 +4471,135 @@ RECOMMENDATION RULES (match the rest of the app exactly):
   );
 }
 
+/**
+ * Phone / tracking number inventory with an optional Twilio dial-test. Lists
+ * every number found by source; the "Test-call each number" button places a
+ * brief automated call to each (via /api/dial) and marks it connected / no
+ * connection. Results persist onto the property's marketingAudit.phones.
+ */
+function PhoneInventoryPanel({
+  phones,
+  property,
+  onUpdateProperty,
+  sectionTitle,
+  para,
+}: {
+  phones: PhoneInventory;
+  property: Property;
+  onUpdateProperty: (p: Property) => void;
+  sectionTitle: React.CSSProperties;
+  para: React.CSSProperties;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const runDialTest = async () => {
+    setTesting(true);
+    setError(null);
+    try {
+      const numbers = phones.numbers.map((n) => n.number);
+      const r = await fetch("/api/dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numbers }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setError(d?.error || "Dial test failed.");
+        setTesting(false);
+        return;
+      }
+      const byNum = new Map<string, { status: PhoneNumberEntry["dialStatus"]; detail?: string }>(
+        (d.results || []).map((res: { number: string; status: string; detail?: string }) => [
+          normalizePhone(res.number),
+          { status: res.status as PhoneNumberEntry["dialStatus"], detail: res.detail },
+        ])
+      );
+      const updatedNumbers = phones.numbers.map((n) => {
+        const res = byNum.get(normalizePhone(n.number));
+        return res ? { ...n, dialStatus: res.status, dialNote: res.detail } : n;
+      });
+      if (property.marketingAudit) {
+        onUpdateProperty({
+          ...property,
+          marketingAudit: { ...property.marketingAudit, phones: { ...phones, numbers: updatedNumbers, dialTested: true } },
+        });
+      }
+    } catch {
+      setError("Dial test request failed.");
+    }
+    setTesting(false);
+  };
+
+  const badge = (n: PhoneNumberEntry) => {
+    if (testing) return <span style={{ color: "#9aa3ad", fontSize: 11 }}>testing…</span>;
+    const s = n.dialStatus;
+    if (s === "connected") return <span style={{ color: "#15803d", fontWeight: 700, fontSize: 11.5 }}>✓ Connected</span>;
+    if (s === "failed") return <span style={{ color: B.tangelo, fontWeight: 700, fontSize: 11.5 }}>✗ No connection</span>;
+    if (s === "unknown") return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>? Inconclusive</span>;
+    return <span style={{ color: "#c3c9cf", fontSize: 11 }}>not tested</span>;
+  };
+
+  return (
+    <>
+      <div style={sectionTitle}>Phone / Tracking Numbers</div>
+      <p style={{ ...para, marginBottom: 10 }}>
+        Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.
+      </p>
+      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 10 }}>
+        <tbody>
+          {(["Website", "Google", "Apartments.com"] as const).flatMap((src) => {
+            const nums = phones.numbers.filter((n) => n.source === src);
+            return nums.map((n, i) => (
+              <tr key={`${src}-${i}`}>
+                <td style={{ padding: "7px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#666", width: 150, verticalAlign: "middle" }}>
+                  {i === 0 ? src : ""}
+                </td>
+                <td style={{ padding: "7px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#333", fontWeight: 600 }}>
+                  {n.number}
+                </td>
+                <td style={{ padding: "7px 10px", borderBottom: "1px solid #eef0f2", textAlign: "right", width: 130 }}>
+                  {badge(n)}
+                </td>
+              </tr>
+            ));
+          })}
+        </tbody>
+      </table>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button
+          onClick={runDialTest}
+          disabled={testing}
+          style={{
+            background: testing ? "#cfd6da" : B.caribbean,
+            border: "none",
+            borderRadius: 8,
+            padding: "8px 16px",
+            color: "white",
+            fontFamily: "'Barlow Condensed',sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            letterSpacing: "0.06em",
+            cursor: testing ? "wait" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+          title="Places a brief automated call to each number to confirm it connects. Requires Twilio configured in Railway."
+        >
+          <span>📞</span> {testing ? "Calling each number…" : phones.dialTested ? "Re-test call each number" : "Test-call each number"}
+        </button>
+        <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad" }}>
+          Places a brief live call to each number (~1.4¢ each) to confirm it rings a real line.
+        </span>
+      </div>
+      {error && (
+        <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: B.tangelo, marginTop: 8 }}>{error}</p>
+      )}
+    </>
+  );
+}
+
 function MarketingAuditResultView({ results, property, onUpdateProperty }: { results: MarketingAuditResult; property: Property; onUpdateProperty: (p: Property) => void }) {
   const sectionTitle: React.CSSProperties = {
     fontFamily: "'Barlow Condensed',sans-serif",
@@ -4569,33 +4698,13 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
 
       {/* Phone / tracking numbers found across the platforms */}
       {results.phones && results.phones.numbers.length > 0 && (
-        <>
-          <div style={sectionTitle}>Phone / Tracking Numbers</div>
-          <p style={{ ...para, marginBottom: 10 }}>
-            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.
-          </p>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 6 }}>
-            <tbody>
-              {(["Website", "Google", "Apartments.com"] as const).map((src) => {
-                const nums = results.phones!.numbers.filter((n) => n.source === src);
-                if (nums.length === 0) return null;
-                return (
-                  <tr key={src}>
-                    <td style={{ padding: "8px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", width: 160, fontWeight: 600, verticalAlign: "top" }}>
-                      {src}
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#333" }}>
-                      {nums.map((n) => n.number).join("  ·  ")}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", fontStyle: "italic", marginBottom: 4 }}>
-            Not yet dial-tested — connect a call-check to confirm each number rings the property.
-          </p>
-        </>
+        <PhoneInventoryPanel
+          phones={results.phones}
+          property={property}
+          onUpdateProperty={onUpdateProperty}
+          sectionTitle={sectionTitle}
+          para={para}
+        />
       )}
 
       {/* Critical Issues — after the consistency data that surfaces them */}
@@ -6370,18 +6479,23 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
                   Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
+                  {mkt.phones.dialTested ? " Each number was dial-tested with an automated call." : ""}
                 </p>
                 <table>
                   <tbody>
-                    {(["Website", "Google", "Apartments.com"] as const).map((src) => {
+                    {(["Website", "Google", "Apartments.com"] as const).flatMap((src) => {
                       const nums = mkt.phones!.numbers.filter((n) => n.source === src);
-                      if (nums.length === 0) return null;
-                      return (
-                        <tr key={src} className="pb-avoid">
-                          <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 120 }}>{src}</td>
-                          <td style={findingsTd}>{nums.map((n) => n.number).join("   ·   ")}</td>
+                      return nums.map((n, i) => (
+                        <tr key={`${src}-${i}`} className="pb-avoid">
+                          <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 120 }}>{i === 0 ? src : ""}</td>
+                          <td style={findingsTd}>{n.number}</td>
+                          {mkt.phones!.dialTested && (
+                            <td style={{ ...findingsTd, textAlign: "center", width: 120, fontWeight: 700, color: n.dialStatus === "connected" ? "#15803d" : n.dialStatus === "failed" ? "#b14a2a" : "#9a7200" }}>
+                              {n.dialStatus === "connected" ? "Connected" : n.dialStatus === "failed" ? "No connection" : n.dialStatus === "unknown" ? "Inconclusive" : "—"}
+                            </td>
+                          )}
                         </tr>
-                      );
+                      ));
                     })}
                   </tbody>
                 </table>
