@@ -111,6 +111,10 @@ export interface CitationSourceResult {
   domain: string;
   present: boolean;
   url?: string; // the listing URL when detected
+  /** Syndication network this site belongs to (e.g. "CoStar", "RentPath"). */
+  network?: string;
+  /** True when this site is its own standalone citation (not syndicated). */
+  standalone?: boolean;
 }
 
 /** Local-citation / directory presence check (from a brand search). */

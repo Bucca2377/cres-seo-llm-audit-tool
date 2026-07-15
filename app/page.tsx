@@ -1868,26 +1868,51 @@ function pageSpeedPromptSummary(ps: PageSpeedResult | undefined): string {
 }
 
 /**
- * Directory / citation sources a prospect (and search engines) expect a
- * property to appear on. Presence is a local-SEO ranking + trust signal.
+ * Directory / citation sources grouped by SYNDICATION NETWORK. Several
+ * "directories" are siblings that share one listing feed (being on
+ * Apartments.com generally covers ApartmentFinder/ForRent), so we detect
+ * presence per network, not per individual site. Standalone sites (Yelp,
+ * Facebook, BBB, Apartment List) are their own citations.
  */
-const CITATION_SOURCES: { name: string; domain: string }[] = [
-  { name: "Apartments.com", domain: "apartments.com" },
-  { name: "Zillow", domain: "zillow.com" },
-  { name: "ApartmentGuide", domain: "apartmentguide.com" },
-  { name: "Apartment List", domain: "apartmentlist.com" },
-  { name: "Rent.com", domain: "rent.com" },
-  { name: "Trulia", domain: "trulia.com" },
-  { name: "Yelp", domain: "yelp.com" },
-  { name: "Facebook", domain: "facebook.com" },
-  { name: "Yellow Pages", domain: "yellowpages.com" },
-  { name: "Better Business Bureau", domain: "bbb.org" },
+const CITATION_NETWORKS: { network: string; standalone: boolean; sites: { name: string; domain: string }[] }[] = [
+  {
+    network: "Apartments.com (CoStar)",
+    standalone: false,
+    sites: [
+      { name: "Apartments.com", domain: "apartments.com" },
+      { name: "ApartmentFinder", domain: "apartmentfinder.com" },
+      { name: "ForRent.com", domain: "forrent.com" },
+    ],
+  },
+  {
+    network: "Rent. (RentPath)",
+    standalone: false,
+    sites: [
+      { name: "Rent.com", domain: "rent.com" },
+      { name: "ApartmentGuide", domain: "apartmentguide.com" },
+      { name: "Rentals.com", domain: "rentals.com" },
+    ],
+  },
+  {
+    network: "Zillow",
+    standalone: false,
+    sites: [
+      { name: "Zillow", domain: "zillow.com" },
+      { name: "Trulia", domain: "trulia.com" },
+      { name: "HotPads", domain: "hotpads.com" },
+    ],
+  },
+  { network: "Apartment List", standalone: true, sites: [{ name: "Apartment List", domain: "apartmentlist.com" }] },
+  { network: "Yelp", standalone: true, sites: [{ name: "Yelp", domain: "yelp.com" }] },
+  { network: "Facebook", standalone: true, sites: [{ name: "Facebook", domain: "facebook.com" }] },
+  { network: "Better Business Bureau", standalone: true, sites: [{ name: "BBB", domain: "bbb.org" }] },
 ];
 
 /**
  * Detect which directory/citation sources surface for a brand search. One
  * SerpAPI call. "Not detected" is a soft signal (the listing may exist but
- * rank below the results we scan), so it reads as "verify / opportunity".
+ * rank below the results we scan), so it reads as "verify / opportunity" — and
+ * we only treat a WHOLE network as absent, never an individual sibling site.
  */
 async function checkCitations(property: Property): Promise<CitationResult | undefined> {
   try {
@@ -1908,14 +1933,37 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
         return { host: hostOf(link), url: link };
       })
       .filter((f) => f.host);
-    const sources = CITATION_SOURCES.map((s) => {
-      const hit = found.find((f) => f.host === s.domain || f.host.endsWith("." + s.domain));
-      return { name: s.name, domain: s.domain, present: !!hit, url: hit?.url };
-    });
+    const sources = CITATION_NETWORKS.flatMap((net) =>
+      net.sites.map((s) => {
+        const hit = found.find((f) => f.host === s.domain || f.host.endsWith("." + s.domain));
+        return { name: s.name, domain: s.domain, present: !!hit, url: hit?.url, network: net.network, standalone: net.standalone };
+      })
+    );
     return { sources, checkedAt: new Date().toISOString() };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Collapse the per-site citation results into network-level rows: a network is
+ * "present" if ANY sibling surfaced. Returns the found sites (with links) and
+ * whether the network counts as a gap worth claiming.
+ */
+function citationNetworkRows(citations: CitationResult | undefined) {
+  const sources = citations?.sources ?? [];
+  return CITATION_NETWORKS.map((net) => {
+    const siteResults = net.sites
+      .map((s) => sources.find((x) => x.domain === s.domain))
+      .filter(Boolean) as CitationResult["sources"];
+    const foundSites = siteResults.filter((s) => s.present);
+    return {
+      network: net.network,
+      standalone: net.standalone,
+      present: foundSites.length > 0,
+      foundSites,
+    };
+  });
 }
 
 /** Strip protocol + trailing slash for compact display of a page URL. */
@@ -2048,15 +2096,17 @@ function moveToneColor(tone: "up" | "down" | "neutral"): string {
 /** Plain-text citation summary fed into the recommendations prompt. */
 function citationsPromptSummary(c: CitationResult | undefined): string {
   if (!c) return "LOCAL CITATIONS: not checked this run.";
-  const present = c.sources.filter((s) => s.present).map((s) => s.name);
-  const missing = c.sources.filter((s) => !s.present).map((s) => s.name);
-  return `LOCAL CITATIONS / DIRECTORY PRESENCE (from a brand search):\n- Detected on: ${present.join(", ") || "none"}.\n- NOT detected on: ${missing.join(", ") || "none"} (build/claim these listings for local-SEO trust and consistent name/address/phone).`;
+  const rows = citationNetworkRows(c);
+  const present = rows.filter((r) => r.present).map((r) => r.network);
+  const missing = rows.filter((r) => !r.present).map((r) => r.network);
+  return `LOCAL CITATIONS / DIRECTORY PRESENCE (directional read from ONE brand search — networks, not individual sibling sites):\n- Appears on: ${present.join(", ") || "none detected"}.\n- Not detected on: ${missing.join(", ") || "none"} (worth claiming for local-SEO trust + consistent name/address/phone; verify before asserting it's missing).`;
 }
 
 /** On-screen local-citations / directory presence panel (SEO tab). */
 function CitationsPanel({ citations }: { citations: CitationResult | undefined }) {
   if (!citations || citations.sources.length === 0) return null;
-  const presentCount = citations.sources.filter((s) => s.present).length;
+  const rows = citationNetworkRows(citations);
+  const presentCount = rows.filter((r) => r.present).length;
   return (
     <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -2066,10 +2116,12 @@ function CitationsPanel({ citations }: { citations: CitationResult | undefined }
         </span>
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", marginBottom: 12 }}>
-        Detected on <strong>{presentCount}</strong> of {citations.sources.length} key directories.
+        Appears on <strong>{presentCount}</strong> of {rows.length} directory networks.
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {citations.sources.map((s) => {
+        {rows.map((r) => {
+          const label = r.present && r.foundSites.length > 1 ? `${r.network} (${r.foundSites.length} sites)` : r.network;
+          const url = r.foundSites[0]?.url;
           const chip = (
             <span
               style={{
@@ -2080,25 +2132,25 @@ function CitationsPanel({ citations }: { citations: CitationResult | undefined }
                 borderRadius: 20,
                 fontFamily: "'Josefin Sans',sans-serif",
                 fontSize: 12,
-                border: `1px solid ${s.present ? "#bfe3cd" : "#e6d9c6"}`,
-                background: s.present ? "#f0faf4" : "#fdf6ee",
-                color: s.present ? "#15803d" : "#9a6a2a",
+                border: `1px solid ${r.present ? "#bfe3cd" : "#e6d9c6"}`,
+                background: r.present ? "#f0faf4" : "#fdf6ee",
+                color: r.present ? "#15803d" : "#9a6a2a",
               }}
             >
-              <span style={{ fontWeight: 700 }}>{s.present ? "✓" : "✗"}</span> {s.name}
+              <span style={{ fontWeight: 700 }}>{r.present ? "✓" : "○"}</span> {label}
             </span>
           );
-          return s.present && s.url ? (
-            <a key={s.name} href={s.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+          return r.present && url ? (
+            <a key={r.network} href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
               {chip}
             </a>
           ) : (
-            <span key={s.name}>{chip}</span>
+            <span key={r.network}>{chip}</span>
           );
         })}
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
-        Based on a brand search; a "✗" means the listing didn&apos;t surface (verify / build it). Consistent listings across directories strengthen local ranking and trust.
+        Directional read from one brand search — networks, not individual sibling sites (a listing on Apartments.com covers ApartmentFinder/ForRent). A &ldquo;○&rdquo; means that network didn&apos;t surface, so it&apos;s worth verifying/claiming — not a confirmed absence.
       </p>
     </div>
   );
@@ -2537,7 +2589,7 @@ Recommendation rules (STRICT):
    - LONG-TAIL: niche query optimization with lower competition
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
 13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.
-14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on major directories (e.g. Yelp, Zillow, ApartmentGuide, Facebook), include at least ONE "FOUNDATIONAL" recommendation to claim/build those listings with consistent name/address/phone — name the specific missing directories. Skip if it already appears on the major ones.
+14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on a whole directory NETWORK (e.g. the Zillow network, the RentPath network, or standalone Yelp/Facebook/BBB), you MAY include ONE "FOUNDATIONAL" recommendation to claim/build a listing there with consistent name/address/phone — name the specific missing network(s). Frame it as "verify then claim" (the read is directional, from one search), and skip entirely if the major networks already appear.
 15. PAGE SPEED: if the mobile PageSpeed score above is below 50 (poor) or 50-89 (needs work), include ONE recommendation to improve it — cite the actual mobile score and the weakest Core Web Vital (e.g. 'mobile score 38/100, LCP 6.2s'), and give concrete fixes (compress/next-gen images, defer offscreen images, reduce render-blocking scripts, enable caching/CDN). Skip if mobile scores 90+.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
@@ -6564,34 +6616,42 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               );
             })()}
 
-            {seo.citations && seo.citations.sources.length > 0 && (
-              <div className="pb-avoid" style={{ marginTop: 18 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Local Citations / Directory Presence
-                </div>
-                <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                  Detected on {seo.citations.sources.filter((s) => s.present).length} of {seo.citations.sources.length} key directories (from a brand search).
-                </p>
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={findingsTh}>Directory</th>
-                      <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Listing found</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {seo.citations.sources.map((s, i) => (
-                      <tr key={i} className="pb-avoid">
-                        <td style={findingsTd}>{s.name}</td>
-                        <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: s.present ? "#15803d" : "#b14a2a" }}>
-                          {s.present ? "Yes" : "Not found"}
-                        </td>
+            {seo.citations && seo.citations.sources.length > 0 && (() => {
+              const rows = citationNetworkRows(seo.citations);
+              return (
+                <div className="pb-avoid" style={{ marginTop: 18 }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                    Local Citations / Directory Presence
+                  </div>
+                  <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
+                    Appears on {rows.filter((r) => r.present).length} of {rows.length} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={findingsTh}>Directory network</th>
+                        <th style={{ ...findingsTh, width: 120, textAlign: "center" }}>Listing found</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} className="pb-avoid">
+                          <td style={findingsTd}>
+                            {r.network}
+                            {r.present && r.foundSites.length > 0 && (
+                              <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
+                            )}
+                          </td>
+                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: r.present ? "#15803d" : "#9a6a2a" }}>
+                            {r.present ? "Yes" : "Verify"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </section>
         )}
 
