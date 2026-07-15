@@ -459,11 +459,11 @@ const SUGGESTED_QUERIES_DEFAULT = [
 /* -- PRIMITIVES ----------------------------------------------------- */
 function KPI({ label, value, sub, accent, live, trend }: { label: string; value: React.ReactNode; sub?: string; accent?: string; live?: boolean; trend?: number }) {
   return (
-    <div style={{ background: "white", borderRadius: 10, padding: "18px 22px", borderLeft: `4px solid ${accent || B.caribbean}`, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", flex: 1, minWidth: 140, position: "relative" }}>
+    <div style={{ background: "white", borderRadius: 10, padding: "18px 22px", borderTop: `4px solid ${accent || B.caribbean}`, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", flex: 1, minWidth: 140, position: "relative", textAlign: "center" }}>
       {live && <span style={{ position: "absolute", top: 10, right: 12, width: 7, height: 7, background: "#22c55e", borderRadius: "50%", display: "inline-block", boxShadow: "0 0 0 2px rgba(34,197,94,0.3)", animation: "lp 2s infinite" }} />}
       <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, fontWeight: 300, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{label}</div>
       <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 30, fontWeight: 700, color: B.oxford, lineHeight: 1 }}>{value}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 4 }}>
         {sub && <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa" }}>{sub}</div>}
         {typeof trend === "number" && <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: trend > 0 ? "#22c55e" : B.tangelo, fontWeight: 400 }}>{trend > 0 ? "▲" : "▼"} {Math.abs(trend)}%</div>}
       </div>
@@ -2307,7 +2307,7 @@ function TechnicalSeoPanel({ tech }: { tech: TechnicalSeoResult | undefined }) {
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         {kpis.map(([label, val, ok]) => (
-          <div key={label} style={{ flex: "1 1 120px", minWidth: 110, border: "1px solid #e6e9ec", borderLeft: `3px solid ${ok ? "#15803d" : B.tangelo}`, borderRadius: 6, padding: "8px 12px" }}>
+          <div key={label} style={{ flex: "1 1 120px", minWidth: 110, border: "1px solid #e6e9ec", borderTop: `3px solid ${ok ? "#15803d" : B.tangelo}`, borderRadius: 6, padding: "8px 12px", textAlign: "center" }}>
             <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "#999" }}>{label}</div>
             <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 18, fontWeight: 700, color: B.oxford }}>{val}</div>
           </div>
