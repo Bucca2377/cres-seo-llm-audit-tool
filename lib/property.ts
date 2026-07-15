@@ -375,6 +375,23 @@ export interface MarketingCriticalIssue {
  * consistency). Persisted on the property so the tab and the printable report
  * can read it after a run.
  */
+/** One phone/tracking number found on a platform, plus its dial-test status. */
+export interface PhoneNumberEntry {
+  number: string; // display form, e.g. "(314) 555-0142"
+  source: "Website" | "Google" | "Apartments.com";
+  /** Dial-test result (populated later by the Twilio check; null = not tested). */
+  dialStatus?: "connected" | "failed" | "unknown" | null;
+  dialNote?: string;
+}
+
+/** All phone/tracking numbers found across the property's platforms. */
+export interface PhoneInventory {
+  numbers: PhoneNumberEntry[];
+  collectedAt: string;
+  /** True once a dial test (Twilio) has been run against these numbers. */
+  dialTested?: boolean;
+}
+
 export interface MarketingAuditResult {
   executiveSummary: string[];
   websiteFindings: MarketingFinding[];
@@ -385,6 +402,8 @@ export interface MarketingAuditResult {
   summary: string[];
   /** Echoes the URLs audited, for the report header. */
   sources: { website?: string; apartments?: string; google?: string };
+  /** Phone/tracking numbers found across website, GBP, and Apartments.com. */
+  phones?: PhoneInventory;
   timestamp: string;
 }
 

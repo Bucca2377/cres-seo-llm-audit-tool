@@ -23,6 +23,8 @@ import {
   type MarketingAuditResult,
   type MarketingStatus,
   type MarketingConsistencyRow,
+  type PhoneInventory,
+  type PhoneNumberEntry,
   type ReviewAuditResult,
   type ReviewPeriod,
   type ReviewSnapshot,
@@ -1919,6 +1921,34 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
 /** Strip protocol + trailing slash for compact display of a page URL. */
 function shortUrl(u: string): string {
   return (u || "").replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
+/* ---- Phone / tracking number inventory (Marketing Audit) ---- */
+/** 10-digit key for de-duping a phone number regardless of formatting. */
+function normalizePhone(s: string): string {
+  const d = (s || "").replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : d;
+}
+
+/** Pretty US display form from any phone string. */
+function formatPhone(s: string): string {
+  const d = normalizePhone(s);
+  if (d.length !== 10) return (s || "").trim();
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+}
+
+/**
+ * Pull US phone numbers out of free text. Requires NANP-valid area/exchange
+ * (first digit 2-9) so it doesn't match zip+4, prices, or ID strings. Returns
+ * de-duped 10-digit keys.
+ */
+function extractPhones(text: string): string[] {
+  if (!text) return [];
+  const re = /(?:\+?1[\s.\-]?)?\(?([2-9]\d{2})\)?[\s.\-]?([2-9]\d{2})[\s.\-]?(\d{4})/g;
+  const out = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) out.add(m[1] + m[2] + m[3]);
+  return [...out];
 }
 
 /**
@@ -3818,6 +3848,7 @@ function MarketingAuditTab({
       setProgress("Pulling Google Business Profile data…");
       let gbpBlock = "GOOGLE BUSINESS PROFILE: could not be verified automatically this run — fetch the provided Google URL if present, otherwise mark Google cells 'Requires Client Verification'.";
       let googlePhotos: string[] = [];
+      let googlePhone = "";
       try {
         const serpData = await callSerp({
           query: buildGbpSearchQuery(current),
@@ -3826,6 +3857,7 @@ function MarketingAuditTab({
         });
         const gbp = extractGBP(serpData, current);
         const place = serpData?.place_results;
+        googlePhone = (place?.phone || "").toString();
         // Google profile photo URLs for the vision pass. Use the direct Google
         // CDN thumbnails (not the serpapi proxy) and downsize to ~512px to keep
         // vision token cost low.
@@ -3963,6 +3995,11 @@ Return ONLY this JSON object, no prose before or after:
     {"label":"Tour scheduling","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
     {"label":"Online application","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}}
   ],
+  "phoneNumbers": {
+    "website": ["every phone/tracking number displayed on the website, digits as shown"],
+    "apartments": ["every phone/tracking number on the Apartments.com listing"],
+    "google": ["the phone number on the Google listing if visible"]
+  },
   "recommendations": [
     {
       "priority": "QUICK WIN" | "FOUNDATIONAL" | "CONTENT" | "STRATEGIC",
@@ -4058,6 +4095,30 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
+      // --- Phone / tracking number inventory ---
+      // Website + Google are pulled deterministically (crawl text regex + the
+      // SerpAPI GBP phone); Apartments.com comes from what the model saw on its
+      // web_fetch (the listing is bot-protected, so no deterministic path).
+      const aiPhones = (parsed as { phoneNumbers?: { website?: string[]; apartments?: string[]; google?: string[] } }).phoneNumbers || {};
+      const phoneEntries: PhoneNumberEntry[] = [];
+      const seenPhone = new Set<string>();
+      const addPhone = (raw: string, source: PhoneNumberEntry["source"]) => {
+        const n = normalizePhone(raw);
+        if (n.length !== 10) return;
+        const key = `${source}|${n}`;
+        if (seenPhone.has(key)) return;
+        seenPhone.add(key);
+        phoneEntries.push({ number: formatPhone(raw), source });
+      };
+      extractPhones(siteText).forEach((p) => addPhone(p, "Website"));
+      (Array.isArray(aiPhones.website) ? aiPhones.website : []).forEach((p) => addPhone(p, "Website"));
+      if (googlePhone) addPhone(googlePhone, "Google");
+      (Array.isArray(aiPhones.google) ? aiPhones.google : []).forEach((p) => addPhone(p, "Google"));
+      (Array.isArray(aiPhones.apartments) ? aiPhones.apartments : []).forEach((p) => addPhone(p, "Apartments.com"));
+      const phones: PhoneInventory | undefined = phoneEntries.length
+        ? { numbers: phoneEntries, collectedAt: new Date().toISOString() }
+        : undefined;
+
       const result: MarketingAuditResult = {
         executiveSummary: parsed.executiveSummary || [],
         websiteFindings,
@@ -4066,6 +4127,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         recommendations: recs,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
+        phones,
         timestamp: new Date().toISOString(),
       };
 
@@ -4315,6 +4377,37 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
               ))}
             </tbody>
           </table>
+        </>
+      )}
+
+      {/* Phone / tracking numbers found across the platforms */}
+      {results.phones && results.phones.numbers.length > 0 && (
+        <>
+          <div style={sectionTitle}>Phone / Tracking Numbers</div>
+          <p style={{ ...para, marginBottom: 10 }}>
+            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 6 }}>
+            <tbody>
+              {(["Website", "Google", "Apartments.com"] as const).map((src) => {
+                const nums = results.phones!.numbers.filter((n) => n.source === src);
+                if (nums.length === 0) return null;
+                return (
+                  <tr key={src}>
+                    <td style={{ padding: "8px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", width: 160, fontWeight: 600, verticalAlign: "top" }}>
+                      {src}
+                    </td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#333" }}>
+                      {nums.map((n) => n.number).join("  ·  ")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", fontStyle: "italic", marginBottom: 4 }}>
+            Not yet dial-tested — connect a call-check to confirm each number rings the property.
+          </p>
         </>
       )}
 
@@ -6067,6 +6160,32 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                           {cell(row.apartments)}
                           {cell(row.google)}
                           {cell(row.website)}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Phone / tracking numbers */}
+            {mkt.phones && mkt.phones.numbers.length > 0 && (
+              <div className="pb-avoid" style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Phone / Tracking Numbers
+                </div>
+                <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
+                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
+                </p>
+                <table>
+                  <tbody>
+                    {(["Website", "Google", "Apartments.com"] as const).map((src) => {
+                      const nums = mkt.phones!.numbers.filter((n) => n.source === src);
+                      if (nums.length === 0) return null;
+                      return (
+                        <tr key={src} className="pb-avoid">
+                          <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 120 }}>{src}</td>
+                          <td style={findingsTd}>{nums.map((n) => n.number).join("   ·   ")}</td>
                         </tr>
                       );
                     })}
