@@ -4610,19 +4610,20 @@ function PhoneInventoryPanel({
   const badge = (n: PhoneNumberEntry) => {
     if (testing) return <span style={{ color: "#9aa3ad", fontSize: 11 }}>testing…</span>;
     const s = n.dialStatus;
-    const ring = typeof n.ringSeconds === "number" ? ` · rang ~${n.ringSeconds}s` : "";
-    if (s === "failed") return <span style={{ color: B.tangelo, fontWeight: 700, fontSize: 11.5 }}>✗ No connection</span>;
-    if (s === "unknown") return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>? Inconclusive</span>;
+    const secs = typeof n.ringSeconds === "number" ? n.ringSeconds : null;
+    const green = { color: "#15803d", fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
+    const amber = { color: "#9a7200", fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
+    const red = { color: B.tangelo, fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
+    if (s === "failed") return <span style={red}>✗ No connection (dead / invalid)</span>;
+    if (s === "unknown") return <span style={amber}>? Inconclusive</span>;
     if (s === "connected") {
-      // Connected — refine by who answered (live person is the good outcome).
-      if (n.answeredBy === "human")
-        return <span style={{ color: "#15803d", fontWeight: 700, fontSize: 11.5 }}>✓ Live person{ring}</span>;
-      if (n.answeredBy === "voicemail")
-        return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>⚠ Voicemail{ring}</span>;
-      if (n.answeredBy === "fax")
-        return <span style={{ color: "#9a7200", fontWeight: 700, fontSize: 11.5 }}>⚠ Fax line{ring}</span>;
-      // Rang a live line but no AMD verdict (e.g. no-answer).
-      return <span style={{ color: "#15803d", fontWeight: 700, fontSize: 11.5 }}>✓ Connected{ring}</span>;
+      if (n.answeredBy === "human") return <span style={green}>✓ Answered by a person{secs != null ? ` (${secs}s to answer)` : ""}</span>;
+      if (n.answeredBy === "voicemail") return <span style={amber}>⚠ Went to voicemail{secs != null ? ` (${secs}s)` : ""}</span>;
+      if (n.answeredBy === "fax") return <span style={amber}>⚠ Fax line</span>;
+      // No answering-machine verdict — say plainly what the line did.
+      if (n.dialNote === "no-answer") return <span style={amber}>◦ Rang{secs != null ? ` ~${secs}s` : ""}, no answer</span>;
+      if (n.dialNote === "busy") return <span style={amber}>◦ Line busy</span>;
+      return <span style={green}>✓ Connected to a live line</span>;
     }
     return <span style={{ color: "#c3c9cf", fontSize: 11 }}>not tested</span>;
   };
@@ -6587,19 +6588,21 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                           <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 120 }}>{i === 0 ? src : ""}</td>
                           <td style={findingsTd}>{n.number}</td>
                           {mkt.phones!.dialTested && (() => {
-                            const ring = typeof n.ringSeconds === "number" ? ` (~${n.ringSeconds}s)` : "";
+                            const secs = typeof n.ringSeconds === "number" ? n.ringSeconds : null;
                             let label = "—";
                             let color = "#9a7200";
                             if (n.dialStatus === "failed") { label = "No connection"; color = "#b14a2a"; }
                             else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#9a7200"; }
                             else if (n.dialStatus === "connected") {
-                              if (n.answeredBy === "human") { label = `Live person${ring}`; color = "#15803d"; }
-                              else if (n.answeredBy === "voicemail") { label = `Voicemail${ring}`; color = "#9a7200"; }
-                              else if (n.answeredBy === "fax") { label = `Fax line${ring}`; color = "#9a7200"; }
-                              else { label = `Connected${ring}`; color = "#15803d"; }
+                              if (n.answeredBy === "human") { label = `Answered by a person${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
+                              else if (n.answeredBy === "voicemail") { label = `Went to voicemail${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
+                              else if (n.answeredBy === "fax") { label = "Fax line"; color = "#9a7200"; }
+                              else if (n.dialNote === "no-answer") { label = `Rang${secs != null ? ` ~${secs}s` : ""}, no answer`; color = "#9a7200"; }
+                              else if (n.dialNote === "busy") { label = "Line busy"; color = "#9a7200"; }
+                              else { label = "Connected to a live line"; color = "#15803d"; }
                             }
                             return (
-                              <td style={{ ...findingsTd, textAlign: "center", width: 140, fontWeight: 700, color }}>{label}</td>
+                              <td style={{ ...findingsTd, textAlign: "center", width: 150, fontWeight: 700, color }}>{label}</td>
                             );
                           })()}
                         </tr>
