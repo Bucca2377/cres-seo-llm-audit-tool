@@ -2027,6 +2027,9 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
   if (!tech || i.total === 0) {
     return "TECHNICAL / ON-PAGE SEO: the site could not be crawled this run (no on-page data).";
   }
+  if (tech.blocked) {
+    return "TECHNICAL / ON-PAGE SEO: the site's bot protection (e.g. Cloudflare) blocked our crawler, so on-page tags could NOT be read. Do NOT assume missing meta descriptions / H1s / schema — recommend verifying on-page SEO live rather than reporting gaps.";
+  }
   const lines: string[] = [`Crawled ${i.total} page(s) with a real browser.`];
   if (i.missingTitle.length) lines.push(`${i.missingTitle.length} page(s) have no <title>.`);
   if (i.missingMeta.length)
@@ -2228,6 +2231,18 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
 /** On-screen technical / on-page SEO health panel (SEO tab). */
 function TechnicalSeoPanel({ tech }: { tech: TechnicalSeoResult | undefined }) {
   if (!tech || tech.pages.length === 0) return null;
+  if (tech.blocked) {
+    return (
+      <div style={{ background: "#fdf6ee", border: "1px solid #e6d9c6", borderRadius: 8, padding: "12px 18px" }}>
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9a6a2a", marginBottom: 4 }}>
+          🩺 Technical / On-Page SEO
+        </div>
+        <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#7a5a2a", margin: 0, lineHeight: 1.5 }}>
+          The site&apos;s bot protection (e.g. Cloudflare) blocked our crawler, so we couldn&apos;t read the on-page tags this run. Meta descriptions, H1s, and schema need to be <strong>verified live</strong> — not reported as gaps. (The Marketing Audit&apos;s website findings still work; they fall back to a different reader.)
+        </p>
+      </div>
+    );
+  }
   const i = computeTechnicalIssues(tech);
   const metaOk = i.total - i.missingMeta.length;
   const h1Ok = tech.pages.filter((p) => p.h1Count === 1).length;
@@ -2517,7 +2532,14 @@ Return ONLY a JSON array of 6 strings, no prose:
           const pages: PageSeo[] = (crawl.pages || [])
             .filter((p) => p.seo)
             .map((p) => ({ url: p.url, status: p.status, ...(p.seo as Omit<PageSeo, "url" | "status">) }));
-          if (pages.length) technicalSeo = { pages, timestamp: new Date().toISOString() };
+          // If we only got a single thin page (typical of a Cloudflare/bot
+          // challenge), the tags aren't real on-page data — flag it as blocked
+          // so the UI says "verify live" instead of reporting fake findings.
+          const gotRealContent = pages.some(
+            (p) => (p.status === 200 || p.status === null) && p.wordCount >= 80
+          );
+          const blocked = pages.length > 0 && !gotRealContent;
+          if (pages.length) technicalSeo = { pages, timestamp: new Date().toISOString(), blocked };
         } catch {
           /* best-effort — technical section is skipped if the crawl fails */
         }
@@ -6576,7 +6598,18 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               </div>
             )}
 
-            {seo.technicalSeo && seo.technicalSeo.pages.length > 0 && (() => {
+            {seo.technicalSeo && seo.technicalSeo.pages.length > 0 && seo.technicalSeo.blocked && (
+              <div className="pb-avoid" style={{ marginTop: 18 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
+                  Technical / On-Page SEO
+                </div>
+                <p style={{ ...bodyP, fontSize: 10.5, color: "#555" }}>
+                  The site&apos;s bot protection blocked our crawler this run, so on-page tags (meta descriptions, H1s, schema) could not be read and should be verified live rather than reported as gaps.
+                </p>
+              </div>
+            )}
+
+            {seo.technicalSeo && seo.technicalSeo.pages.length > 0 && !seo.technicalSeo.blocked && (() => {
               const tech = seo.technicalSeo;
               const ti = computeTechnicalIssues(tech);
               const cell = (good: boolean, label: string) => (

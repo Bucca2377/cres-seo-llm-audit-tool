@@ -85,6 +85,12 @@ export interface PageSeo {
 export interface TechnicalSeoResult {
   pages: PageSeo[];
   timestamp: string;
+  /**
+   * True when the crawler was blocked / bot-challenged (e.g. Cloudflare 403)
+   * and only got a thin shell — the per-page tags are NOT reliable, so the UI
+   * shows a "verify live" note instead of presenting them as findings.
+   */
+  blocked?: boolean;
 }
 
 /** PageSpeed / Core Web Vitals for one strategy (mobile or desktop). */
