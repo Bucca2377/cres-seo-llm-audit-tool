@@ -845,26 +845,61 @@ export async function callAI(opts: {
   webFetch?: boolean;
   images?: string[];
 }) {
-  const r = await fetch("/api/ai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts),
-  });
-  if (!r.ok) {
+  // Retry transient upstream failures with exponential backoff. Anthropic
+  // returns 529 "overloaded" fairly often under load; without a retry a single
+  // blip throws, and callers like the Marketing Audit's photo vision passes
+  // swallow that in a catch — silently degrading a real photo grade to
+  // "quality not assessed". Only transient statuses (overload / rate limit /
+  // gateway) and network errors are retried; a 400/401/404 is permanent and
+  // fails fast.
+  const RETRYABLE = new Set([429, 502, 503, 504, 529]);
+  const maxAttempts = 4;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const backoff = (n: number) => 700 * 2 ** (n - 1) + Math.floor(Math.random() * 250);
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let r: Response;
+    try {
+      r = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(opts),
+      });
+    } catch (e) {
+      // Network-level failure — transient, retry.
+      lastError = e instanceof Error ? e : new Error("Network request failed");
+      if (attempt < maxAttempts) {
+        await sleep(backoff(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (r.ok) {
+      const data = await r.json();
+      if (data?._meta) {
+        emitSpend({
+          source: "anthropic",
+          cost: data._meta.cost || 0,
+          inputTokens: data._meta.input_tokens || 0,
+          outputTokens: data._meta.output_tokens || 0,
+          webSearches: data._meta.web_searches || 0,
+        });
+      }
+      return data;
+    }
+
     const err = await r.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || `Request failed (${r.status})`);
+    const message = err.error || `Request failed (${r.status})`;
+    if (RETRYABLE.has(r.status) && attempt < maxAttempts) {
+      lastError = new Error(message);
+      await sleep(backoff(attempt));
+      continue;
+    }
+    throw new Error(message);
   }
-  const data = await r.json();
-  if (data?._meta) {
-    emitSpend({
-      source: "anthropic",
-      cost: data._meta.cost || 0,
-      inputTokens: data._meta.input_tokens || 0,
-      outputTokens: data._meta.output_tokens || 0,
-      webSearches: data._meta.web_searches || 0,
-    });
-  }
-  return data;
+  throw lastError || new Error("Request failed");
 }
 
 interface SpendState {
