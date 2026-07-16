@@ -4287,6 +4287,7 @@ Return ONLY this JSON object, no prose before or after:
     "apartments": ["every phone/tracking number on the Apartments.com listing"],
     "google": ["the phone number on the Google listing if visible"]
   },
+  "apartmentsPhotos": ["direct image URLs (the actual src) of the first few photos in the Apartments.com listing's photo gallery, e.g. https://images1.apartments.com/...; up to 6; ONLY real URLs you can actually see in the fetched page, NEVER invented, guessed, or constructed; [] if you cannot see any image URLs"],
   "recommendations": [
     {
       "priority": "QUICK WIN" | "FOUNDATIONAL" | "CONTENT" | "STRATEGIC",
@@ -4406,6 +4407,46 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           }
         } catch {
           /* keep the text-only Google photos fallback */
+        }
+      }
+
+      // --- Vision pass on the Apartments.com listing photos (separate verdict) ---
+      // The listing fetch can't judge photo QUALITY from a media count ("16
+      // Photos"), so the model returns the gallery image URLs (apartmentsPhotos)
+      // and we grade them exactly like the website/Google galleries. Apartments.com
+      // CDN images are public, so the vision model can fetch them even though the
+      // listing HTML is bot-protected. We only accept real apartments.com image
+      // URLs; a bad/guessed URL just makes the vision call fail → the amber
+      // "quality not assessed" fallback stands (no regression).
+      const aptPhotoUrls: string[] = Array.isArray(
+        (parsed as { apartmentsPhotos?: unknown }).apartmentsPhotos
+      )
+        ? ((parsed as { apartmentsPhotos: unknown[] }).apartmentsPhotos)
+            .filter(
+              (u): u is string =>
+                typeof u === "string" && /^https?:\/\/[^/]*apartments\.com\//i.test(u)
+            )
+            .slice(0, 6)
+        : [];
+      if (aptPhotoUrls.length >= 2) {
+        try {
+          setProgress("Assessing Apartments.com photos…");
+          const aPrompt = `These ${Math.min(aptPhotoUrls.length, 6)} images are from the Apartments.com listing gallery of ${current.name}, a ${current.propertyType || "multifamily apartment"} community. Grade them on MARKETING quality a leasing prospect would perceive: professional vs amateur (lighting, composition, sharpness, resolution), staging/cleanliness, and coverage (interiors/units, amenities, exterior). Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you actually see"}. green = genuinely professional, well-lit, good coverage; amber = adequate but some weak/low-res shots or thin coverage; red = clearly amateur/low-quality.`;
+          const aResp = await callAI({ prompt: aPrompt, images: aptPhotoUrls, maxTokens: 400 });
+          const aTextResp = (aResp.content || [])
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("");
+          const am = aTextResp.match(/\{[\s\S]*\}/);
+          if (am) {
+            const aj = JSON.parse(am[0]) as { status?: string; note?: string };
+            if (aj.status === "green" || aj.status === "amber" || aj.status === "red") {
+              const row = consistency.find((c) => /photo/i.test(c.label));
+              if (row) row.apartments = { status: aj.status, note: (aj.note || "").trim() || "Listing photos assessed" };
+            }
+          }
+        } catch {
+          /* keep the text-only "quality not assessed" fallback */
         }
       }
 
