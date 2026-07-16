@@ -6030,18 +6030,26 @@ function recTopicKey(card: RecommendationCard): string | null {
 }
 
 /**
- * Merge two structured card sets (LLM audit first, then SEO audit) and drop
- * cards that repeat a topic already covered. LLM-first ordering means the
- * checklist-grounded card wins when both audits cover the same ground.
+ * Merge structured card sets from multiple audits (order: marketing ->
+ * checklist -> SEO) and drop only TRUE duplicates — cards proposing the same
+ * action, keyed by normalized title. Two audits that both say "Add JSON-LD
+ * schema" collapse to one; distinct recommendations that merely share a broad
+ * topic (e.g. marketing "list amenities on the ILS listing" vs SEO "add an
+ * amenities landing page for search") are BOTH kept. Earlier cards win ties.
+ *
+ * NOTE: this intentionally does NOT use recTopicKey. The coarse topic key is
+ * right for matching set-aside items across re-runs (setAsideKey), but as a
+ * dedup key it collapsed genuinely-different same-topic cards — silently
+ * dropping SEO recs from the combined report.
  */
 function dedupeRecCards(cards: RecommendationCard[]): RecommendationCard[] {
   const seen = new Set<string>();
   const kept: RecommendationCard[] = [];
   for (const c of cards) {
-    const topic = recTopicKey(c);
-    if (topic) {
-      if (seen.has(topic)) continue;
-      seen.add(topic);
+    const key = (c.title || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
     }
     kept.push(c);
   }
