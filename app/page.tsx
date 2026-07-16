@@ -4880,7 +4880,7 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
       {/* Recommendations — same card format as the SEO/LLM tabs */}
       {isStructuredRecs(results.recommendations) && (
         <>
-          <div style={sectionTitle}>Recommendations to Drive More Leases</div>
+          <div style={sectionTitle}>Recommendations</div>
           <RecommendationsBlock
             recs={results.recommendations}
             setAsideList={property.setAsideRecs}
@@ -6388,6 +6388,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   // legacy text + categorizer for older persisted audits.
   const structuredLlmRecs = isStructuredRecs(llmRecs) ? llmRecs : null;
   const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
+  const structuredMktRecs = isStructuredRecs(mkt?.recommendations) ? (mkt!.recommendations as RecommendationCard[]) : null;
 
   // Recommendations the client has set aside are dropped from the active
   // printed lists and instead summarized in a "Considered & Set Aside" recap.
@@ -6402,17 +6403,16 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
       ? setAsideList.filter((s) => s.audit === "marketing")
       : setAsideList;
 
-  // Merge LLM-audit + SEO-audit cards, dropping topical duplicates (both
-  // audits independently cover reviews / FAQ / schema / amenities, so the
-  // raw concatenation showed each topic twice in the printed report).
-  // In SEO-only mode the checklist (LLM-audit) recs belong to the Marketing
-  // report, so only the SEO/LLM-rank cards are carried through.
+  // ONE unified recommendations list per report, dedup'd across the audits that
+  // feed it: marketing-consistency recs + optimization-checklist (LLM) recs +
+  // SEO recs. SEO-only mode carries just the SEO cards; the marketing report
+  // carries the marketing + checklist cards; combined carries all three.
   const allStructuredCards: RecommendationCard[] = dedupeRecCards(
     mode === "seo"
       ? [...(structuredSeoRecs || [])]
       : mode === "marketing"
-      ? [...(structuredLlmRecs || [])]
-      : [...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
+      ? [...(structuredMktRecs || []), ...(structuredLlmRecs || [])]
+      : [...(structuredMktRecs || []), ...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
   ).filter((c) => !isSetAside(c, setAsideKeys));
 
   // Group cards into priority bands for the printed report. The order
@@ -6687,88 +6687,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 })()}
               </div>
             )}
-
-            {/* Marketing Recommendations — same card format as SEO/LLM, kept
-                as its own section (not merged into the combined card block).
-                Set-aside cards are dropped here and recapped at the bottom. */}
-            {isStructuredRecs(mkt.recommendations) &&
-              mkt.recommendations.some((c) => !isSetAside(c, setAsideKeys)) && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                    Recommendations to Drive More Leases
-                  </div>
-                  {mkt.recommendations
-                    .filter((c) => !isSetAside(c, setAsideKeys))
-                    .map((card, i) => (
-                      <PrintRecCard key={i} card={card} />
-                    ))}
-                </div>
-              )}
-
-            {/* Progress Since Last Audit — accountability recap, kept at the
-                bottom so the report leads with findings + actions and closes
-                with what moved since the prior run. Deterministic diff. */}
-            {property.marketingAuditPrev &&
-              (() => {
-                const prog = computeAuditProgress(
-                  property.marketingAuditPrev,
-                  mkt.consistency,
-                  property.checklistStatuses ?? {}
-                );
-                const resolved = [...prog.fixed, ...prog.completed];
-                const regressedAll = [...prog.regressed, ...prog.slipped];
-                const empty =
-                  resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
-                const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                });
-                const grp: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.03em", margin: "6px 0 2px" };
-                const li: React.CSSProperties = { ...bodyP, margin: "0 0 2px 0", fontSize: 10.5 };
-                return (
-                  <div className="pb-avoid" style={{ marginBottom: 16 }}>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                      Progress Since Last Audit
-                    </div>
-                    <p style={{ ...bodyP, marginBottom: 6 }}>
-                      Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open, {regressedAll.length} regressed.
-                    </p>
-                    {empty ? (
-                      <p style={{ ...bodyP, color: PRINT_MUTED, fontStyle: "italic" }}>
-                        No changes in tracked findings since the last audit.
-                      </p>
-                    ) : (
-                      <>
-                        {resolved.length > 0 && (
-                          <div>
-                            <div style={{ ...grp, color: "#15803d" }}>✓ Resolved</div>
-                            {resolved.map((s, i) => (
-                              <p key={`f${i}`} style={li}>{s}</p>
-                            ))}
-                          </div>
-                        )}
-                        {prog.stillOpen.length > 0 && (
-                          <div>
-                            <div style={{ ...grp, color: "#9a7200" }}>⚠ Still open</div>
-                            {prog.stillOpen.map((s, i) => (
-                              <p key={`o${i}`} style={li}>{s}</p>
-                            ))}
-                          </div>
-                        )}
-                        {regressedAll.length > 0 && (
-                          <div>
-                            <div style={{ ...grp, color: PRINT_ORANGE }}>✗ Regressed</div>
-                            {regressedAll.map((s, i) => (
-                              <p key={`r${i}`} style={li}>{s}</p>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
 
           </section>
         )}
@@ -7165,9 +7083,12 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         )}
 
         {/* ============ RECOMMENDATIONS ============ */}
-        {(mode === "seo" ? seo?.recommendations : mode === "marketing" ? llmRecs : llmRecs || seo?.recommendations) && (
+        {/* ONE unified recommendations section per report. Structured cards come
+            from allStructuredCards (marketing + checklist + SEO, deduped);
+            legacy text lines are the fallback for older persisted audits. */}
+        {(printBands.length > 0 || allRecs.length > 0) && (
           <section className="pb-before">
-            <PrintSectionHeader>Recommendations to Drive Visibility</PrintSectionHeader>
+            <PrintSectionHeader>Recommendations</PrintSectionHeader>
 
             {/* Preferred path: structured cards grouped by priority band */}
             {printBands.length > 0 && printBands.map((band, i) => (
@@ -7213,6 +7134,70 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
             )}
           </section>
         )}
+
+        {/* ============ PROGRESS SINCE LAST AUDIT ============ */}
+        {/* Accountability recap, kept at the very bottom so the report leads
+            with findings + actions and closes with what moved since the prior
+            run. Deterministic diff. Marketing/combined only. */}
+        {mode !== "seo" && property.marketingAuditPrev && mkt &&
+          (() => {
+            const prog = computeAuditProgress(
+              property.marketingAuditPrev,
+              mkt.consistency,
+              property.checklistStatuses ?? {}
+            );
+            const resolved = [...prog.fixed, ...prog.completed];
+            const regressedAll = [...prog.regressed, ...prog.slipped];
+            const empty =
+              resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
+            const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            });
+            const grp: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.03em", margin: "6px 0 2px" };
+            const li: React.CSSProperties = { ...bodyP, margin: "0 0 2px 0", fontSize: 10.5 };
+            return (
+              <section className="pb-avoid">
+                <PrintSectionHeader>Progress Since Last Audit</PrintSectionHeader>
+                <p style={{ ...bodyP, marginBottom: 6 }}>
+                  Since {sinceDate}: {resolved.length} resolved, {prog.stillOpen.length} still open, {regressedAll.length} regressed.
+                </p>
+                {empty ? (
+                  <p style={{ ...bodyP, color: PRINT_MUTED, fontStyle: "italic" }}>
+                    No changes in tracked findings since the last audit.
+                  </p>
+                ) : (
+                  <>
+                    {resolved.length > 0 && (
+                      <div>
+                        <div style={{ ...grp, color: "#15803d" }}>✓ Resolved</div>
+                        {resolved.map((s, i) => (
+                          <p key={`f${i}`} style={li}>{s}</p>
+                        ))}
+                      </div>
+                    )}
+                    {prog.stillOpen.length > 0 && (
+                      <div>
+                        <div style={{ ...grp, color: "#9a7200" }}>⚠ Still open</div>
+                        {prog.stillOpen.map((s, i) => (
+                          <p key={`o${i}`} style={li}>{s}</p>
+                        ))}
+                      </div>
+                    )}
+                    {regressedAll.length > 0 && (
+                      <div>
+                        <div style={{ ...grp, color: PRINT_ORANGE }}>✗ Regressed</div>
+                        {regressedAll.map((s, i) => (
+                          <p key={`r${i}`} style={li}>{s}</p>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            );
+          })()}
 
         {/* ============ CONSIDERED & SET ASIDE ============ */}
         {/* Recommendations the client reviewed and chose not to pursue, with
