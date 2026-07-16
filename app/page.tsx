@@ -4330,16 +4330,31 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // real verdict instead of "present, quality not assessed".
       const websiteFindings = parsed.websiteFindings || [];
       const consistency = parsed.consistency || [];
-      // HARD GUARANTEE: the Apartments.com fetch is bot-limited and can't PROVE
-      // a feature is absent, so a partial read must never surface as a red
-      // ISSUE. Clamp any Apartments.com "red" down to amber "verify live" — the
-      // website column (reliable crawl) still catches genuine gaps.
-      for (const row of consistency) {
-        if (row?.apartments?.status === "red") {
-          row.apartments = {
-            status: "amber",
-            note: "Could not confirm on the Apartments.com listing this run (bot-limited fetch); verify live.",
-          };
+      // SMART CLAMP for Apartments.com reds. The listing fetch is bot-protected
+      // and SOMETIMES comes back partial — a red from a partial read can't prove
+      // a feature is absent, so it must not manufacture a false ISSUE. But when
+      // the fetch clearly SUCCEEDED (the listing returned several confirmed green
+      // cells with real data), a red is a genuine "not on the listing" gap and
+      // should stand as a real, decisive finding — not be disguised as "couldn't
+      // read it." So we only soften reds to "verify live" amber when the read
+      // looks partial/unreliable.
+      //
+      // Read-quality signal: how many Apartments.com cells came back green. Per
+      // the audit's own rules the model marks a feature it couldn't clearly SEE
+      // as amber (never red), so 3+ green cells means the listing genuinely came
+      // through and any remaining red reflects a real absence, not a block.
+      const aptGreenCount = consistency.filter(
+        (r) => r?.apartments?.status === "green"
+      ).length;
+      const aptReadSucceeded = aptGreenCount >= 3;
+      if (!aptReadSucceeded) {
+        for (const row of consistency) {
+          if (row?.apartments?.status === "red") {
+            row.apartments = {
+              status: "amber",
+              note: "Could not confirm on the Apartments.com listing this run (bot-limited fetch); verify live.",
+            };
+          }
         }
       }
       if (siteImages.length >= 2) {
