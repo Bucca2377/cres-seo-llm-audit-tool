@@ -4268,9 +4268,6 @@ Return ONLY this JSON object, no prose before or after:
     {"label":"Virtual tours","status":"...","note":"..."},
     {"label":"Amenities page","status":"...","note":"..."}
   ],
-  "criticalIssues": [
-    {"title":"short title","observed":"one sentence of what was observed","impact":"one sentence on how it hurts lease conversion"}
-  ],
   "consistency": [
     {"label":"Currently advertising / active","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
     {"label":"Office hours listed","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
@@ -4301,9 +4298,9 @@ Return ONLY this JSON object, no prose before or after:
 }
 
 RECOMMENDATION RULES (match the rest of the app exactly):
-- MUST RESOLVE THE FINDINGS: the recommendations exist to fix what THIS audit found. Every Critical Issue you listed AND every red (ISSUE) or amber (CHECK) cell in the consistency check must be addressed by at least one recommendation. Do not invent recommendations unrelated to the findings, and do not leave a critical issue without a fix.
+- MUST RESOLVE THE FINDINGS: the recommendations exist to fix what THIS audit found. Every red (ISSUE) or amber (CHECK) cell in the consistency check AND every red/amber website finding must be addressed by at least one recommendation. Do not invent recommendations unrelated to the findings, and do not leave a genuine problem without a fix.
 - Order recommendations by damage: the fixes for the most harmful critical issues come first.
-- "source" MUST name the exact finding each card resolves, e.g. "Resolves Critical Issue #1: office-hours conflict across platforms" or "Fixes Website + Apartments.com: Virtual tour ISSUE".
+- "source" MUST name the exact finding each card resolves, e.g. "Fixes the office-hours conflict (Google vs website)" or "Fixes Website + Apartments.com: Virtual tour ISSUE".
 - COUNT: aim for 5 recommendations; use up to 7 ONLY if there are more distinct critical issues / red gaps than 5 to cover. Never leave a critical issue uncovered just to hit a number.
 - "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
@@ -4863,24 +4860,6 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
           sectionTitle={sectionTitle}
           para={para}
         />
-      )}
-
-      {/* Critical Issues — after the consistency data that surfaces them */}
-      {results.criticalIssues.length > 0 && (
-        <>
-          <div style={sectionTitle}>Critical Issues Impacting Leasing</div>
-          {results.criticalIssues.map((issue, i) => (
-            <div key={i} style={{ marginBottom: 12, paddingLeft: 4 }}>
-              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: B.oxford }}>
-                {i + 1}. {issue.title}
-              </div>
-              <div style={{ ...para, marginBottom: 4 }}>{issue.observed}</div>
-              <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.tangelo, lineHeight: 1.5 }}>
-                <strong>Impact:</strong> {issue.impact}
-              </div>
-            </div>
-          ))}
-        </>
       )}
 
       {/* Recommendations — same card format as the SEO/LLM tabs */}
@@ -6637,17 +6616,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
                   Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
-                  {mkt.phones.dialTested && mkt.phones.dialTestedAt
-                    ? (() => {
-                        const when = formatDialTime(mkt.phones.dialTestedAt, property.address);
-                        const openAt = officeOpenAt(mkt.phones.officeHours, mkt.phones.dialTestedAt, property.address);
-                        if (openAt === false) return ` Dial-tested ${when} — outside posted office hours, so a no-answer or voicemail here is expected, not a finding.`;
-                        if (openAt === true) return ` Dial-tested ${when} — during posted office hours, so a no-answer or voicemail is a real lead-leak signal.`;
-                        return ` Dial-tested ${when} (property's local time); a no-answer/voicemail only signals a lead leak if the call landed during posted office hours.`;
-                      })()
-                    : mkt.phones.dialTested
-                    ? " Each number was dial-tested with an automated call."
-                    : ""}
                 </p>
                 <table>
                   <tbody>
@@ -6680,26 +6648,28 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     })}
                   </tbody>
                 </table>
-              </div>
-            )}
-
-            {/* Critical Issues — after the consistency data that surfaces them */}
-            {mkt.criticalIssues.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Critical Issues Impacting Leasing
-                </div>
-                {mkt.criticalIssues.map((issue, i) => (
-                  <div key={i} className="pb-avoid" style={{ marginBottom: 9 }}>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, color: PRINT_NAVY }}>
-                      {i + 1}. {issue.title}
-                    </div>
-                    <p style={{ ...bodyP, margin: "2px 0 2px 0" }}>{issue.observed}</p>
-                    <p style={{ ...bodyP, margin: 0, color: "#b14a2a" }}>
-                      <strong style={{ color: "#b14a2a" }}>Impact:</strong> {issue.impact}
+                {mkt.phones.dialTested && mkt.phones.dialTestedAt && (() => {
+                  const when = formatDialTime(mkt.phones.dialTestedAt, property.address);
+                  const openAt = officeOpenAt(mkt.phones.officeHours, mkt.phones.dialTestedAt, property.address);
+                  const base: React.CSSProperties = { ...bodyP, fontSize: 10, margin: "8px 0 0 0", padding: "6px 10px", borderRadius: 4 };
+                  if (openAt === false)
+                    return (
+                      <p style={{ ...base, background: "#f0faf4", border: "1px solid #bfe3cd", color: "#15803d" }}>
+                        <strong>Dial-tested {when} — OUTSIDE the property&rsquo;s office hours.</strong> A &ldquo;no answer&rdquo; or &ldquo;voicemail&rdquo; above is expected here, not a finding.
+                      </p>
+                    );
+                  if (openAt === true)
+                    return (
+                      <p style={{ ...base, background: "#fdf6ee", border: "1px solid #f0e2cd", color: "#9a6a2a" }}>
+                        <strong>Dial-tested {when} — DURING the property&rsquo;s office hours.</strong> A &ldquo;no answer&rdquo; or &ldquo;voicemail&rdquo; above is a real lead-leak signal.
+                      </p>
+                    );
+                  return (
+                    <p style={{ ...base, background: "#faf7f2", border: "1px solid #ececec", color: "#555" }}>
+                      Dial-tested {when} (property&rsquo;s local time). A &ldquo;no answer&rdquo; / &ldquo;voicemail&rdquo; above only signals a lead leak if the call landed during posted office hours.
                     </p>
-                  </div>
-                ))}
+                  );
+                })()}
               </div>
             )}
 
