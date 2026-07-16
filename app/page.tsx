@@ -4330,6 +4330,18 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // real verdict instead of "present, quality not assessed".
       const websiteFindings = parsed.websiteFindings || [];
       const consistency = parsed.consistency || [];
+      // HARD GUARANTEE: the Apartments.com fetch is bot-limited and can't PROVE
+      // a feature is absent, so a partial read must never surface as a red
+      // ISSUE. Clamp any Apartments.com "red" down to amber "verify live" — the
+      // website column (reliable crawl) still catches genuine gaps.
+      for (const row of consistency) {
+        if (row?.apartments?.status === "red") {
+          row.apartments = {
+            status: "amber",
+            note: "Could not confirm on the Apartments.com listing this run (bot-limited fetch); verify live.",
+          };
+        }
+      }
       if (siteImages.length >= 2) {
         try {
           setProgress("Assessing photo quality…");
@@ -4680,7 +4692,8 @@ function PhoneInventoryPanel({
       // No answering-machine verdict — say plainly what the line did.
       if (n.dialNote === "no-answer") return <span style={amber}>◦ Rang{secs != null ? ` ~${secs}s` : ""}, no answer</span>;
       if (n.dialNote === "busy") return <span style={amber}>◦ Line busy</span>;
-      return <span style={green}>✓ Connected to a live line</span>;
+      // Answered, but detection couldn't tell a person from voicemail/IVR.
+      return <span style={amber}>◦ Answered — couldn&apos;t tell person vs voicemail</span>;
     }
     return <span style={{ color: "#c3c9cf", fontSize: 11 }}>not tested</span>;
   };
@@ -6639,7 +6652,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                               else if (n.answeredBy === "fax") { label = "Fax line"; color = "#9a7200"; }
                               else if (n.dialNote === "no-answer") { label = `Rang${secs != null ? ` ~${secs}s` : ""}, no answer`; color = "#9a7200"; }
                               else if (n.dialNote === "busy") { label = "Line busy"; color = "#9a7200"; }
-                              else { label = "Connected to a live line"; color = "#15803d"; }
+                              else { label = "Answered (person vs voicemail unclear)"; color = "#9a7200"; }
                             }
                             return (
                               <td style={{ ...findingsTd, textAlign: "center", width: 150, fontWeight: 700, color }}>{label}</td>
