@@ -3446,6 +3446,18 @@ const MK_STATUS_WORD: Record<MarketingStatus, string> = {
 };
 
 /**
+ * True only when a property has a REAL prior Marketing Audit to diff against —
+ * a previous run that actually recorded consistency rows. The "Progress Since
+ * Last Audit" section keys off this so a FIRST run never shows resolved /
+ * regressed items. A first run already leaves marketingAuditPrev undefined;
+ * this also rejects an empty or partial baseline (import, aborted run).
+ */
+function hasPriorMarketingBaseline(property: Property): boolean {
+  const prev = property.marketingAuditPrev;
+  return !!(prev && Array.isArray(prev.consistency) && prev.consistency.length > 0);
+}
+
+/**
  * Deterministic diff between the previous Marketing Audit snapshot and the
  * current run — no AI. Compares the consistency grid (per row/platform) and
  * the optimization checklist so a client can see accountability run-to-run.
@@ -5038,10 +5050,10 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
       {/* Progress Since Last Audit — accountability recap, kept at the bottom
           so the report leads with findings + actions and closes with what
           moved since the prior run. Deterministic diff vs the prior run. */}
-      {property.marketingAuditPrev &&
+      {hasPriorMarketingBaseline(property) &&
         (() => {
           const prog = computeAuditProgress(
-            property.marketingAuditPrev,
+            property.marketingAuditPrev!,
             results.consistency,
             property.checklistStatuses ?? {}
           );
@@ -7402,10 +7414,10 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         {/* Accountability recap, kept at the very bottom so the report leads
             with findings + actions and closes with what moved since the prior
             run. Deterministic diff. Marketing/combined only. */}
-        {mode !== "seo" && property.marketingAuditPrev && mkt &&
+        {mode !== "seo" && hasPriorMarketingBaseline(property) && mkt &&
           (() => {
             const prog = computeAuditProgress(
-              property.marketingAuditPrev,
+              property.marketingAuditPrev!,
               mkt.consistency,
               property.checklistStatuses ?? {}
             );
