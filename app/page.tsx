@@ -4227,6 +4227,27 @@ function MarketingAuditTab({
         siteBlocked = true;
       }
 
+      // Dedicated Apartments.com read — its OWN retryable web_fetch, not buried
+      // in the big audit call, so the listing facts are reliable and the model
+      // just reports them instead of re-fetching (see readApartmentsListing).
+      setProgress("Reading the Apartments.com listing…");
+      const aptRead = current.apartmentsUrl ? await readApartmentsListing(current.apartmentsUrl) : null;
+
+      const apartmentsBlock = !current.apartmentsUrl
+        ? "APARTMENTS.COM LISTING: no listing URL was provided."
+        : aptRead && aptRead.ok
+        ? `APARTMENTS.COM LISTING (already read from ${current.apartmentsUrl} — treat these facts as AUTHORITATIVE, do NOT re-fetch the URL):
+- Advertising / active: ${aptRead.advertising === null ? "unknown" : aptRead.advertising ? "yes, active listing with units" : "listing present but not advertising units"}
+- Pricing: ${aptRead.priceText || "not shown"}${aptRead.beds ? ` (${aptRead.beds})` : ""}${aptRead.sqft ? `, ${aptRead.sqft}` : ""}
+- Office hours (as listed): ${Object.keys(aptRead.officeHours).length ? Object.entries(aptRead.officeHours).map(([d, h]) => `${d} ${h}`).join(", ") : "not shown on the listing"}
+- Media on listing (verbatim gallery badge): "${aptRead.mediaSummary || "not shown"}"
+- Concession / special: ${aptRead.concessions || "none advertised"}
+- Tour scheduling (Request-a-Tour / contact form): ${aptRead.tourScheduling === null ? "unknown" : aptRead.tourScheduling ? "available" : "not found"}
+- Online application / inquiry: ${aptRead.onlineApplication === null ? "unknown" : aptRead.onlineApplication ? "available" : "not found"}
+- Amenities: ${aptRead.amenities.join(", ") || "not listed"}
+- Phone numbers on listing: ${aptRead.phones.join(", ") || "none shown"}`
+        : `APARTMENTS.COM LISTING (${current.apartmentsUrl}): the dedicated read came back empty this run (partial or blocked fetch). Mark the Apartments.com cells AMBER "could not read the listing this run; verify live" — NEVER red.`;
+
       setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
@@ -4237,15 +4258,14 @@ ${
     : `the pages below were captured with a REAL headless browser, so JavaScript-rendered pricing, floor plans, galleries, tour tools, and specials ARE included. Report ONLY what you actually see in them:\n${siteText}`
 }
 
-APARTMENTS.COM LISTING: ${current.apartmentsUrl ? `FETCH this exact URL with your web fetch tool and report what you actually see (Apartments.com is readable that way and returns the full units/pricing/specials/photos/hours): ${current.apartmentsUrl}` : "no listing URL was provided"}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
+${apartmentsBlock}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
 ${gbpBlock}
 
 RULES (apply strictly):
 - WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
-- APARTMENTS.COM: fetch the URL above with your tool. If it returns the listing (units, pricing, photos, specials), mark "currently advertising / active" GREEN and report the real data. Only mark "not advertising" red if it LITERALLY says "not currently advertising". If your fetch errors or returns nothing, mark the Apartments.com rows AMBER "could not verify automatically; check live" — NEVER red.
-- APARTMENTS.COM — CONSERVATIVE, NON-DESTRUCTIVE READ: the fetch is bot-protected and often returns only a PARTIAL page. For any Apartments.com feature you cannot clearly SEE (virtual tour, photos, amenities, etc.), mark it AMBER "could not fully verify on the listing; check live" — NEVER red. Only mark an Apartments.com feature RED if you fully read the listing and it genuinely lacks it. Apartments.com listings routinely include virtual tours, photos, and specials even when a quick fetch misses them, so absence in the fetch is NOT proof of absence.
-- APARTMENTS.COM VIRTUAL TOUR — TRUST THE MEDIA COUNT, NOT A TAB LABEL. Every Apartments.com listing shows a media summary on its gallery that enumerates exactly what it contains, e.g. "16 Photos" or "29 Photos, 2 Virtual Tours, 1 Video". That count is the source of truth. Mark "Virtual tour" GREEN only when the media summary lists one or more Virtual Tours, OR you can actually see an embedded 3D / Matterport tour. If you CAN read the media summary and it lists only Photos (and/or Videos) with NO Virtual Tour entry, the listing genuinely has NO virtual tour — mark it RED (this is the one case where absence IS confirmed, and it overrides the conservative "absence is not proof" rule above). Do NOT mark it GREEN from a "Virtual Tour" tab, menu item, section heading, or navigation link — Apartments.com renders those labels generically even when there is no tour behind them. If you cannot read the media summary at all, mark it AMBER "could not fully verify on the listing; check live".
+- APARTMENTS.COM — REPORT FROM THE PROVIDED FACTS, DO NOT RE-FETCH. Base every Apartments.com cell on the "APARTMENTS.COM LISTING" facts block above (already read for you). When it shows an active listing with units, mark "currently advertising / active" GREEN and report the real pricing/hours/etc. from those facts. A field shown there is reliable — report it, do not mark it "could not verify". Mark an Apartments.com cell AMBER "could not read the listing this run; verify live" ONLY when the facts block itself says the read came back empty, or a specific field there reads "unknown / not shown". NEVER red for a field the facts simply don't mention.
+- APARTMENTS.COM VIRTUAL TOUR — USE THE PROVIDED MEDIA SUMMARY. The facts block lists the listing's media counts. If it shows one or more Virtual Tours, mark "Virtual tour" GREEN. If it shows photos/videos but ZERO virtual tours, mark it RED (the listing genuinely has no virtual tour). Only if the media counts are unknown, mark it AMBER. (A code check also enforces this from the media counts, so match it.)
 - APARTMENTS.COM IS AN ILS — its lead flow IS the "Request a Tour" / contact/message form, which routes inquiries to the property. That is the intended behavior, NOT a deficiency. For "Tour scheduling", mark GREEN when a Request-a-Tour or contact option exists. For "Online application", Apartments.com is NOT expected to host the property's own application portal (prospects apply on the property website) — mark it GREEN when the listing lets a prospect inquire/request, or "na"; NEVER red for "no apply link" or "message form only". Do not treat Apartments.com's contact/message form as a missing feature.
 - APARTMENTS.COM — PREFERRED EMPLOYERS IS NOT AN ILS FIELD. A preferred-employer program is a property-website feature, not a standard Apartments.com listing field. Always set the Apartments.com "Preferred employers" cell to "na" with note "Not an ILS feature"; NEVER mark it red or amber. The website column still catches a genuinely missing program, so this is not a lost finding.
 - GOOGLE SCOPE: a Google Business Profile only carries active presence, hours, photos, rating/reviews, and the website link. For rows it does NOT carry (pricing, concessions, preferred employers, online application, tour scheduling, virtual tour) set the Google status to "na" with note "Not a Google feature". Never put amber/red in those Google cells. Because these are not Google listing features, NEVER write a recommendation to add them to the Google Business Profile — in particular, do not recommend posting the concession/special to Google. That would contradict the consistency table.
@@ -4254,6 +4274,7 @@ RULES (apply strictly):
 - WEBSITE PRICING / AVAILABILITY lives on the FLOOR PLANS or AVAILABILITY page, NOT the homepage. Grade this GREEN when the floor plans / availability page shows per-plan pricing or availability ("Starting at $X", "$1,806", "4 Available", or a live availability/pricing widget) — even if some plans read "Call for details" / "Inquire", and even if the homepage shows no prices. It is CORRECT and expected that the homepage has no rent prices. NEVER mark website pricing RED/ISSUE or AMBER merely because the homepage lacks prices. Only mark it RED when there is NO floor plans or availability page at all (nowhere on the site to see pricing/units).
 - DO NOT flag differing PHONE NUMBERS across platforms as a discrepancy. Different tracking numbers are intentional for lead-source attribution.
 - PRICING & CONCESSIONS ARE NOT CONFLICTS. Rents and specials change constantly and Apartments.com / aggregator data lags the website (the website is authoritative), so small differences are normal and expected. NEVER mark pricing or concessions RED for a website-vs-Apartments.com mismatch. If both platforms show pricing, mark GREEN even when the ranges differ modestly (e.g. $2,149-$2,440 vs $2,190-$2,430 is fine — not an issue). If both advertise a concession, mark GREEN even when the wording or deadline differs (e.g. "first month free, apply by July 3" vs "Summer Savings, first month free"). Use AMBER only when they MATERIALLY contradict (one advertises a concession the other flatly denies, or a price is off by a large, prospect-misleading margin) with a plain "align these" note. This softer treatment is for pricing/concessions only; it does NOT loosen the office-hours rule.
+- CONCESSIONS ABSENCE IS NOT A DEFICIENCY. A concession/special is an OPTIONAL promotion, not a required feature. If no concession is currently offered, mark the concessions cell "na" with note "No concession currently offered" — NEVER red. Only when a concession IS advertised on one platform but missing from another should the missing side be AMBER ("add the special to this listing"), never red. A concession present is green.
 - Plain English, concise, no em dashes as punctuation, no "Note:" sections.
 
 Status values are exactly "green" (found & functional / consistent), "amber" (present but could not verify / could not render, OR a non-critical inconsistency to align — e.g. pricing/concession wording that differs), "red" (confirmed absent OR a confirmed OPERATIONAL conflict that misleads a prospect, e.g. office hours that genuinely do not match — NOT pricing or concession differences, which follow the tolerance rule above), or "na" (not applicable to that platform).
@@ -4372,6 +4393,39 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           };
         }
       }
+      // Concessions are an OPTIONAL promo, not a required feature — absence is
+      // never a deficiency. If no concession is offered anywhere, a red just
+      // means "none currently offered" -> neutral N/A. If a concession IS shown
+      // on one platform but missing on another, that's a mild "align" AMBER, not
+      // a red ISSUE. Deterministic backup to the prompt rule.
+      {
+        const concRow = consistency.find((r) => /concession/i.test(r?.label || ""));
+        if (concRow) {
+          const hasConcessionSomewhere = (["apartments", "website"] as const).some(
+            (col) => concRow[col]?.status === "green"
+          );
+          for (const col of ["apartments", "website"] as const) {
+            if (concRow[col]?.status === "red") {
+              concRow[col] = hasConcessionSomewhere
+                ? { status: "amber", note: "No concession shown here; align with the platform that advertises one." }
+                : { status: "na", note: "No concession currently offered (not a deficiency)." };
+            }
+          }
+        }
+      }
+      // Virtual tour on Apartments.com is deterministic from the listing's media
+      // summary (read reliably by readApartmentsListing) — media counts don't
+      // lie. >=1 virtual tour -> green; photos-but-zero-tours -> a real red that
+      // stands (the read succeeded). Unknown counts -> leave the model + clamp.
+      if (aptRead && aptRead.ok && aptRead.mediaCounts.virtualTours !== null) {
+        const vtRow = consistency.find((r) => /virtual tour/i.test(r?.label || ""));
+        if (vtRow) {
+          const vts = aptRead.mediaCounts.virtualTours;
+          vtRow.apartments = vts > 0
+            ? { status: "green", note: `Media summary lists ${vts} virtual tour${vts > 1 ? "s" : ""}.` }
+            : { status: "red", note: "Media summary shows no virtual tour on the listing." };
+        }
+      }
       if (siteImages.length >= 2) {
         try {
           setProgress("Assessing photo quality…");
@@ -4404,7 +4458,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       if (googlePhotos.length >= 2) {
         try {
           setProgress("Assessing Google profile photos…");
-          const gPrompt = `These ${Math.min(googlePhotos.length, 8)} images are photos on the Google Business Profile of ${current.name} (a mix of owner and visitor photos a prospect sees when browsing the listing). Grade the overall visual quality a prospect would perceive: professional vs amateur, lighting/sharpness, and coverage (interiors, amenities, exterior). Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you see"}. green = mostly professional, good coverage; amber = mixed quality or thin coverage; red = mostly low-quality/amateur or almost none.`;
+          const gPrompt = `These ${Math.min(googlePhotos.length, 8)} images are photos from the Google Business Profile of ${current.name} — a MIX of owner-posted and visitor-uploaded photos (the owner does NOT control what visitors upload). Judge the gallery on its DOMINANT impression, the way a prospect scrolling the profile would: are the majority professional with reasonable coverage (interiors, amenities, exterior)? A few weak, odd, or low-quality visitor shots mixed in are normal and fine — do NOT let one or two of them drive the grade, and do NOT exaggerate their count or use alarmist language. Be factual and measured. Return ONLY "green" or "amber" (a Google profile with visitor photos is never a red issue): green = the majority are professional with reasonable coverage; amber = coverage is genuinely thin or most photos are low-quality. Return ONLY JSON, no prose: {"status":"green|amber","note":"one concise, measured clause under 18 words citing what you actually see"}.`;
           const gResp = await callAI({ prompt: gPrompt, images: googlePhotos, maxTokens: 400 });
           const gText = (gResp.content || [])
             .filter((b: any) => b.type === "text")
@@ -4414,8 +4468,11 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           if (gm) {
             const gj = JSON.parse(gm[0]) as { status?: string; note?: string };
             if (gj.status === "green" || gj.status === "amber" || gj.status === "red") {
+              // Cap at amber — GBP galleries are partly visitor-uploaded UGC, so
+              // they never warrant a red ISSUE in a client-facing report.
+              const status: MarketingStatus = gj.status === "red" ? "amber" : gj.status;
               const row = consistency.find((c) => /photo/i.test(c.label));
-              if (row) row.google = { status: gj.status, note: (gj.note || "").trim() || "Google photos assessed" };
+              if (row) row.google = { status, note: (gj.note || "").trim() || "Google photos assessed" };
             }
           }
         } catch {
@@ -4431,16 +4488,17 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // listing HTML is bot-protected. We only accept real apartments.com image
       // URLs; a bad/guessed URL just makes the vision call fail → the amber
       // "quality not assessed" fallback stands (no regression).
-      const aptPhotoUrls: string[] = Array.isArray(
+      // Prefer the dedicated reader's gallery URLs (reliable); fall back to any
+      // the big audit call happened to surface.
+      const parsedAptPhotos = Array.isArray(
         (parsed as { apartmentsPhotos?: unknown }).apartmentsPhotos
       )
-        ? ((parsed as { apartmentsPhotos: unknown[] }).apartmentsPhotos)
-            .filter(
-              (u): u is string =>
-                typeof u === "string" && /^https?:\/\/[^/]*apartments\.com\//i.test(u)
-            )
-            .slice(0, 6)
+        ? ((parsed as { apartmentsPhotos: unknown[] }).apartmentsPhotos).filter(
+            (u): u is string =>
+              typeof u === "string" && /^https?:\/\/[^/]*apartments\.com\//i.test(u)
+          )
         : [];
+      const aptPhotoUrls: string[] = (aptRead?.photoUrls.length ? aptRead.photoUrls : parsedAptPhotos).slice(0, 6);
       if (aptPhotoUrls.length >= 2) {
         try {
           setProgress("Assessing Apartments.com photos…");
@@ -6006,6 +6064,115 @@ function splitRecommendations(text: string): string[] {
     .map((p) => p.trim())
     .filter(Boolean);
   return parts.length > 0 ? parts : [text.trim()];
+}
+
+/** Structured facts read from an Apartments.com listing by the dedicated reader. */
+interface ApartmentsListingRead {
+  ok: boolean; // false = the fetch came back empty/blocked this run
+  advertising: boolean | null;
+  priceText: string;
+  beds: string;
+  sqft: string;
+  officeHours: Record<string, string>; // day -> "9 AM-5 PM" | "Closed"
+  mediaSummary: string; // verbatim gallery badge text, e.g. "16 Photos"
+  mediaCounts: { photos: number | null; virtualTours: number | null; videos: number | null }; // parsed from mediaSummary in code
+  photoUrls: string[];
+  concessions: string; // "" when none advertised
+  tourScheduling: boolean | null;
+  onlineApplication: boolean | null;
+  phones: string[];
+  amenities: string[];
+}
+
+/**
+ * Dedicated, retryable reader for an Apartments.com listing. The listing is
+ * bot-protected (Playwright 403s it), so we use Claude's web_fetch — but as its
+ * OWN focused call, not buried in the giant audit call. That's the whole point:
+ * the model isn't juggling nine other jobs, so it reliably returns the media
+ * summary, hours, and gallery image URLs; a thin read can simply be retried;
+ * and the big audit call then consumes these facts as authoritative instead of
+ * re-fetching. `ok:false` means the listing genuinely came back empty.
+ */
+async function readApartmentsListing(url: string): Promise<ApartmentsListingRead> {
+  const empty: ApartmentsListingRead = {
+    ok: false, advertising: null, priceText: "", beds: "", sqft: "",
+    officeHours: {}, mediaSummary: "", mediaCounts: { photos: null, virtualTours: null, videos: null },
+    photoUrls: [], concessions: "", tourScheduling: null, onlineApplication: null,
+    phones: [], amenities: [],
+  };
+  if (!url) return empty;
+  const prompt = `Use your web_fetch tool to load this Apartments.com listing and read it carefully: ${url}
+
+Report EXACTLY what the listing shows, as JSON only (no prose). Never guess or invent — use null / [] / "" for anything you cannot actually see on the page.
+{
+  "advertising": true or false,
+  "priceText": "rent range as shown, e.g. \\"$1,660+\\"",
+  "beds": "bedroom types offered, e.g. \\"2-3 BR\\"",
+  "sqft": "square-footage range if shown",
+  "officeHours": {"monday":"9 AM-5 PM or Closed","tuesday":"...", "wednesday":"...","thursday":"...","friday":"...","saturday":"...","sunday":"..."},
+  "mediaSummaryVerbatim": "the small media-count badge on the photo gallery, transcribed EXACTLY as printed, e.g. \\"16 Photos\\" or \\"29 Photos, 2 Virtual Tours, 1 Video\\"",
+  "photoUrls": ["direct gallery image src URLs, e.g. https://images1.apartments.com/... ; up to 6; only URLs you actually see"],
+  "concessions": "the exact special/concession text if one is advertised, else empty string",
+  "tourScheduling": true or false,
+  "onlineApplication": true or false,
+  "phones": ["any phone/tracking numbers shown"],
+  "amenities": ["listed amenities, up to 12"]
+}
+For "mediaSummaryVerbatim", copy the gallery badge text character-for-character. Do NOT add media types (Virtual Tours, Videos) that are not literally printed there — if it only says "16 Photos", write exactly "16 Photos". Do NOT invent counts.`;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resp = await callAI({ prompt, webFetch: true, maxTokens: 1200 });
+      const text = (resp.content || [])
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text)
+        .join("\n");
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) continue;
+      const j = JSON.parse(m[0]) as Record<string, unknown>;
+      const strArr = (v: unknown, n: number) =>
+        Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === "string").slice(0, n) : [];
+      // Parse media counts from the VERBATIM badge text, not a model-emitted
+      // number: the model fabricates nonzero tour/video counts but transcribes
+      // the badge accurately. No "Virtual Tour" in the text => 0 tours, for real.
+      const mediaSummary = typeof j.mediaSummaryVerbatim === "string" ? j.mediaSummaryVerbatim.trim() : "";
+      const grabCount = (re: RegExp): number | null => {
+        if (!/\d/.test(mediaSummary)) return null; // badge unreadable -> unknown
+        const mm = mediaSummary.match(re);
+        return mm ? parseInt(mm[1], 10) : 0;
+      };
+      const read: ApartmentsListingRead = {
+        ok: true,
+        advertising: typeof j.advertising === "boolean" ? j.advertising : null,
+        priceText: typeof j.priceText === "string" ? j.priceText : "",
+        beds: typeof j.beds === "string" ? j.beds : "",
+        sqft: typeof j.sqft === "string" ? j.sqft : "",
+        officeHours: j.officeHours && typeof j.officeHours === "object" ? (j.officeHours as Record<string, string>) : {},
+        mediaSummary,
+        mediaCounts: {
+          photos: grabCount(/(\d+)\s*photos?/i),
+          virtualTours: grabCount(/(\d+)\s*virtual\s*tours?/i),
+          videos: grabCount(/(\d+)\s*videos?/i),
+        },
+        photoUrls: strArr(j.photoUrls, 6).filter((u) => /^https?:\/\/[^/]*apartments\.com\//i.test(u)),
+        concessions: typeof j.concessions === "string" ? j.concessions : "",
+        tourScheduling: typeof j.tourScheduling === "boolean" ? j.tourScheduling : null,
+        onlineApplication: typeof j.onlineApplication === "boolean" ? j.onlineApplication : null,
+        phones: strArr(j.phones, 6),
+        amenities: strArr(j.amenities, 12),
+      };
+      // A "thin" read (nothing substantive) is a partial/blocked fetch — retry once.
+      const thin =
+        read.advertising === null && !read.priceText &&
+        Object.keys(read.officeHours).length === 0 &&
+        read.mediaCounts.photos === null && read.photoUrls.length === 0;
+      if (thin && attempt < 2) continue;
+      return thin ? empty : read;
+    } catch {
+      if (attempt < 2) continue;
+    }
+  }
+  return empty;
 }
 
 /**
