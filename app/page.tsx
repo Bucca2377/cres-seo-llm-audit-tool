@@ -4235,6 +4235,8 @@ function MarketingAuditTab({
 
       const apartmentsBlock = !current.apartmentsUrl
         ? "APARTMENTS.COM LISTING: no listing URL was provided."
+        : aptRead && aptRead.ok && aptRead.advertising === false
+        ? `APARTMENTS.COM LISTING (${current.apartmentsUrl}): the listing shows "This property is NOT currently advertising on Apartments.com" — an inactive shell with no live data. Mark EVERY Apartments.com cell "na" with note "Not advertising on Apartments.com". Do NOT grade any feature, and do NOT borrow data from nearby / similar listings.`
         : aptRead && aptRead.ok
         ? `APARTMENTS.COM LISTING (already read from ${current.apartmentsUrl} — treat these facts as AUTHORITATIVE, do NOT re-fetch the URL):
 - Advertising / active: ${aptRead.advertising === null ? "unknown" : aptRead.advertising ? "yes, active listing with units" : "listing present but not advertising units"}
@@ -4521,6 +4523,18 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
+      // If the Apartments.com listing is a shell (the page says the property is
+      // NOT currently advertising), there is nothing to grade and the model must
+      // not borrow data from nearby listings — collapse EVERY Apartments.com cell
+      // to a neutral N/A. Runs last so it overrides all other Apartments guards.
+      if (aptRead && aptRead.ok && aptRead.advertising === false) {
+        for (const row of consistency) {
+          if (row?.apartments) {
+            row.apartments = { status: "na", note: "Not advertising on Apartments.com." };
+          }
+        }
+      }
+
       // --- Phone / tracking number inventory ---
       // Website + Google are pulled deterministically (crawl text regex + the
       // SerpAPI GBP phone); Apartments.com comes from what the model saw on its
@@ -4540,7 +4554,9 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       (Array.isArray(aiPhones.website) ? aiPhones.website : []).forEach((p) => addPhone(p, "Website"));
       if (googlePhone) addPhone(googlePhone, "Google");
       (Array.isArray(aiPhones.google) ? aiPhones.google : []).forEach((p) => addPhone(p, "Google"));
-      (Array.isArray(aiPhones.apartments) ? aiPhones.apartments : []).forEach((p) => addPhone(p, "Apartments.com"));
+      // Apartments.com phones come from the dedicated reader (reliable; empty
+      // when the listing isn't advertising, so no borrowed nearby-listing number).
+      (aptRead?.phones ?? []).forEach((p) => addPhone(p, "Apartments.com"));
       let phones: PhoneInventory | undefined = phoneEntries.length
         ? { numbers: phoneEntries, collectedAt: new Date().toISOString(), officeHours }
         : undefined;
@@ -6106,7 +6122,7 @@ async function readApartmentsListing(url: string): Promise<ApartmentsListingRead
 Report EXACTLY what the listing shows, as JSON only (no prose). Never guess or invent — use null / [] / "" for anything you cannot actually see on the page.
 {
   "advertising": true or false,
-  "priceText": "rent range as shown, e.g. \\"$1,660+\\"",
+  "priceText": "rent range as shown, e.g. \\"$1,660+\\" (empty if not advertising)",
   "beds": "bedroom types offered, e.g. \\"2-3 BR\\"",
   "sqft": "square-footage range if shown",
   "officeHours": {"monday":"9 AM-5 PM or Closed","tuesday":"...", "wednesday":"...","thursday":"...","friday":"...","saturday":"...","sunday":"..."},
@@ -6118,7 +6134,9 @@ Report EXACTLY what the listing shows, as JSON only (no prose). Never guess or i
   "phones": ["any phone/tracking numbers shown"],
   "amenities": ["listed amenities, up to 12"]
 }
-For "mediaSummaryVerbatim", copy the gallery badge text character-for-character. Do NOT add media types (Virtual Tours, Videos) that are not literally printed there — if it only says "16 Photos", write exactly "16 Photos". Do NOT invent counts.`;
+For "mediaSummaryVerbatim", copy the gallery badge text character-for-character. Do NOT add media types (Virtual Tours, Videos) that are not literally printed there — if it only says "16 Photos", write exactly "16 Photos". Do NOT invent counts.
+
+IF the page shows "This property is not currently advertising on Apartments.com" (a shell / inactive listing): set "advertising" to false and leave priceText, beds, sqft, officeHours, mediaSummaryVerbatim, photoUrls, concessions, and amenities EMPTY. Do NOT fill ANY field from the "Explore Similar Rentals Nearby" section or from web search — report only what THIS listing itself shows.`;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
