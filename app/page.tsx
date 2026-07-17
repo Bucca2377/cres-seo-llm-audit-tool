@@ -4675,6 +4675,33 @@ RECOMMENDATION RULES (match the rest of the app exactly):
     alignSelf: "center",
   };
 
+  // Clear this property's saved audit history so the next run is a clean first
+  // run (URLs + settings kept). For rolling a property to a fresh baseline —
+  // e.g. after an audit-methodology change makes old runs non-comparable.
+  const resetAuditHistory = () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Clear all saved audit history for "${property.name}"?\n\nThis wipes the Marketing, SEO, Review, and AI-rank results and their trend snapshots. The property's URLs and settings are kept, so the next run starts as a clean first run. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    const cleaned: Property = { ...property };
+    for (const f of [
+      "marketingAudit", "marketingAuditPrev", "seoAudit", "seoRankSnapshots",
+      "reviewAudit", "reviewSnapshots", "llmRank", "checklistStatuses",
+      "checklistEvidence", "llmAuditRecommendations", "llmAuditTimestamp",
+    ] as const) {
+      delete (cleaned as unknown as Record<string, unknown>)[f];
+    }
+    onUpdateProperty(cleaned);
+    setResults(null);
+    setStage("idle");
+    setError(null);
+    setProgress("");
+  };
+
   return (
     <div style={{ background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 14 }}>
@@ -4689,6 +4716,27 @@ RECOMMENDATION RULES (match the rest of the app exactly):
             <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: 4 }}>
               Last audited {new Date(results.timestamp).toLocaleString()}
             </div>
+          )}
+          {(results || property.seoAudit || property.reviewAudit || property.llmRank || property.marketingAuditPrev) && (
+            <button
+              onClick={resetAuditHistory}
+              disabled={running}
+              style={{
+                marginTop: 6,
+                padding: 0,
+                border: "none",
+                background: "none",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11,
+                color: "#b14a2a",
+                cursor: running ? "default" : "pointer",
+                textDecoration: "underline",
+                opacity: running ? 0.5 : 1,
+              }}
+              title="Wipe this property's saved audit history (URLs + settings kept) so the next run is a clean first run."
+            >
+              Reset audit history
+            </button>
           )}
         </div>
         <button
