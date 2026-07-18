@@ -2868,6 +2868,10 @@ Recommendation rules (STRICT):
       ? Math.round(compMapPackPositions.reduce((a, b) => a + b, 0) / compMapPackPositions.length)
       : null;
     const mapPackRankingCount = compMapPackPositions.length;
+    // The property's single BEST (closest-to-#1) Map Pack position across
+    // competitive queries — surfaced so the scorecard shows the peak, not just
+    // the average dragged up by an expanded-pack outlier.
+    const bestMapPackRank = compMapPackPositions.length ? Math.min(...compMapPackPositions) : null;
 
     // Strongest / weakest are chosen among COMPETITIVE queries so the cards
     // surface a real win and a real gap, not "you rank #1 for your own name".
@@ -2922,6 +2926,7 @@ Recommendation rules (STRICT):
       avgRank,
       avgMapPackRank,
       mapPackRankingCount,
+      bestMapPackRank,
       rankingCount: compValid.length,
       // Only call a competitive query "strongest" if it genuinely ranks
       // somewhere — otherwise there's no real win to highlight.
@@ -3128,7 +3133,7 @@ Recommendation rules (STRICT):
               value={`${summary.mapPackCount}/${summary.competitiveTotal}`}
               sub={
                 summary.mapPackPartial > 0
-                  ? `+${summary.mapPackPartial} more in pack (best #${summary.bestPartialMP})`
+                  ? `+${summary.mapPackPartial} more in expanded pack (${summary.mapPackPartial === 1 ? `#${summary.bestPartialMP}` : `best #${summary.bestPartialMP}`})`
                   : "of competitive searches"
               }
               accent={
@@ -3144,7 +3149,7 @@ Recommendation rules (STRICT):
               value={summary.avgMapPackRank ? `#${summary.avgMapPackRank}` : "—"}
               sub={
                 summary.avgMapPackRank
-                  ? `Avg of ${summary.mapPackRankingCount} of ${summary.competitiveTotal} in the Map Pack`
+                  ? `Best #${summary.bestMapPackRank} · avg of ${summary.mapPackRankingCount} in the Map Pack`
                   : "Not in the Map Pack for any competitive search"
               }
               accent={
