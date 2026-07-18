@@ -149,25 +149,21 @@ export async function POST(req: NextRequest) {
       try {
         const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: 30000 });
         if (pollLate) {
-          // Poll for late-injected content (specials/concession popups, chat
-          // widgets) instead of a fixed 3.5s guess: capture as soon as
-          // concession-like text appears, or when the DOM settles, up to ~10s.
-          // Removes the timing flake that let a real popup special be missed on
-          // slower networks.
+          // Wait for LATE-injected content — specials/concession popups that
+          // Entrata/NurtureBoss inject SECONDS after the page looks done. Poll up
+          // to ~10s and break the moment a special appears. Do NOT break on "DOM
+          // settled": the popup lands AFTER the page settles, so a settle-break
+          // stops too early and misses it (the production bug that hid the
+          // concession — locally the popup loaded fast enough to beat the settle,
+          // on Railway's slower network it didn't). No concession => waits the
+          // full window then captures whatever's there. HINT excludes the bare
+          // word "special" so "special features" in main content can't trip it.
           const HINT =
-            /special|waived|half.?off|free rent|month.?free|weeks?\s+free|\d+%\s*off|\$\d[\d,]*\s*off|limited.time|move.?in special|reduced deposit/i;
-          let lastLen = -1;
-          let stable = 0;
+            /waived|half.?off|free rent|month.?free|weeks?\s+free|\d+%\s*off|\$\d[\d,]*\s*off|limited.?time\s+special|move.?in\s+special|reduced deposit|rent special|deposit special/i;
           for (let poll = 0; poll < 12; poll++) {
             await page.waitForTimeout(800);
             const cur: string = await page.evaluate(() => document.body?.innerText || "");
-            if (HINT.test(cur)) break; // caught a special
-            if (cur.length === lastLen) {
-              if (++stable >= 2) break; // DOM settled
-            } else {
-              stable = 0;
-              lastLen = cur.length;
-            }
+            if (HINT.test(cur)) break; // special appeared — capture now
           }
         } else {
           await page.waitForTimeout(3500); // let client-side widgets + challenge resolve
