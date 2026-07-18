@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
     // Each page gets a FRESH context. The target sites flag rapid sequential
     // navigations within one session (2nd+ nav returns 403), but a fresh
     // context per page behaves like a first-time visitor and gets through.
-    const render = async (target: string, wantLinks: boolean) => {
+    const render = async (target: string, wantLinks: boolean, pollLate = false) => {
       const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1366, height: 900 } });
       await ctx.route("**/*", (route) => {
         const t = route.request().resourceType();
@@ -148,7 +148,30 @@ export async function POST(req: NextRequest) {
       const page = await ctx.newPage();
       try {
         const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await page.waitForTimeout(3500); // let client-side widgets + challenge resolve
+        if (pollLate) {
+          // Poll for late-injected content (specials/concession popups, chat
+          // widgets) instead of a fixed 3.5s guess: capture as soon as
+          // concession-like text appears, or when the DOM settles, up to ~10s.
+          // Removes the timing flake that let a real popup special be missed on
+          // slower networks.
+          const HINT =
+            /special|waived|half.?off|free rent|month.?free|weeks?\s+free|\d+%\s*off|\$\d[\d,]*\s*off|limited.time|move.?in special|reduced deposit/i;
+          let lastLen = -1;
+          let stable = 0;
+          for (let poll = 0; poll < 12; poll++) {
+            await page.waitForTimeout(800);
+            const cur: string = await page.evaluate(() => document.body?.innerText || "");
+            if (HINT.test(cur)) break; // caught a special
+            if (cur.length === lastLen) {
+              if (++stable >= 2) break; // DOM settled
+            } else {
+              stable = 0;
+              lastLen = cur.length;
+            }
+          }
+        } else {
+          await page.waitForTimeout(3500); // let client-side widgets + challenge resolve
+        }
         const text: string = await page.evaluate(() => document.body?.innerText || "");
         // Also pull text from iframes. Some marketing tools render the
         // specials/concession popup (and chat/lead widgets) inside a
@@ -266,7 +289,7 @@ export async function POST(req: NextRequest) {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) await sleep(1500);
       try {
-        home = await render(start, !!body.follow);
+        home = await render(start, !!body.follow, true);
         if (home.text && home.text.trim().length > 50) break; // got real content
       } catch {
         /* retry once */

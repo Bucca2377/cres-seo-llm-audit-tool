@@ -4449,6 +4449,26 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           };
         }
       }
+      // DETERMINISTIC website concession detection from the crawled site text —
+      // not the model's judgment. Specials usually live in a JS popup the crawler
+      // now reliably captures (poll-until-present), but the model sometimes still
+      // fails to classify it. Flag it in code with HIGH-PRECISION phrases only
+      // (waived fees, half-off/free/reduced deposit, N months/weeks free, move-in
+      // or limited-time special, $/% off) — verified NOT to fire on "security
+      // deposit", "application fee: $X", or "no specials". When found, force the
+      // website Concessions cell GREEN with the special's own wording.
+      {
+        const CONCESSION_RE = /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|\$0\s+(security\s+)?deposit|deposit\s+special|rent\s+special|months?\s+free\s+rent/i;
+        const flat = siteText.replace(/\s+/g, " ");
+        const sentence = flat.match(new RegExp("[^.!?\\n]*(?:" + CONCESSION_RE.source + ")[^.!?\\n]*", "i"));
+        if (sentence) {
+          const note = sentence[0].replace(/^[^A-Za-z0-9$]+/, "").trim().slice(0, 90);
+          const concRow = consistency.find((r) => /concession/i.test(r?.label || ""));
+          if (concRow) {
+            concRow.website = { status: "green", note: note || "Move-in special advertised on the website." };
+          }
+        }
+      }
       // Concessions are an OPTIONAL promo, not a required feature — absence is
       // never a deficiency. If no concession is offered anywhere, a red just
       // means "none currently offered" -> neutral N/A. If a concession IS shown
