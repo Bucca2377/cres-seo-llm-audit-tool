@@ -7611,6 +7611,28 @@ export default function MarketingHub() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#eff2f5", fontFamily: "'Josefin Sans',sans-serif" }}>
+      {/* Build stamp — glance to confirm which commit is actually deployed and
+          end the "is this the latest build?" ambiguity. Hidden in print. */}
+      <div
+        data-print-hide="true"
+        title={`Deployed build: ${process.env.NEXT_PUBLIC_COMMIT_SHA || "dev"}`}
+        style={{
+          position: "fixed",
+          bottom: 6,
+          right: 8,
+          zIndex: 100,
+          fontFamily: "'Josefin Sans',sans-serif",
+          fontSize: 10,
+          color: "#9aa3ab",
+          background: "rgba(255,255,255,0.7)",
+          padding: "2px 6px",
+          borderRadius: 4,
+          pointerEvents: "none",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        build {(process.env.NEXT_PUBLIC_COMMIT_SHA || "dev").slice(0, 7)}
+      </div>
       <div className="top-bar" style={{ background: B.oxford, padding: "0 32px", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 20, letterSpacing: "0.14em", color: "white" }}>CRES</div>
