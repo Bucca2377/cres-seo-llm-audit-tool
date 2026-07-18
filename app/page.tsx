@@ -4082,6 +4082,10 @@ function MarketingAuditTab({
   const [progress, setProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<MarketingAuditResult | null>(property.marketingAudit ?? null);
+  // True once an audit has been RUN this session (not merely loaded from
+  // storage). Drives the "you're viewing a saved audit — re-run to refresh" hint
+  // so a stale saved result is never mistaken for the current code's output.
+  const [ranThisSession, setRanThisSession] = useState(false);
 
   useEffect(() => {
     setWebsite(property.website ?? "");
@@ -4091,6 +4095,7 @@ function MarketingAuditTab({
     setStage(property.marketingAudit ? "done" : "idle");
     setError(null);
     setProgress("");
+    setRanThisSession(false);
   }, [property.id]);
 
   // Re-sync the URL fields when the stored values change out from under the
@@ -4649,6 +4654,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 
       setStage("done");
       setProgress("");
+      setRanThisSession(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Marketing audit failed.");
       setStage("idle");
@@ -4781,6 +4787,30 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           <input value={gbpUrl} onChange={(e) => setGbpUrl(e.target.value)} style={inputStyle} placeholder="https://www.google.com/maps/place/..." />
         </div>
       </div>
+
+      {results && !ranThisSession && !running && (
+        <div
+          data-print-hide="true"
+          style={{
+            marginBottom: 14,
+            padding: "9px 14px",
+            background: "#fff8e6",
+            border: "1px solid #f2d98a",
+            borderRadius: 8,
+            fontFamily: "'Josefin Sans',sans-serif",
+            fontSize: 12.5,
+            color: "#8a6d1a",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span aria-hidden>↻</span>
+          <span>
+            Showing your last saved audit{results.timestamp ? ` from ${new Date(results.timestamp).toLocaleDateString()}` : ""}. Click <strong>Run Marketing Audit</strong> to refresh it with the latest checks.
+          </span>
+        </div>
+      )}
 
       {running && (
         <div style={{ marginTop: 14, padding: "12px 16px", background: "#f9fafb", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: B.caribbean, display: "flex", alignItems: "center", gap: 10 }}>
