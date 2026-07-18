@@ -7641,6 +7641,20 @@ export default function MarketingHub() {
     importProperty,
   } = useRoster();
   const [tab, setTab] = useState("marketing");
+  // Deployed commit SHA, read at runtime from /api/version so the footer badge
+  // reflects the RUNNING build (Railway exposes the SHA at runtime, not to the
+  // build). Falls back to the build-time value / "dev" locally.
+  const [buildSha, setBuildSha] = useState<string>(process.env.NEXT_PUBLIC_COMMIT_SHA || "");
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/version")
+      .then((r) => r.json())
+      .then((d) => { if (alive && d?.sha) setBuildSha(d.sha); })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Which report to print: the combined Marketing/SEO/LLM doc, or the
   // standalone Review Audit. Set just before window.print() so only the
@@ -7682,7 +7696,7 @@ export default function MarketingHub() {
           end the "is this the latest build?" ambiguity. Hidden in print. */}
       <div
         data-print-hide="true"
-        title={`Deployed build: ${process.env.NEXT_PUBLIC_COMMIT_SHA || "dev"}`}
+        title={`Deployed build: ${buildSha || "dev"}`}
         style={{
           position: "fixed",
           bottom: 6,
@@ -7698,7 +7712,7 @@ export default function MarketingHub() {
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        build {(process.env.NEXT_PUBLIC_COMMIT_SHA || "dev").slice(0, 7)}
+        build {(buildSha || "dev").slice(0, 7)}
       </div>
       <div className="top-bar" style={{ background: B.oxford, padding: "0 32px", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
