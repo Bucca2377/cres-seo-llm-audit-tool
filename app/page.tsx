@@ -6286,9 +6286,34 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         const mm = mediaSummary.match(re);
         return mm ? parseInt(mm[1], 10) : 0;
       };
+      // DETERMINISTIC advertising check from the RAW fetched page, NOT the
+      // model's judgment. The model's boolean flip-flops run-to-run on the exact
+      // same shell page (sometimes "active", borrowing a nearby listing's rent)
+      // because the "not currently advertising" banner is JS-rendered and never
+      // reaches web_fetch. But the STRUCTURE differs reliably: an ACTIVE
+      // apartments.com listing renders the property's own "Pricing & Floor Plans"
+      // / "Monthly Rent" section; a NOT-advertising shell has neither and instead
+      // pushes "Explore Similar Rentals Nearby". Verified active-vs-shell. Read
+      // the raw web_fetch tool-result content and decide in code, every time.
+      const rawFetched = (resp.content || [])
+        .filter((b: any) => b?.type === "web_fetch_tool_result")
+        .map((b: any) => {
+          try {
+            return JSON.stringify(b);
+          } catch {
+            return "";
+          }
+        })
+        .join("\n");
+      const advertising: boolean | null =
+        rawFetched.length > 500
+          ? /pricing\s*&?\s*floor\s*plans|monthly\s+rent/i.test(rawFetched)
+          : typeof j.advertising === "boolean"
+          ? j.advertising
+          : null;
       const read: ApartmentsListingRead = {
         ok: true,
-        advertising: typeof j.advertising === "boolean" ? j.advertising : null,
+        advertising,
         priceText: typeof j.priceText === "string" ? j.priceText : "",
         beds: typeof j.beds === "string" ? j.beds : "",
         sqft: typeof j.sqft === "string" ? j.sqft : "",
