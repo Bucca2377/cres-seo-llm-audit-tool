@@ -2857,6 +2857,17 @@ Recommendation rules (STRICT):
     const avgRank = compValid.length
       ? Math.round(compValid.reduce((a, b) => a + b, 0) / compValid.length)
       : null;
+    // Average MAP PACK position across competitive queries where the property
+    // appears in the pack (top-3 3-pack OR the expanded "More places" list) —
+    // the parallel to avgRank (organic). Excludes queries absent from the pack
+    // entirely, exactly as avgRank excludes non-ranking organic.
+    const compMapPackPositions = compRanks
+      .map((r) => r.map_pack_rank ?? r.expanded_map_pack_rank ?? null)
+      .filter((x): x is number => typeof x === "number");
+    const avgMapPackRank = compMapPackPositions.length
+      ? Math.round(compMapPackPositions.reduce((a, b) => a + b, 0) / compMapPackPositions.length)
+      : null;
+    const mapPackRankingCount = compMapPackPositions.length;
 
     // Strongest / weakest are chosen among COMPETITIVE queries so the cards
     // surface a real win and a real gap, not "you rank #1 for your own name".
@@ -2909,6 +2920,8 @@ Recommendation rules (STRICT):
       bestPartialMP,
       page1Count,
       avgRank,
+      avgMapPackRank,
+      mapPackRankingCount,
       rankingCount: compValid.length,
       // Only call a competitive query "strongest" if it genuinely ranks
       // somewhere — otherwise there's no real win to highlight.
@@ -3109,7 +3122,7 @@ Recommendation rules (STRICT):
           </div>
 
           {/* Scorecard */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 18 }}>
             <KPI
               label="Map Pack hits (top 3)"
               value={`${summary.mapPackCount}/${summary.competitiveTotal}`}
@@ -3127,13 +3140,31 @@ Recommendation rules (STRICT):
               }
             />
             <KPI
+              label="Avg Map Pack rank"
+              value={summary.avgMapPackRank ? `#${summary.avgMapPackRank}` : "—"}
+              sub={
+                summary.avgMapPackRank
+                  ? `Avg of ${summary.mapPackRankingCount} of ${summary.competitiveTotal} in the Map Pack`
+                  : "Not in the Map Pack for any competitive search"
+              }
+              accent={
+                !summary.avgMapPackRank
+                  ? B.tangelo
+                  : summary.avgMapPackRank <= 3
+                  ? "#22c55e"
+                  : summary.avgMapPackRank <= 6
+                  ? "#f59e0b"
+                  : B.tangelo
+              }
+            />
+            <KPI
               label="Page 1 (organic)"
               value={`${summary.page1Count}/${summary.competitiveTotal}`}
               sub="of competitive searches"
               accent={summary.page1Count >= 4 ? "#22c55e" : summary.page1Count >= 2 ? "#f59e0b" : B.tangelo}
             />
             <KPI
-              label="Avg rank (competitive)"
+              label="Avg organic rank"
               value={summary.avgRank ? `#${summary.avgRank}` : "—"}
               sub={
                 summary.avgRank
