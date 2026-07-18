@@ -150,6 +150,26 @@ export async function POST(req: NextRequest) {
         const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: 30000 });
         await page.waitForTimeout(3500); // let client-side widgets + challenge resolve
         const text: string = await page.evaluate(() => document.body?.innerText || "");
+        // Also pull text from iframes. Some marketing tools render the
+        // specials/concession popup (and chat/lead widgets) inside a
+        // cross-origin iframe, which document.body.innerText does NOT include.
+        // Playwright can read each frame's content, so an iframe-based concession
+        // banner isn't missed. Best-effort: skip frames that block eval.
+        let frameText = "";
+        try {
+          for (const f of page.frames()) {
+            if (f === page.mainFrame()) continue;
+            try {
+              const ft: string = await f.evaluate(() => document.body?.innerText || "");
+              if (ft && ft.trim().length > 20) frameText += "\n" + ft.trim();
+            } catch {
+              /* frame blocked eval — skip it */
+            }
+          }
+        } catch {
+          /* ignore frame enumeration errors */
+        }
+        const pageText = frameText ? `${text}\n\n[EMBEDDED WIDGETS]\n${frameText}` : text;
         let links: { href: string; text: string }[] = [];
         if (wantLinks) {
           links = await page.evaluate(() =>
@@ -215,7 +235,7 @@ export async function POST(req: NextRequest) {
             wordCount: words,
           };
         });
-        return { status: resp ? resp.status() : null, text: text.slice(0, PAGE_TEXT_CAP), links, images, seo };
+        return { status: resp ? resp.status() : null, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo };
       } finally {
         await ctx.close();
       }
