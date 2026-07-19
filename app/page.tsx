@@ -4479,6 +4479,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 - COUNT: aim for 5 recommendations; use up to 7 ONLY if there are more distinct critical issues / red gaps than 5 to cover. Never leave a critical issue uncovered just to hit a number.
 - "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
+- NO COMPETITOR CLAIMS: this audit does NOT research competing properties, so you have ZERO competitor data. NEVER name a specific competing property, and NEVER assert anything about one (their rents, specials/concessions, incentives, occupancy, amenities, or programs). Do not write phrases like "competing properties nearby offer specials" or invent competitor names — that would be fabricated. Ground every recommendation ONLY in what THIS audit observed about THIS property.
 - Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.${setAsidePromptNote(current)}`;
 
       // Website content is provided (Playwright); Apartments.com is fetched by
