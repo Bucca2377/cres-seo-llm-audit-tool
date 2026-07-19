@@ -4462,7 +4462,12 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         const flat = siteText.replace(/\s+/g, " ");
         const sentence = flat.match(new RegExp("[^.!?\\n]*(?:" + CONCESSION_RE.source + ")[^.!?\\n]*", "i"));
         if (sentence) {
-          const note = sentence[0].replace(/^[^A-Za-z0-9$]+/, "").trim().slice(0, 90);
+          const note = sentence[0]
+            .replace(/\\+/g, " ") // drop JSON-escape residue (\/, \", \\) that leaks in from raw HTML
+            .replace(/\s+/g, " ")
+            .replace(/^[^A-Za-z0-9$]+/, "")
+            .trim()
+            .slice(0, 90);
           const concRow = consistency.find((r) => /concession/i.test(r?.label || ""));
           if (concRow) {
             concRow.website = { status: "green", note: note || "Move-in special advertised on the website." };
