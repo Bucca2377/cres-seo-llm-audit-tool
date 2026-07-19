@@ -2280,6 +2280,32 @@ function moveToneColor(tone: "up" | "down" | "neutral"): string {
   return tone === "up" ? "#15803d" : tone === "down" ? B.tangelo : "#9aa3ad";
 }
 
+/**
+ * Smooth a query's Map Pack position across recent checks. The local 3-pack is
+ * hyper-local and reorders minute-to-minute (the #3/#4 boundary flips constantly
+ * for the same query), so a single reading — and any "movement" derived from it —
+ * misrepresents a boundary flip as a real change. Returns the MEDIAN of the last
+ * few snapshots plus the observed range, so the report shows the TYPICAL position.
+ * `null`/absent readings are ignored; returns null when there are <2 checks to
+ * smooth (nothing to stabilize yet — caller shows the live reading).
+ */
+function smoothedMapPack(
+  snapshots: SeoRankSnapshot[] | undefined,
+  query: string,
+  window = 5
+): { median: number; min: number; max: number; n: number } | null {
+  const norm = (q: string) => q.trim().toLowerCase();
+  const vals = (snapshots ?? [])
+    .slice(-window)
+    .map((s) => s.ranks.find((r) => norm(r.query) === norm(query))?.mapPackRank ?? null)
+    .filter((x): x is number => typeof x === "number" && x > 0);
+  if (vals.length < 2) return null;
+  const sorted = [...vals].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  return { median, min: sorted[0], max: sorted[sorted.length - 1], n: vals.length };
+}
+
 /** Plain-text citation summary fed into the recommendations prompt. */
 function citationsPromptSummary(c: CitationResult | undefined): string {
   if (!c) return "LOCAL CITATIONS: not checked this run.";
@@ -3422,7 +3448,11 @@ Recommendation rules (STRICT):
                   const r = results.ranks[i];
                   const branded = isBrandedQuery(q, property);
                   const mpNow = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
-                  const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpNow);
+                  // Smooth the Map Pack position across recent checks so a
+                  // minute-to-minute boundary flip doesn't read as a real move.
+                  // Falls back to the live reading until there are >=2 checks.
+                  const mpSmooth = smoothedMapPack(property.seoRankSnapshots, q, 5);
+                  const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpSmooth ? mpSmooth.median : mpNow);
                   const orgMv = movementFor(property.seoRankSnapshots, q, "organicRank", r.organic_rank);
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
@@ -3451,25 +3481,41 @@ Recommendation rules (STRICT):
                         )}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        <span
-                          style={{
-                            color: r.map_pack_rank
-                              ? "#15803d"
+                        {mpSmooth ? (
+                          <>
+                            <span
+                              style={{ color: mpSmooth.median <= 3 ? "#15803d" : "#9a7200", fontWeight: 600 }}
+                              title={r.diagnosis || ""}
+                            >
+                              #{mpSmooth.median}
+                            </span>
+                            {mpSmooth.max > mpSmooth.min && (
+                              <span style={{ display: "block", fontSize: 10, color: "#9aa3ad" }}>
+                                typically #{mpSmooth.min}–#{mpSmooth.max} · {mpSmooth.n} checks
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span
+                            style={{
+                              color: r.map_pack_rank
+                                ? "#15803d"
+                                : r.expanded_map_pack_rank
+                                ? "#9a7200"
+                                : "#aaa",
+                              fontWeight: 600,
+                            }}
+                            title={r.diagnosis || ""}
+                          >
+                            {r.map_pack_rank
+                              ? `#${r.map_pack_rank}`
                               : r.expanded_map_pack_rank
-                              ? "#9a7200"
-                              : "#aaa",
-                            fontWeight: 600,
-                          }}
-                          title={r.diagnosis || ""}
-                        >
-                          {r.map_pack_rank
-                            ? `#${r.map_pack_rank}`
-                            : r.expanded_map_pack_rank
-                            ? `#${r.expanded_map_pack_rank}`
-                            : r.map_pack_appeared
-                            ? "Not in top 20"
-                            : "No pack"}
-                        </span>
+                              ? `#${r.expanded_map_pack_rank}`
+                              : r.map_pack_appeared
+                              ? "Not in top 20"
+                              : "No pack"}
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span
@@ -7388,17 +7434,29 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 {seo.queries.map((q, i) => {
                   const r = seo.ranks[i];
                   const mpNow = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
-                  const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpNow);
+                  // Smooth the Map Pack position across recent checks so a
+                  // minute-to-minute boundary flip doesn't read as a real move.
+                  // Falls back to the live reading until there are >=2 checks.
+                  const mpSmooth = smoothedMapPack(property.seoRankSnapshots, q, 5);
+                  const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpSmooth ? mpSmooth.median : mpNow);
                   const orgMv = movementFor(property.seoRankSnapshots, q, "organicRank", r.organic_rank);
                   const printMoveColor = (t: "up" | "down" | "neutral") => (t === "up" ? "#15803d" : t === "down" ? "#b14a2a" : "#888");
-                  const mapText = r.map_pack_rank
+                  const mapText = mpSmooth
+                    ? mpSmooth.max > mpSmooth.min
+                      ? `#${mpSmooth.median} (${mpSmooth.min}–${mpSmooth.max})`
+                      : `#${mpSmooth.median}`
+                    : r.map_pack_rank
                     ? `#${r.map_pack_rank}`
                     : r.expanded_map_pack_rank
                     ? `#${r.expanded_map_pack_rank}`
                     : r.map_pack_appeared
                     ? "Not in top 20"
                     : "—";
-                  const mapColor = r.map_pack_rank
+                  const mapColor = mpSmooth
+                    ? mpSmooth.median <= 3
+                      ? "#15803d"
+                      : "#9a7200"
+                    : r.map_pack_rank
                     ? "#15803d"
                     : r.expanded_map_pack_rank
                     ? "#9a7200"
