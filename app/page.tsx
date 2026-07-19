@@ -1966,6 +1966,18 @@ function citationNetworkRows(citations: CitationResult | undefined) {
   });
 }
 
+/**
+ * True when the marketing audit determined the property is NOT advertising on
+ * Apartments.com. A brand search still surfaces the (shell/unclaimed) listing —
+ * a real NAP citation — so the directory-presence panel would show it as an
+ * active green citation, contradicting the consistency check. This lets the
+ * panel render it as "listed, not advertising" instead, so the two agree.
+ */
+function aptListedNotAdvertising(consistency: MarketingConsistencyRow[] | undefined): boolean {
+  if (!consistency) return false;
+  return consistency.some((r) => /not advertising on apartments/i.test(r?.apartments?.note || ""));
+}
+
 /** Strip protocol + trailing slash for compact display of a page URL. */
 function shortUrl(u: string): string {
   return (u || "").replace(/^https?:\/\//i, "").replace(/\/+$/, "");
@@ -2238,10 +2250,16 @@ function citationsPromptSummary(c: CitationResult | undefined): string {
 }
 
 /** On-screen local-citations / directory presence panel (SEO tab). */
-function CitationsPanel({ citations }: { citations: CitationResult | undefined }) {
+function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: CitationResult | undefined; aptNotAdvertising?: boolean }) {
   if (!citations || citations.sources.length === 0) return null;
   const rows = citationNetworkRows(citations);
-  const presentCount = rows.filter((r) => r.present).length;
+  // Apartments.com surfaces a listing (a real NAP citation) even when the
+  // property isn't advertising there. When the marketing audit determined "not
+  // advertising", render it as a caveat — not an active green citation — so this
+  // panel agrees with the consistency check.
+  const isAptCaveat = (r: (typeof rows)[number]) =>
+    aptNotAdvertising && r.present && /^Apartments\.com/i.test(r.network);
+  const presentCount = rows.filter((r) => r.present && !isAptCaveat(r)).length;
   return (
     <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -2255,7 +2273,13 @@ function CitationsPanel({ citations }: { citations: CitationResult | undefined }
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {rows.map((r) => {
-          const label = r.present && r.foundSites.length > 1 ? `${r.network} (${r.foundSites.length} sites)` : r.network;
+          const caveat = isAptCaveat(r);
+          const active = r.present && !caveat;
+          const label = caveat
+            ? `${r.network} — listed, not advertising`
+            : active && r.foundSites.length > 1
+            ? `${r.network} (${r.foundSites.length} sites)`
+            : r.network;
           const url = r.foundSites[0]?.url;
           const chip = (
             <span
@@ -2267,12 +2291,12 @@ function CitationsPanel({ citations }: { citations: CitationResult | undefined }
                 borderRadius: 20,
                 fontFamily: "'Josefin Sans',sans-serif",
                 fontSize: 12,
-                border: `1px solid ${r.present ? "#bfe3cd" : "#e6d9c6"}`,
-                background: r.present ? "#f0faf4" : "#fdf6ee",
-                color: r.present ? "#15803d" : "#9a6a2a",
+                border: `1px solid ${active ? "#bfe3cd" : "#e6d9c6"}`,
+                background: active ? "#f0faf4" : "#fdf6ee",
+                color: active ? "#15803d" : "#9a6a2a",
               }}
             >
-              <span style={{ fontWeight: 700 }}>{r.present ? "✓" : "○"}</span> {label}
+              <span style={{ fontWeight: 700 }}>{caveat ? "◐" : active ? "✓" : "○"}</span> {label}
             </span>
           );
           return r.present && url ? (
@@ -2285,7 +2309,7 @@ function CitationsPanel({ citations }: { citations: CitationResult | undefined }
         })}
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
-        Directional read from one brand search — networks, not individual sibling sites (a listing on Apartments.com covers ApartmentFinder/ForRent). A &ldquo;○&rdquo; means that network didn&apos;t surface, so it&apos;s worth verifying/claiming — not a confirmed absence.
+        Directional read from one brand search — networks, not individual sibling sites (a listing on Apartments.com covers ApartmentFinder/ForRent). A &ldquo;○&rdquo; means that network didn&apos;t surface, so it&apos;s worth verifying/claiming — not a confirmed absence.{aptNotAdvertising ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
       </p>
     </div>
   );
@@ -3424,7 +3448,10 @@ Recommendation rules (STRICT):
           )}
 
           {/* Local citations / directory presence (still part of online presence) */}
-          <CitationsPanel citations={results.citations} />
+          <CitationsPanel
+            citations={results.citations}
+            aptNotAdvertising={aptListedNotAdvertising(property.marketingAudit?.consistency)}
+          />
 
           {/* ===== Group 2: Website Optimization (the site itself) ===== */}
           <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.08em", textTransform: "uppercase", color: B.oxford, borderBottom: `2px solid ${B.caribbean}`, paddingBottom: 6, marginTop: 22, marginBottom: 16 }}>
@@ -7320,13 +7347,17 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
 
             {seo.citations && seo.citations.sources.length > 0 && (() => {
               const rows = citationNetworkRows(seo.citations);
+              const aptNotAdv = aptListedNotAdvertising(mkt?.consistency);
+              const isAptCaveat = (r: (typeof rows)[number]) =>
+                aptNotAdv && r.present && /^Apartments\.com/i.test(r.network);
+              const presentCount = rows.filter((r) => r.present && !isAptCaveat(r)).length;
               return (
                 <div className="pb-avoid" style={{ marginTop: 18 }}>
                   <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
                     Local Citations / Directory Presence
                   </div>
                   <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                    Appears on {rows.filter((r) => r.present).length} of {rows.length} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.
+                    Appears on {presentCount} of {rows.length} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.{aptNotAdv ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
                   </p>
                   <table>
                     <thead>
@@ -7336,19 +7367,25 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((r, i) => (
-                        <tr key={i} className="pb-avoid">
-                          <td style={findingsTd}>
-                            {r.network}
-                            {r.present && r.foundSites.length > 0 && (
-                              <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
-                            )}
-                          </td>
-                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: r.present ? "#15803d" : "#9a6a2a" }}>
-                            {r.present ? "Yes" : "Verify"}
-                          </td>
-                        </tr>
-                      ))}
+                      {rows.map((r, i) => {
+                        const caveat = isAptCaveat(r);
+                        const active = r.present && !caveat;
+                        return (
+                          <tr key={i} className="pb-avoid">
+                            <td style={findingsTd}>
+                              {r.network}
+                              {caveat ? (
+                                <span style={{ color: "#9a6a2a" }}> — listed, not advertising</span>
+                              ) : active && r.foundSites.length > 0 ? (
+                                <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
+                              ) : null}
+                            </td>
+                            <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: active ? "#15803d" : "#9a6a2a" }}>
+                              {caveat ? "Not advertising" : active ? "Yes" : "Verify"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
