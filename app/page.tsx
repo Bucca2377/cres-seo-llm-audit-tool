@@ -457,7 +457,7 @@ const SUGGESTED_QUERIES_DEFAULT = [
 ];
 
 /* -- PRIMITIVES ----------------------------------------------------- */
-function KPI({ label, value, sub, accent, live, trend }: { label: string; value: React.ReactNode; sub?: string; accent?: string; live?: boolean; trend?: number }) {
+function KPI({ label, value, sub, accent, live, trend }: { label: string; value: React.ReactNode; sub?: React.ReactNode; accent?: string; live?: boolean; trend?: number }) {
   return (
     <div style={{ background: "white", borderRadius: 10, padding: "18px 22px", borderTop: `4px solid ${accent || B.caribbean}`, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", flex: 1, minWidth: 140, position: "relative", textAlign: "center" }}>
       {live && <span style={{ position: "absolute", top: 10, right: 12, width: 7, height: 7, background: "#22c55e", borderRadius: "50%", display: "inline-block", boxShadow: "0 0 0 2px rgba(34,197,94,0.3)", animation: "lp 2s infinite" }} />}
@@ -469,6 +469,22 @@ function KPI({ label, value, sub, accent, live, trend }: { label: string; value:
       </div>
     </div>
   );
+}
+
+/**
+ * Accent color for an average-rank tile that reflects BOTH rank quality AND
+ * coverage. A great average across only a couple of queries (e.g. #7 on 2 of 6)
+ * shouldn't read green — being absent from most competitive searches is the
+ * bigger story. Returns the MORE severe of the rank-based and coverage-based
+ * color so the tile can't look healthy while the property is mostly invisible.
+ */
+function coverageRankAccent(avg: number | null, ranking: number, total: number, good = 10, ok = 30): string {
+  if (!avg || !total) return B.tangelo;
+  const cov = ranking / total;
+  const rankSev = avg <= good ? 0 : avg <= ok ? 1 : 2;
+  const covSev = cov >= 0.6 ? 0 : cov >= 0.3 ? 1 : 2;
+  const sev = Math.max(rankSev, covSev);
+  return sev === 0 ? "#22c55e" : sev === 1 ? "#f59e0b" : B.tangelo;
 }
 
 function ScoreMeter({ score, max = 100 }: { score: number; max?: number }) {
@@ -3172,19 +3188,23 @@ Recommendation rules (STRICT):
               label="Avg Map Pack rank"
               value={summary.avgMapPackRank ? `#${summary.avgMapPackRank}` : "—"}
               sub={
-                summary.avgMapPackRank
-                  ? `Best #${summary.bestMapPackRank} · avg of ${summary.mapPackRankingCount} in the Map Pack`
-                  : "Not in the Map Pack for any competitive search"
+                summary.avgMapPackRank ? (
+                  <>
+                    Best #{summary.bestMapPackRank} · avg of {summary.mapPackRankingCount} in the pack
+                    {summary.competitiveTotal - summary.mapPackRankingCount > 0 && (
+                      <>
+                        <br />
+                        <span style={{ color: B.tangelo, fontWeight: 700 }}>
+                          absent from pack on {summary.competitiveTotal - summary.mapPackRankingCount} of {summary.competitiveTotal}
+                        </span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  "Not in the Map Pack for any competitive search"
+                )
               }
-              accent={
-                !summary.avgMapPackRank
-                  ? B.tangelo
-                  : summary.avgMapPackRank <= 3
-                  ? "#22c55e"
-                  : summary.avgMapPackRank <= 6
-                  ? "#f59e0b"
-                  : B.tangelo
-              }
+              accent={coverageRankAccent(summary.avgMapPackRank, summary.mapPackRankingCount, summary.competitiveTotal, 3, 6)}
             />
             <KPI
               label="Page 1 (organic)"
@@ -3196,19 +3216,23 @@ Recommendation rules (STRICT):
               label="Avg organic rank"
               value={summary.avgRank ? `#${summary.avgRank}` : "—"}
               sub={
-                summary.avgRank
-                  ? `Avg of ${summary.rankingCount} of ${summary.competitiveTotal} ranking competitive queries`
-                  : "Not ranking for any competitive search"
+                summary.avgRank ? (
+                  <>
+                    avg of {summary.rankingCount} of {summary.competitiveTotal} that rank
+                    {summary.competitiveTotal - summary.rankingCount > 0 && (
+                      <>
+                        <br />
+                        <span style={{ color: B.tangelo, fontWeight: 700 }}>
+                          absent on {summary.competitiveTotal - summary.rankingCount} of {summary.competitiveTotal} (not in top 30)
+                        </span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  "Not ranking for any competitive search"
+                )
               }
-              accent={
-                !summary.avgRank
-                  ? B.tangelo
-                  : summary.avgRank <= 10
-                  ? "#22c55e"
-                  : summary.avgRank <= 30
-                  ? "#f59e0b"
-                  : B.tangelo
-              }
+              accent={coverageRankAccent(summary.avgRank, summary.rankingCount, summary.competitiveTotal)}
             />
             <KPI
               label="Queries audited"
@@ -6820,6 +6844,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   let seoAvg: number | null = null;
   let seoCompTotal = 0;
   let seoBrandedCount = 0;
+  let seoRankingCount = 0;
   if (seo) {
     const compRanks = seo.ranks.filter((r, i) => !isBrandedQuery(seo.queries[i], property));
     seoCompTotal = compRanks.length;
@@ -6831,6 +6856,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     seoP1 = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
     const valid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
     seoAvg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
+    seoRankingCount = valid.length;
   }
 
   const cssName = property.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -7218,7 +7244,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                   [
                     "Avg Organic Rank",
                     seoAvg ? `#${seoAvg}` : "—",
-                    seoAvg ? `Competitive queries that rank` : "Not ranking (competitive)",
+                    seoAvg
+                      ? `avg of ${seoRankingCount} of ${seoCompTotal} that rank${seoCompTotal - seoRankingCount > 0 ? ` · absent on ${seoCompTotal - seoRankingCount} (not in top 30)` : ""}`
+                      : "Not ranking (competitive)",
                   ],
                 ] as [string, string, string][]
               ).map(([label, val, sub]) => (
