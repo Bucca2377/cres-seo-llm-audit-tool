@@ -1994,6 +1994,30 @@ function aptListedNotAdvertising(consistency: MarketingConsistencyRow[] | undefi
   return consistency.some((r) => /not advertising on apartments/i.test(r?.apartments?.note || ""));
 }
 
+/**
+ * Deterministic website concession detector — HIGH-PRECISION phrases only
+ * (waived/reduced fees, half-off/free/reduced deposit, N months/weeks free,
+ * move-in/limited-time special, $/% off). Verified NOT to fire on "security
+ * deposit", "application fee: $X", or "no specials". Returns the special's own
+ * wording (cleaned, <=90 chars) or null. Used BOTH to feed the audit prompt as
+ * ground truth AND to force the consistency cell green — so the model can neither
+ * miss the concession nor contradict it in the recommendations.
+ */
+const WEBSITE_CONCESSION_RE = /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|\$0\s+(security\s+)?deposit|deposit\s+special|rent\s+special|months?\s+free\s+rent/i;
+function detectWebsiteSpecial(siteText: string): string | null {
+  const flat = siteText.replace(/\s+/g, " ");
+  const sentence = flat.match(new RegExp("[^.!?\\n]*(?:" + WEBSITE_CONCESSION_RE.source + ")[^.!?\\n]*", "i"));
+  if (!sentence) return null;
+  return (
+    sentence[0]
+      .replace(/\\+/g, " ") // drop JSON-escape residue (\/, \", \\) that leaks in from raw HTML
+      .replace(/\s+/g, " ")
+      .replace(/^[^A-Za-z0-9$]+/, "")
+      .trim()
+      .slice(0, 90) || null
+  );
+}
+
 /** Strip protocol + trailing slash for compact display of a page URL. */
 function shortUrl(u: string): string {
   return (u || "").replace(/^https?:\/\//i, "").replace(/\/+$/, "");
@@ -4331,6 +4355,12 @@ function MarketingAuditTab({
         siteBlocked = true;
       }
 
+      // Deterministic website concession detection — run BEFORE the prompt so the
+      // special can be fed to the model as GROUND TRUTH. Otherwise the model
+      // misses it and writes "the property offers no concessions / launch one"
+      // even though we detected (and green-flagged) a live special.
+      const websiteSpecial = siteText ? detectWebsiteSpecial(siteText) : null;
+
       // Dedicated Apartments.com read — its OWN retryable web_fetch, not buried
       // in the big audit call, so the listing facts are reliable and the model
       // just reports them instead of re-fetching (see readApartmentsListing).
@@ -4354,6 +4384,18 @@ function MarketingAuditTab({
 - Phone numbers on listing: ${aptRead.phones.join(", ") || "none shown"}`
         : `APARTMENTS.COM LISTING (${current.apartmentsUrl}): the dedicated read came back empty this run (partial or blocked fetch). Mark the Apartments.com cells AMBER "could not read the listing this run; verify live" — NEVER red.`;
 
+      // GROUND TRUTH for the concession — a deterministic finding the model must
+      // respect (it otherwise misses the special and recommends launching one).
+      const concessionText = websiteSpecial || (aptRead?.ok ? aptRead.concessions : "") || "";
+      const concessionSource = websiteSpecial
+        ? "website"
+        : aptRead?.ok && aptRead.concessions
+        ? "Apartments.com listing"
+        : null;
+      const concessionBlock = concessionSource
+        ? `CONCESSION — DETERMINISTIC GROUND TRUTH (verified in code from the actual content): the ${concessionSource} IS currently advertising this move-in special: "${concessionText}". Treat the concession as PRESENT. Mark the website "Concessions" cell GREEN with this wording. Do NOT state anywhere — executive summary, findings, or recommendations — that the property has "no concession", "no advertised specials", or similar. Do NOT recommend LAUNCHING, CREATING, ADDING, or INTRODUCING a concession: it already has one. If a platform that should carry it (e.g. Apartments.com) is missing it, you MAY recommend SYNCING/promoting THIS existing special there — never a brand-new one.`
+        : "";
+
       setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
@@ -4366,7 +4408,7 @@ ${
 
 ${apartmentsBlock}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
-${gbpBlock}
+${gbpBlock}${concessionBlock ? "\n\n" + concessionBlock : ""}
 
 RULES (apply strictly):
 - WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
@@ -4453,6 +4495,20 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
         ? (parsed.recommendations as RecommendationCard[])
         : [];
+      // Deterministic backstop: with a concession already running, never let a
+      // "launch/create a concession" card reach the client — the model has
+      // fabricated that recommendation before, even with the ground-truth block.
+      // Narrow match (a create/launch verb within ~40 chars of concession/special)
+      // so a legitimate "sync the EXISTING special to Apartments.com" card, which
+      // uses "add/sync/promote", is preserved.
+      const recsFinal: AuditRecommendations = concessionText
+        ? recs.filter(
+            (c) =>
+              !/\b(launch|create|introduc\w*|start|establish|roll[-\s]?out|implement)\b[^.!?]{0,40}\b(concession|move[-\s]?in special|move[-\s]?in incentive)\b/i.test(
+                `${c.title || ""}. ${c.what || ""}`
+              )
+          )
+        : recs;
 
       // --- Vision pass: actually LOOK at the website gallery photos ---
       // The text audit can only confirm photos exist; here we hand the real
@@ -4500,29 +4556,13 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           };
         }
       }
-      // DETERMINISTIC website concession detection from the crawled site text —
-      // not the model's judgment. Specials usually live in a JS popup the crawler
-      // now reliably captures (poll-until-present), but the model sometimes still
-      // fails to classify it. Flag it in code with HIGH-PRECISION phrases only
-      // (waived fees, half-off/free/reduced deposit, N months/weeks free, move-in
-      // or limited-time special, $/% off) — verified NOT to fire on "security
-      // deposit", "application fee: $X", or "no specials". When found, force the
-      // website Concessions cell GREEN with the special's own wording.
-      {
-        const CONCESSION_RE = /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|\$0\s+(security\s+)?deposit|deposit\s+special|rent\s+special|months?\s+free\s+rent/i;
-        const flat = siteText.replace(/\s+/g, " ");
-        const sentence = flat.match(new RegExp("[^.!?\\n]*(?:" + CONCESSION_RE.source + ")[^.!?\\n]*", "i"));
-        if (sentence) {
-          const note = sentence[0]
-            .replace(/\\+/g, " ") // drop JSON-escape residue (\/, \", \\) that leaks in from raw HTML
-            .replace(/\s+/g, " ")
-            .replace(/^[^A-Za-z0-9$]+/, "")
-            .trim()
-            .slice(0, 90);
-          const concRow = consistency.find((r) => /concession/i.test(r?.label || ""));
-          if (concRow) {
-            concRow.website = { status: "green", note: note || "Move-in special advertised on the website." };
-          }
+      // Force the website "Concessions" cell GREEN from the deterministic special
+      // detected BEFORE the prompt (same value fed to the model as ground truth),
+      // so the cell can't disagree with the model or be missed by it.
+      if (websiteSpecial) {
+        const concRow = consistency.find((r) => /concession/i.test(r?.label || ""));
+        if (concRow) {
+          concRow.website = { status: "green", note: websiteSpecial || "Move-in special advertised on the website." };
         }
       }
       // Concessions are an OPTIONAL promo, not a required feature — absence is
@@ -4764,7 +4804,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         websiteFindings,
         criticalIssues: parsed.criticalIssues || [],
         consistency,
-        recommendations: recs,
+        recommendations: recsFinal,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
         phones,
