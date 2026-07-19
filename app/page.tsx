@@ -4507,6 +4507,12 @@ RECOMMENDATION RULES (match the rest of the app exactly):
             : { status: "red", note: "Media summary shows no virtual tour on the listing." };
         }
       }
+      // Photo grades captured to drive the Google-vs-controlled comparison below:
+      // Google photos are flagged only when the property HAS professional photos
+      // on the website/listing that its Google profile is missing.
+      let webPhotoStatus: MarketingStatus | null = null;
+      let aptPhotoStatus: MarketingStatus | null = null;
+      let googleHasPro: boolean | null = null;
       if (siteImages.length >= 2) {
         try {
           setProgress("Assessing photo quality…");
@@ -4521,6 +4527,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
             const pj = JSON.parse(pm[0]) as { status?: string; note?: string };
             if (pj.status === "green" || pj.status === "amber" || pj.status === "red") {
               const verdict: { status: MarketingStatus; note: string } = { status: pj.status, note: (pj.note || "").trim() || "Gallery photos assessed" };
+              webPhotoStatus = verdict.status;
               const wf = websiteFindings.find((f) => /photo|gallery/i.test(f.label));
               if (wf) {
                 wf.status = verdict.status;
@@ -4535,22 +4542,29 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
-      // --- Google profile photos: DETERMINISTIC, not model-judged ---
-      // The GBP gallery is a mix of owner- and visitor-uploaded photos the
-      // property does NOT control, and model quality-grading of it flip-flopped
-      // run-to-run (green one run, an alarmist "low-quality visitor toilet photos"
-      // amber the next) — false alarms that undermine trust in the whole report.
-      // The photo quality the property ACTUALLY controls is graded on the Website
-      // and Apartments.com galleries below. So Google photos get a deterministic
-      // grade: an active gallery is GOOD and never flagged. (Also drops a per-audit
-      // vision call.)
+      // --- Google profile photos: assess whether the PROFESSIONAL set is present ---
+      // Not an absolute quality grade of the gallery (that flip-flopped and threw
+      // false alarms on visitor uploads). The one concrete, stable question: does
+      // the Google profile carry the property's professional marketing photos, or
+      // is it mostly casual visitor snapshots? The verdict is applied below, only
+      // when the website/listing actually HAS a professional set to mirror.
       if (googlePhotos.length >= 2) {
-        const row = consistency.find((c) => /photo/i.test(c.label));
-        if (row)
-          row.google = {
-            status: "green",
-            note: "Active profile gallery with owner and visitor photos.",
-          };
+        try {
+          setProgress("Checking Google profile photos…");
+          const gPrompt = `These ${Math.min(googlePhotos.length, 8)} images are the Google Business Profile gallery of ${current.name}. The property markets itself with professional photos elsewhere. QUESTION: does THIS Google gallery INCLUDE professional, owner-posted marketing photos (well-lit, staged, wide-angle interiors, amenities, exteriors), or is it mostly casual visitor phone snapshots that don't present the property at its best? A few odd visitor shots are fine — judge whether a professional set is PRESENT. Return ONLY JSON, no prose: {"hasProfessional": true|false}.`;
+          const gResp = await callAI({ prompt: gPrompt, images: googlePhotos, maxTokens: 200 });
+          const gText = (gResp.content || [])
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("");
+          const gm = gText.match(/\{[\s\S]*\}/);
+          if (gm) {
+            const gj = JSON.parse(gm[0]) as { hasProfessional?: boolean };
+            if (typeof gj.hasProfessional === "boolean") googleHasPro = gj.hasProfessional;
+          }
+        } catch {
+          /* leave googleHasPro null -> not flagged (can't confirm a gap) */
+        }
       }
 
       // --- Vision pass on the Apartments.com listing photos (separate verdict) ---
@@ -4587,6 +4601,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
             if (aj.status === "green" || aj.status === "amber" || aj.status === "red") {
               const row = consistency.find((c) => /photo/i.test(c.label));
               if (row) row.apartments = { status: aj.status, note: (aj.note || "").trim() || "Listing photos assessed" };
+              aptPhotoStatus = aj.status;
             }
           }
         } catch {
@@ -4602,6 +4617,34 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         for (const row of consistency) {
           if (row?.apartments) {
             row.apartments = { status: "na", note: "Not advertising on Apartments.com." };
+          }
+        }
+      }
+
+      // --- Google photos verdict: flag only a real, actionable gap ---
+      // If the property has professional photos on the website or Apartments.com
+      // but its Google profile is missing that set, flag it (amber) — prospects
+      // lean on the Google profile and it isn't showing the property at its best.
+      // Otherwise GOOD. Capped at amber (a Google gallery is never a red issue), and
+      // a failed/unavailable check (googleHasPro null) is never flagged.
+      if (googlePhotos.length >= 2) {
+        const row = consistency.find((c) => /photo/i.test(c.label));
+        if (row) {
+          const proSource =
+            webPhotoStatus === "green"
+              ? "website"
+              : aptPhotoStatus === "green"
+              ? "Apartments.com listing"
+              : "";
+          if (googleHasPro === false && proSource) {
+            row.google = {
+              status: "amber",
+              note: `Professional ${proSource} photos aren't on the Google profile — upload them so prospects see the property at its best.`,
+            };
+          } else if (googleHasPro === true) {
+            row.google = { status: "green", note: "Professional photos are posted to the Google profile." };
+          } else {
+            row.google = { status: "green", note: "Active profile gallery." };
           }
         }
       }
