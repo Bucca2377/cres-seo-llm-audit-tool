@@ -4535,30 +4535,22 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
-      // --- Vision pass on the Google profile photos (separate verdict) ---
+      // --- Google profile photos: DETERMINISTIC, not model-judged ---
+      // The GBP gallery is a mix of owner- and visitor-uploaded photos the
+      // property does NOT control, and model quality-grading of it flip-flopped
+      // run-to-run (green one run, an alarmist "low-quality visitor toilet photos"
+      // amber the next) — false alarms that undermine trust in the whole report.
+      // The photo quality the property ACTUALLY controls is graded on the Website
+      // and Apartments.com galleries below. So Google photos get a deterministic
+      // grade: an active gallery is GOOD and never flagged. (Also drops a per-audit
+      // vision call.)
       if (googlePhotos.length >= 2) {
-        try {
-          setProgress("Assessing Google profile photos…");
-          const gPrompt = `These ${Math.min(googlePhotos.length, 8)} images are photos from the Google Business Profile of ${current.name} — a MIX of owner-posted and visitor-uploaded photos (the owner does NOT control what visitors upload). Judge the gallery on its DOMINANT impression, the way a prospect scrolling the profile would: are the majority professional with reasonable coverage (interiors, amenities, exterior)? A few weak, odd, or low-quality visitor shots mixed in are normal and fine — do NOT let one or two of them drive the grade, and do NOT exaggerate their count or use alarmist language. Be factual and measured. Return ONLY "green" or "amber" (a Google profile with visitor photos is never a red issue): green = the majority are professional with reasonable coverage; amber = coverage is genuinely thin or most photos are low-quality. Return ONLY JSON, no prose: {"status":"green|amber","note":"one concise, measured clause under 18 words citing what you actually see"}.`;
-          const gResp = await callAI({ prompt: gPrompt, images: googlePhotos, maxTokens: 400 });
-          const gText = (gResp.content || [])
-            .filter((b: any) => b.type === "text")
-            .map((b: any) => b.text)
-            .join("");
-          const gm = gText.match(/\{[\s\S]*\}/);
-          if (gm) {
-            const gj = JSON.parse(gm[0]) as { status?: string; note?: string };
-            if (gj.status === "green" || gj.status === "amber" || gj.status === "red") {
-              // Cap at amber — GBP galleries are partly visitor-uploaded UGC, so
-              // they never warrant a red ISSUE in a client-facing report.
-              const status: MarketingStatus = gj.status === "red" ? "amber" : gj.status;
-              const row = consistency.find((c) => /photo/i.test(c.label));
-              if (row) row.google = { status, note: (gj.note || "").trim() || "Google photos assessed" };
-            }
-          }
-        } catch {
-          /* keep the text-only Google photos fallback */
-        }
+        const row = consistency.find((c) => /photo/i.test(c.label));
+        if (row)
+          row.google = {
+            status: "green",
+            note: "Active profile gallery with owner and visitor photos.",
+          };
       }
 
       // --- Vision pass on the Apartments.com listing photos (separate verdict) ---
