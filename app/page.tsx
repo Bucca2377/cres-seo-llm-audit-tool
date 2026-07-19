@@ -1887,8 +1887,9 @@ function pageSpeedPromptSummary(ps: PageSpeedResult | undefined): string {
  * Directory / citation sources grouped by SYNDICATION NETWORK. Several
  * "directories" are siblings that share one listing feed (being on
  * Apartments.com generally covers ApartmentFinder/ForRent), so we detect
- * presence per network, not per individual site. Standalone sites (Yelp,
- * Facebook, BBB, Apartment List) are their own citations.
+ * presence per network, not per individual site. Standalone sites (Facebook,
+ * BBB, Apartment List) are their own citations. Yelp is intentionally excluded —
+ * low-value for multifamily lead-gen vs. the ILS networks + Google.
  */
 const CITATION_NETWORKS: { network: string; standalone: boolean; sites: { name: string; domain: string }[] }[] = [
   {
@@ -1919,7 +1920,6 @@ const CITATION_NETWORKS: { network: string; standalone: boolean; sites: { name: 
     ],
   },
   { network: "Apartment List", standalone: true, sites: [{ name: "Apartment List", domain: "apartmentlist.com" }] },
-  { network: "Yelp", standalone: true, sites: [{ name: "Yelp", domain: "yelp.com" }] },
   { network: "Facebook", standalone: true, sites: [{ name: "Facebook", domain: "facebook.com" }] },
   { network: "Better Business Bureau", standalone: true, sites: [{ name: "BBB", domain: "bbb.org" }] },
 ];
@@ -2826,7 +2826,7 @@ Recommendation rules (STRICT):
    - LONG-TAIL: niche query optimization with lower competition
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
 13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.
-14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on a whole directory NETWORK (e.g. the Zillow network, the RentPath network, or standalone Yelp/Facebook/BBB), you MAY include ONE "FOUNDATIONAL" recommendation to claim/build a listing there with consistent name/address/phone — name the specific missing network(s). Frame it as "verify then claim" (the read is directional, from one search), and skip entirely if the major networks already appear.
+14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on a whole directory NETWORK (e.g. the Zillow network, the RentPath network, or standalone Facebook/BBB), you MAY include ONE "FOUNDATIONAL" recommendation to claim/build a listing there with consistent name/address/phone — name the specific missing network(s). Frame it as "verify then claim" (the read is directional, from one search), and skip entirely if the major networks already appear.
 15. PAGE SPEED: if the mobile PageSpeed score above is below 50 (poor) or 50-89 (needs work), include ONE recommendation to improve it — cite the actual mobile score and the weakest Core Web Vital (e.g. 'mobile score 38/100, LCP 6.2s'), and give concrete fixes (compress/next-gen images, defer offscreen images, reduce render-blocking scripts, enable caching/CDN). Skip if mobile scores 90+.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
