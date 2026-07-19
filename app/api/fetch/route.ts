@@ -72,6 +72,57 @@ const NAV_RE =
 
 const PAGE_TEXT_CAP = 14000;
 
+/**
+ * Render a URL through a residential-IP unblock service (ScrapingBee) that
+ * defeats Cloudflare AND runs JavaScript. This is the only reliable way to read
+ * a bot-protected, JS-rendered site (e.g. a specials/concession popup) from a
+ * datacenter like Railway, where our own headless browser gets a 403 challenge
+ * and Claude's web_fetch strips the embedded JSON. Returns the fully-rendered
+ * HTML, or null when no key is set / on error (caller keeps what it had). Gated
+ * on SCRAPINGBEE_API_KEY — no key means unchanged behavior. Works for ANY
+ * bot-protected site, not one specific marketing tool.
+ */
+async function fetchViaUnblockService(url: string): Promise<string | null> {
+  const key = process.env.SCRAPINGBEE_API_KEY;
+  if (!key) return null;
+  const api =
+    `https://app.scrapingbee.com/api/v1/?api_key=${key}` +
+    `&url=${encodeURIComponent(url)}&render_js=true&premium_proxy=true&wait=6000`;
+  try {
+    const r = await fetch(api, { signal: AbortSignal.timeout(55000) });
+    if (!r.ok) return null;
+    const html = await r.text();
+    return html && html.length > 200 ? html : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Strip a rendered HTML document to readable text (scripts/styles removed). */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** True when a rendered page looks like a bot-challenge wall, not the real site. */
+function looksBotBlocked(status: number | null, text: string): boolean {
+  if (status === 403) return true;
+  if (text.replace(/\s+/g, "").length < 200) return true;
+  return /performing security verification|challenges\.cloudflare|checking your browser|verify you are (a )?human|are not a bot|enable javascript and cookies|attention required/i.test(
+    text
+  );
+}
+
 function normUrl(u: string): string {
   const t = (u || "").trim();
   if (!t) return "";
@@ -188,7 +239,26 @@ export async function POST(req: NextRequest) {
         } catch {
           /* ignore frame enumeration errors */
         }
-        const pageText = frameText ? `${text}\n\n[EMBEDDED WIDGETS]\n${frameText}` : text;
+        let pageText = frameText ? `${text}\n\n[EMBEDDED WIDGETS]\n${frameText}` : text;
+        let pageStatus = resp ? resp.status() : null;
+        // If the browser got a Cloudflare/bot wall (common from Railway's
+        // datacenter IP — a 403 "verify you're not a bot" page), we never saw
+        // the real site or its JS-injected specials popup. Re-fetch through the
+        // residential-IP unblock service (renders JS + defeats Cloudflare) and
+        // use that fully-rendered HTML instead. Only runs when a key is set and
+        // the page actually looks blocked, so normal sites are untouched. On
+        // success mark the page 200 so the audit treats this as real content
+        // (not "blocked") and reads pricing/hours/specials from it.
+        if (looksBotBlocked(pageStatus, pageText)) {
+          const html = await fetchViaUnblockService(target);
+          if (html) {
+            const unblocked = htmlToText(html);
+            if (unblocked.length > pageText.length) {
+              pageText = unblocked;
+              pageStatus = 200;
+            }
+          }
+        }
         let links: { href: string; text: string }[] = [];
         if (wantLinks) {
           links = await page.evaluate(() =>
@@ -254,7 +324,7 @@ export async function POST(req: NextRequest) {
             wordCount: words,
           };
         });
-        return { status: resp ? resp.status() : null, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo };
+        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo };
       } finally {
         await ctx.close();
       }
