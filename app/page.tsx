@@ -2550,6 +2550,29 @@ function SEOAudit({
 
   const isRunning = stage !== "idle" && stage !== "done";
 
+  // Clear just this property's SEO history (results + rank-trend snapshots) so the
+  // next run is a clean first-run baseline — e.g. after changing the tracked query
+  // set makes old snapshots non-comparable. Marketing / Review / AI-rank history is
+  // untouched (the Marketing tab has the full property-wide reset).
+  const resetSeoHistory = () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Clear the SEO audit history for "${property.name}"?\n\nThis wipes the SEO results and the rank-trend snapshots (the before/after baseline), so the next SEO run starts as a clean first run. Marketing, Review, and AI-rank history are NOT affected. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    const cleaned: Property = { ...property };
+    delete (cleaned as unknown as Record<string, unknown>).seoAudit;
+    delete (cleaned as unknown as Record<string, unknown>).seoRankSnapshots;
+    onUpdateProperty(cleaned);
+    setResults(null);
+    setStage("idle");
+    setError(null);
+    setProgress("");
+  };
+
   const run = async () => {
     setError(null);
     setResults(null);
@@ -3024,6 +3047,27 @@ Recommendation rules (STRICT):
             <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: 4 }}>
               Last audited {new Date(results.timestamp).toLocaleString()}
             </div>
+          )}
+          {(results || property.seoAudit || (property.seoRankSnapshots?.length ?? 0) > 0) && (
+            <button
+              onClick={resetSeoHistory}
+              disabled={isRunning}
+              style={{
+                marginTop: 6,
+                padding: 0,
+                border: "none",
+                background: "none",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11,
+                color: "#b14a2a",
+                cursor: isRunning ? "default" : "pointer",
+                textDecoration: "underline",
+                opacity: isRunning ? 0.5 : 1,
+              }}
+              title="Wipe this property's SEO results + rank-trend snapshots so the next SEO run is a clean first run. Marketing / Review / AI-rank history kept."
+            >
+              Reset SEO history
+            </button>
           )}
         </div>
         <button
