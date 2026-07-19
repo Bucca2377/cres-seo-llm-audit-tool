@@ -240,23 +240,22 @@ export async function POST(req: NextRequest) {
           /* ignore frame enumeration errors */
         }
         let pageText = frameText ? `${text}\n\n[EMBEDDED WIDGETS]\n${frameText}` : text;
-        let pageStatus = resp ? resp.status() : null;
+        const pageStatus = resp ? resp.status() : null;
         // If the browser got a Cloudflare/bot wall (common from Railway's
         // datacenter IP — a 403 "verify you're not a bot" page), we never saw
         // the real site or its JS-injected specials popup. Re-fetch through the
         // residential-IP unblock service (renders JS + defeats Cloudflare) and
-        // use that fully-rendered HTML instead. Only runs when a key is set and
-        // the page actually looks blocked, so normal sites are untouched. On
-        // success mark the page 200 so the audit treats this as real content
-        // (not "blocked") and reads pricing/hours/specials from it.
-        if (looksBotBlocked(pageStatus, pageText)) {
+        // use that fully-rendered HTML. Gated to the HOMEPAGE (pollLate) — that's
+        // where the specials popup is, and it keeps cost to ONE unblock call per
+        // audit. We keep the page's real (blocked) status so the existing
+        // web_fetch fallback still fills pricing/hours from the other pages; the
+        // deterministic concession detector reads this rescued homepage text out
+        // of siteText. Only runs when a key is set, so normal sites are untouched.
+        if (pollLate && looksBotBlocked(pageStatus, pageText)) {
           const html = await fetchViaUnblockService(target);
           if (html) {
             const unblocked = htmlToText(html);
-            if (unblocked.length > pageText.length) {
-              pageText = unblocked;
-              pageStatus = 200;
-            }
+            if (unblocked.length > pageText.length) pageText = unblocked;
           }
         }
         let links: { href: string; text: string }[] = [];
