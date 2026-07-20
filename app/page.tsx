@@ -2015,7 +2015,9 @@ function citationNetworkRows(citations: CitationResult | undefined) {
  * active green citation, contradicting the consistency check. This lets the
  * panel render it as "listed, not advertising" instead, so the two agree.
  */
-function aptListedNotAdvertising(consistency: MarketingConsistencyRow[] | undefined): boolean {
+function aptListedNotAdvertising(property: Property): boolean {
+  if (property.aptNotAdvertising) return true; // manual override wins over the flaky auto-read
+  const consistency = property.marketingAudit?.consistency;
   if (!consistency) return false;
   return consistency.some((r) => /not advertising on apartments/i.test(r?.apartments?.note || ""));
 }
@@ -3635,7 +3637,7 @@ Recommendation rules (STRICT):
           {/* Local citations / directory presence (still part of online presence) */}
           <CitationsPanel
             citations={results.citations}
-            aptNotAdvertising={aptListedNotAdvertising(property.marketingAudit?.consistency)}
+            aptNotAdvertising={aptListedNotAdvertising(property)}
           />
 
           {/* ===== Group 2: Website Optimization (the site itself) ===== */}
@@ -4507,6 +4509,14 @@ function MarketingAuditTab({
       // just reports them instead of re-fetching (see readApartmentsListing).
       setProgress("Reading the Apartments.com listing…");
       const aptRead = current.apartmentsUrl ? await readApartmentsListing(current.apartmentsUrl) : null;
+      // Manual override wins over the flaky auto-read (which can be fooled by
+      // aggregator-populated pricing and flip-flops run-to-run). When the manager
+      // has marked the listing NOT advertising, force that so every downstream
+      // check (shell handling, consistency cells, website-link cell) agrees.
+      if (current.aptNotAdvertising && aptRead) {
+        aptRead.ok = true;
+        aptRead.advertising = false;
+      }
 
       const apartmentsBlock = !current.apartmentsUrl
         ? "APARTMENTS.COM LISTING: no listing URL was provided."
@@ -5207,6 +5217,24 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           <input value={gbpUrl} onChange={(e) => setGbpUrl(e.target.value)} style={inputStyle} placeholder="https://www.google.com/maps/place/..." />
         </div>
       </div>
+
+      {/* Manual override — the auto-detection of Apartments.com advertising status
+          flip-flops run-to-run and can be fooled by aggregator-populated pricing,
+          so let the manager lock it when they know the listing is a stale/unclaimed
+          shell. Wins over the auto-read in the consistency table + citation flag. */}
+      <label
+        data-print-hide="true"
+        style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#666", cursor: "pointer" }}
+      >
+        <input
+          type="checkbox"
+          checked={!!property.aptNotAdvertising}
+          onChange={(e) => onUpdateProperty({ ...property, aptNotAdvertising: e.target.checked })}
+        />
+        <span>
+          This property is <strong>not actively advertising</strong> on Apartments.com (override auto-detection — use when the listing is an unclaimed/stale shell)
+        </span>
+      </label>
 
       {results && !ranThisSession && !running && (
         <div
@@ -7665,7 +7693,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
 
             {seo.citations && seo.citations.sources.length > 0 && (() => {
               const rows = citationNetworkRows(seo.citations);
-              const aptNotAdv = aptListedNotAdvertising(mkt?.consistency);
+              const aptNotAdv = aptListedNotAdvertising(property);
               const isAptCaveat = (r: (typeof rows)[number]) =>
                 aptNotAdv && r.present && /^Apartments\.com/i.test(r.network);
               // Count the caveat as present — a listing exists (the citation); the
