@@ -2086,7 +2086,7 @@ function extractStateCode(address: string): string {
 function formatDialTime(iso: string, address: string): string {
   const tz = STATE_TZ[extractStateCode(address)];
   try {
-    const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+    const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
     if (tz) return new Date(iso).toLocaleString("en-US", { ...opts, timeZone: tz, timeZoneName: "short" });
     return new Date(iso).toLocaleString("en-US", opts) + " (viewer's local time — property state unknown)";
   } catch {
