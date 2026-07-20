@@ -4525,6 +4525,10 @@ function MarketingAuditTab({
 - Phone numbers on listing: ${aptRead.phones.join(", ") || "none shown"}`
         : `APARTMENTS.COM LISTING (${current.apartmentsUrl}): the dedicated read came back empty this run (partial or blocked fetch). Mark the Apartments.com cells AMBER "could not read the listing this run; verify live" — NEVER red.`;
 
+      // Is the Apartments.com listing DARK (deterministically detected shell)? If so
+      // it can't carry a concession, take an activation recommendation, etc.
+      const aptIsDark = !!(aptRead && aptRead.ok && aptRead.advertising === false);
+
       // GROUND TRUTH for the concession — a deterministic finding the model must
       // respect (it otherwise misses the special and recommends launching one).
       const concessionText = websiteSpecial || (aptRead?.ok ? aptRead.concessions : "") || "";
@@ -4533,8 +4537,14 @@ function MarketingAuditTab({
         : aptRead?.ok && aptRead.concessions
         ? "Apartments.com listing"
         : null;
+      // When Apartments.com is dark, do NOT suggest syncing the special there — you
+      // can't add a concession to a listing that isn't advertising (activate it
+      // first; that's a separate recommendation).
+      const concessionSyncGuidance = aptIsDark
+        ? "The Apartments.com listing is NOT currently advertising (dark), so do NOT recommend adding/syncing the concession to Apartments.com — there is nothing to add it to until the listing is reactivated. You may recommend syncing it to other ACTIVE platforms only."
+        : "If a platform that should carry it (e.g. Apartments.com) is missing it, you MAY recommend SYNCING/promoting THIS existing special there — never a brand-new one.";
       const concessionBlock = concessionSource
-        ? `CONCESSION — DETERMINISTIC GROUND TRUTH (verified in code from the actual content): the ${concessionSource} IS currently advertising this move-in special: "${concessionText}". Treat the concession as PRESENT. Mark the website "Concessions" cell GREEN with this wording. Do NOT state anywhere — executive summary, findings, or recommendations — that the property has "no concession", "no advertised specials", or similar. Do NOT recommend LAUNCHING, CREATING, ADDING, or INTRODUCING a concession: it already has one. If a platform that should carry it (e.g. Apartments.com) is missing it, you MAY recommend SYNCING/promoting THIS existing special there — never a brand-new one.`
+        ? `CONCESSION — DETERMINISTIC GROUND TRUTH (verified in code from the actual content): the ${concessionSource} IS currently advertising this move-in special: "${concessionText}". Treat the concession as PRESENT. Mark the website "Concessions" cell GREEN with this wording. Do NOT state anywhere — executive summary, findings, or recommendations — that the property has "no concession", "no advertised specials", or similar. Do NOT recommend LAUNCHING, CREATING, ADDING, or INTRODUCING a concession: it already has one. ${concessionSyncGuidance}`
         : "";
 
       // --- Website-link check: does the "Website" link on the Google listing
@@ -4719,19 +4729,29 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // Narrow match (a create/launch verb within ~40 chars of concession/special)
       // so a legitimate "sync the EXISTING special to Apartments.com" card, which
       // uses "add/sync/promote", is preserved.
-      const recsFiltered: AuditRecommendations = concessionText
-        ? recs.filter(
-            (c) =>
-              !/\b(launch|create|introduc\w*|start|establish|roll[-\s]?out|implement)\b[^.!?]{0,40}\b(concession|move[-\s]?in special|move[-\s]?in incentive)\b/i.test(
-                `${c.title || ""}. ${c.what || ""}`
-              )
-          )
-        : recs;
-      // When the Apartments.com listing is DARK (deterministically detected via the
-      // "not currently advertising" banner), inject a fixed recommendation to turn
-      // it back on — with an explicit escape hatch in case the property intends it
-      // to be off. Deterministic so the wording + escape hatch are reliable.
-      const aptIsDark = !!(aptRead && aptRead.ok && aptRead.advertising === false);
+      const recsFiltered: AuditRecommendations = recs.filter((c) => {
+        const t = `${c.title || ""}. ${c.what || ""}`;
+        // Drop fabricated "launch/create a concession" when one already runs.
+        if (
+          concessionText &&
+          /\b(launch|create|introduc\w*|start|establish|roll[-\s]?out|implement)\b[^.!?]{0,40}\b(concession|move[-\s]?in special|move[-\s]?in incentive)\b/i.test(t)
+        )
+          return false;
+        // Drop "add/sync the concession to Apartments.com" when that listing is DARK —
+        // you can't put a special on a listing that isn't advertising. The "activate
+        // the listing" card (below) is the correct recommendation instead.
+        if (
+          aptIsDark &&
+          /apartments\.?com/i.test(t) &&
+          /\b(concession|special|move[-\s]?in special)\b/i.test(t) &&
+          /\b(add|adding|sync|includ\w*|promot\w*|put|list|update|carry)\b/i.test(t)
+        )
+          return false;
+        return true;
+      });
+      // When the Apartments.com listing is DARK, inject a fixed recommendation to
+      // turn it back on — with an explicit escape hatch in case the property intends
+      // it to be off. Deterministic so the wording + escape hatch are reliable.
       const aptActivationCard: RecommendationCard = {
         priority: "STRATEGIC",
         title: "Activate the Apartments.com listing immediately (ignore if intentionally off)",
