@@ -2015,9 +2015,7 @@ function citationNetworkRows(citations: CitationResult | undefined) {
  * active green citation, contradicting the consistency check. This lets the
  * panel render it as "listed, not advertising" instead, so the two agree.
  */
-function aptListedNotAdvertising(property: Property): boolean {
-  if (property.aptNotAdvertising) return true; // manual override wins over the flaky auto-read
-  const consistency = property.marketingAudit?.consistency;
+function aptListedNotAdvertising(consistency: MarketingConsistencyRow[] | undefined): boolean {
   if (!consistency) return false;
   return consistency.some((r) => /not advertising on apartments/i.test(r?.apartments?.note || ""));
 }
@@ -3637,7 +3635,7 @@ Recommendation rules (STRICT):
           {/* Local citations / directory presence (still part of online presence) */}
           <CitationsPanel
             citations={results.citations}
-            aptNotAdvertising={aptListedNotAdvertising(property)}
+            aptNotAdvertising={aptListedNotAdvertising(property.marketingAudit?.consistency)}
           />
 
           {/* ===== Group 2: Website Optimization (the site itself) ===== */}
@@ -4509,14 +4507,6 @@ function MarketingAuditTab({
       // just reports them instead of re-fetching (see readApartmentsListing).
       setProgress("Reading the Apartments.com listing…");
       const aptRead = current.apartmentsUrl ? await readApartmentsListing(current.apartmentsUrl) : null;
-      // Manual override wins over the flaky auto-read (which can be fooled by
-      // aggregator-populated pricing and flip-flops run-to-run). When the manager
-      // has marked the listing NOT advertising, force that so every downstream
-      // check (shell handling, consistency cells, website-link cell) agrees.
-      if (current.aptNotAdvertising && aptRead) {
-        aptRead.ok = true;
-        aptRead.advertising = false;
-      }
 
       const apartmentsBlock = !current.apartmentsUrl
         ? "APARTMENTS.COM LISTING: no listing URL was provided."
@@ -5217,24 +5207,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           <input value={gbpUrl} onChange={(e) => setGbpUrl(e.target.value)} style={inputStyle} placeholder="https://www.google.com/maps/place/..." />
         </div>
       </div>
-
-      {/* Manual override — the auto-detection of Apartments.com advertising status
-          flip-flops run-to-run and can be fooled by aggregator-populated pricing,
-          so let the manager lock it when they know the listing is a stale/unclaimed
-          shell. Wins over the auto-read in the consistency table + citation flag. */}
-      <label
-        data-print-hide="true"
-        style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#666", cursor: "pointer" }}
-      >
-        <input
-          type="checkbox"
-          checked={!!property.aptNotAdvertising}
-          onChange={(e) => onUpdateProperty({ ...property, aptNotAdvertising: e.target.checked })}
-        />
-        <span>
-          This property is <strong>not actively advertising</strong> on Apartments.com (override auto-detection — use when the listing is an unclaimed/stale shell)
-        </span>
-      </label>
 
       {results && !ranThisSession && !running && (
         <div
@@ -6698,15 +6670,15 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         const mm = mediaSummary.match(re);
         return mm ? parseInt(mm[1], 10) : 0;
       };
-      // DETERMINISTIC advertising check from the RAW fetched page, NOT the
-      // model's judgment. The model's boolean flip-flops run-to-run on the exact
-      // same shell page (sometimes "active", borrowing a nearby listing's rent)
-      // because the "not currently advertising" banner is JS-rendered and never
-      // reaches web_fetch. But the STRUCTURE differs reliably: an ACTIVE
-      // apartments.com listing renders the property's own "Pricing & Floor Plans"
-      // / "Monthly Rent" section; a NOT-advertising shell has neither and instead
-      // pushes "Explore Similar Rentals Nearby". Verified active-vs-shell. Read
-      // the raw web_fetch tool-result content and decide in code, every time.
+      // DETERMINISTIC advertising check from the RAW fetched page, NOT the model's
+      // (flip-floppy) boolean. The DEFINITIVE shell signal is the on-page banner
+      // "This property is not currently advertising on Apartments.com" — and it IS
+      // in the fetched content (the model reads it to follow its prompt), so detect
+      // it directly. It WINS over the pricing-presence proxy, which false-positived
+      // on the "Explore Similar Rentals Nearby" section: those nearby listings carry
+      // "Monthly Rent" / pricing text that fooled the proxy into "advertising" on a
+      // shell page. Only when the banner is ABSENT do we fall back to the
+      // active-structure proxy (the property's own "Pricing & Floor Plans" section).
       const rawFetched = (resp.content || [])
         .filter((b: any) => b?.type === "web_fetch_tool_result")
         .map((b: any) => {
@@ -6717,12 +6689,14 @@ IF the page shows "This property is not currently advertising on Apartments.com"
           }
         })
         .join("\n");
-      const advertising: boolean | null =
-        rawFetched.length > 500
-          ? /pricing\s*&?\s*floor\s*plans|monthly\s+rent/i.test(rawFetched)
-          : typeof j.advertising === "boolean"
-          ? j.advertising
-          : null;
+      const notAdvertisingBanner = /not\s+currently\s+advertising/i.test(rawFetched);
+      const advertising: boolean | null = notAdvertisingBanner
+        ? false
+        : rawFetched.length > 500
+        ? /pricing\s*&?\s*floor\s*plans|monthly\s+rent/i.test(rawFetched)
+        : typeof j.advertising === "boolean"
+        ? j.advertising
+        : null;
       const read: ApartmentsListingRead = {
         ok: true,
         advertising,
@@ -7693,7 +7667,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
 
             {seo.citations && seo.citations.sources.length > 0 && (() => {
               const rows = citationNetworkRows(seo.citations);
-              const aptNotAdv = aptListedNotAdvertising(property);
+              const aptNotAdv = aptListedNotAdvertising(mkt?.consistency);
               const isAptCaveat = (r: (typeof rows)[number]) =>
                 aptNotAdv && r.present && /^Apartments\.com/i.test(r.network);
               // Count the caveat as present — a listing exists (the citation); the

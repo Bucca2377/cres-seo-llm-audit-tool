@@ -198,14 +198,6 @@ export interface Property {
    */
   apartmentsUrl?: string;
   /**
-   * Manual override: the property is NOT actively advertising on Apartments.com.
-   * The auto-detection (does the fetched listing show "Pricing & Floor Plans" /
-   * "Monthly Rent") flip-flops run-to-run and can be fooled by aggregator-populated
-   * pricing, so when the manager KNOWS the listing is a stale/unclaimed shell they
-   * set this and it wins everywhere (consistency table + directory-presence flag).
-   */
-  aptNotAdvertising?: boolean;
-  /**
    * Legacy "must-check" pinned queries. Superseded by {@link trackedQueries};
    * still read once to migrate old properties into the sticky tracked set.
    */
