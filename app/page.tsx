@@ -1969,6 +1969,18 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
         return { name: s.name, domain: s.domain, present: !!hit, url: hit?.url, network: net.network, standalone: net.standalone };
       })
     );
+    // We audit the property's Apartments.com listing directly (its URL is
+    // configured), so Apartments.com is a CONFIRMED citation — seed it present
+    // even when the single brand search (directional, and flaky for aggregators)
+    // didn't surface it this run. Prevents the absurd "we have the listing URL but
+    // it shows not-detected".
+    if (property.apartmentsUrl) {
+      const apt = sources.find((s) => s.domain === "apartments.com");
+      if (apt && !apt.present) {
+        apt.present = true;
+        apt.url = property.apartmentsUrl;
+      }
+    }
     return { sources, checkedAt: new Date().toISOString() };
   } catch {
     return undefined;
@@ -2829,8 +2841,21 @@ Return ONLY a JSON array of 6 strings, no prose:
       // letting the panel silently vanish (directory presence barely changes
       // run-to-run) — a transient blip should never look like "no citations".
       setProgress("Checking directory / citation presence…");
-      const citations =
-        (await checkCitations(currentProperty)) ?? currentProperty.seoAudit?.citations;
+      const priorCitations = currentProperty.seoAudit?.citations;
+      let citations = (await checkCitations(currentProperty)) ?? priorCitations;
+      // Directory presence is STICKY — a network that surfaced in a prior run still
+      // exists even if this run's single (flaky) brand search misses it. Union the
+      // present set with the prior run's so detection doesn't flap 4 -> 0 -> 4
+      // between runs. No extra API calls; a listing doesn't vanish run-to-run.
+      if (citations && priorCitations && citations !== priorCitations) {
+        citations = {
+          ...citations,
+          sources: citations.sources.map((s) => {
+            const prior = priorCitations.sources.find((p) => p.domain === s.domain);
+            return prior?.present && !s.present ? { ...s, present: true, url: s.url ?? prior.url } : s;
+          }),
+        };
+      }
 
       // PageSpeed / Core Web Vitals — Google PageSpeed Insights (mobile + desktop).
       let pageSpeed: PageSpeedResult | undefined;
