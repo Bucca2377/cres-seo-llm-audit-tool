@@ -4341,6 +4341,8 @@ function MarketingAuditTab({
       setProgress("Pulling Google Business Profile data…");
       let gbpBlock = "GOOGLE BUSINESS PROFILE: could not be verified automatically this run — fetch the provided Google URL if present, otherwise mark Google cells 'Requires Client Verification'.";
       let googlePhotos: string[] = [];
+      let googleWebsiteUrl = ""; // the "Website" link shown on the Google listing
+      let gbpHadData = false; // true once SerpAPI returned a real Google profile
       let googlePhone = "";
       let officeHours: Record<string, string> | undefined;
       try {
@@ -4399,6 +4401,8 @@ function MarketingAuditTab({
 - Website link on Google: ${gbp?.website || place?.website || "not shown"}
 - Phone on Google: ${place?.phone || "not shown"}
 - Note: Google may surface aggregator-pulled pricing; never mark Google pricing "green".`;
+          googleWebsiteUrl = gbp?.website || place?.website || "";
+          gbpHadData = true;
         }
       } catch {
         /* best-effort; proceed without GBP ground truth */
@@ -4486,6 +4490,55 @@ function MarketingAuditTab({
         ? `CONCESSION — DETERMINISTIC GROUND TRUTH (verified in code from the actual content): the ${concessionSource} IS currently advertising this move-in special: "${concessionText}". Treat the concession as PRESENT. Mark the website "Concessions" cell GREEN with this wording. Do NOT state anywhere — executive summary, findings, or recommendations — that the property has "no concession", "no advertised specials", or similar. Do NOT recommend LAUNCHING, CREATING, ADDING, or INTRODUCING a concession: it already has one. If a platform that should carry it (e.g. Apartments.com) is missing it, you MAY recommend SYNCING/promoting THIS existing special there — never a brand-new one.`
         : "";
 
+      // --- Website-link check: does the "Website" link on the Google listing
+      // actually reach the property's live site? A missing, broken, or wrong-domain
+      // link there is a MAJOR lead leak — a prospect clicks "Website" on Google and
+      // never lands on the leasing site. Deterministic: SerpAPI gives the URL; we
+      // compare domains and probe reachability only when the domain differs.
+      setProgress("Checking the Google listing's website link…");
+      const domainOf = (u: string) => {
+        try {
+          return new URL(/^https?:\/\//i.test(u) ? u : "https://" + u).hostname.replace(/^www\./i, "").toLowerCase();
+        } catch {
+          return "";
+        }
+      };
+      const propDomain = domainOf(current.website || "");
+      const gWebDomain = domainOf(googleWebsiteUrl);
+      let googleLink: { status: MarketingStatus; note: string };
+      if (!gbpHadData) {
+        googleLink = { status: "na", note: "No Google profile data this run." };
+      } else if (!googleWebsiteUrl) {
+        googleLink = { status: "red", note: "No website link on the Google listing — prospects can't click through to your site." };
+      } else if (propDomain && gWebDomain && gWebDomain !== propDomain) {
+        // Google points somewhere other than the property's site — probe whether
+        // that domain even loads (403/429 = bot-protected but reachable, not dead).
+        let dead = false;
+        try {
+          const r = await callFetch({ url: googleWebsiteUrl, follow: false, maxPages: 1 });
+          const p = r.pages?.[0];
+          const st = p?.status ?? 0;
+          dead = st >= 400 && st !== 403 && st !== 429;
+          if (st === 0 && (p?.text || "").length < 50) dead = true;
+        } catch {
+          dead = true;
+        }
+        googleLink = dead
+          ? { status: "red", note: `Google's website link (${gWebDomain}) doesn't load — a broken click-through for prospects.` }
+          : { status: "amber", note: `Google's website link goes to ${gWebDomain}, not your site (${propDomain}) — verify it's intended.` };
+      } else {
+        // Link points to the property's own site. It's up if our render got content;
+        // if our browser was blocked (Cloudflare) we can't confirm, so say "verify".
+        googleLink =
+          siteBlocked && !siteText
+            ? { status: "amber", note: "Website link points to your site, but we couldn't confirm it loads this run — verify." }
+            : { status: "green", note: `Website link works and points to your site${propDomain ? ` (${propDomain})` : ""}.` };
+      }
+      const websiteLinkBlock =
+        googleLink.status === "red" || googleLink.status === "amber"
+          ? `WEBSITE-LINK CHECK — DETERMINISTIC GROUND TRUTH: ${googleLink.note} This is a lead leak (a prospect clicking "Website" on the Google listing must land on the leasing site). Include a recommendation to fix the Google listing's website link.`
+          : "";
+
       setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
@@ -4498,7 +4551,7 @@ ${
 
 ${apartmentsBlock}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
-${gbpBlock}${concessionBlock ? "\n\n" + concessionBlock : ""}
+${gbpBlock}${concessionBlock ? "\n\n" + concessionBlock : ""}${websiteLinkBlock ? "\n\n" + websiteLinkBlock : ""}
 
 RULES (apply strictly):
 - WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
@@ -4608,6 +4661,20 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // real verdict instead of "present, quality not assessed".
       const websiteFindings = parsed.websiteFindings || [];
       const consistency = parsed.consistency || [];
+      // Insert the DETERMINISTIC "Website link works" row (computed in code above,
+      // not model judgment) near the top — a broken/missing/wrong website link on
+      // the Google listing is a major lead leak. Apartments.com routes inquiries
+      // through its own contact form, so there's no outbound website link to test.
+      {
+        const websiteLinkRow: MarketingConsistencyRow = {
+          label: "Website link works",
+          apartments: { status: "na", note: "Apartments.com routes inquiries through its own contact form — no outbound website link to test." },
+          google: googleLink,
+          website: { status: "na", note: "This is the destination site." },
+        };
+        const advIdx = consistency.findIndex((r) => /currently advertising|active/i.test(r?.label || ""));
+        consistency.splice(advIdx >= 0 ? advIdx + 1 : consistency.length, 0, websiteLinkRow);
+      }
       // SMART CLAMP for Apartments.com reds. The listing fetch is bot-protected
       // and SOMETIMES comes back partial — a red from a partial read can't prove
       // a feature is absent, so it must not manufacture a false ISSUE. But when
