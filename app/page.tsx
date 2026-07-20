@@ -1931,11 +1931,25 @@ const CITATION_NETWORKS: { network: string; standalone: boolean; sites: { name: 
  * we only treat a WHOLE network as absent, never an individual sibling site.
  */
 async function checkCitations(property: Property): Promise<CitationResult | undefined> {
+  const city = extractCity(property.address) || "";
+  const q = `${property.name} ${city}`.trim();
+  // Retry once on failure — this is the last SerpAPI call of the run, so it's the
+  // most likely to catch a transient per-minute rate limit; a short pause clears it.
+  let data: { organic_results?: unknown } | undefined;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      data = await callSerp({ query: q, engine: "google", location: extractLocation(property.address) });
+      break;
+    } catch {
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      return undefined;
+    }
+  }
   try {
-    const city = extractCity(property.address) || "";
-    const q = `${property.name} ${city}`.trim();
-    const data = await callSerp({ query: q, engine: "google", location: extractLocation(property.address) });
-    const results: unknown[] = Array.isArray(data?.organic_results) ? data.organic_results : [];
+    const results: unknown[] = Array.isArray(data?.organic_results) ? (data?.organic_results as unknown[]) : [];
     const hostOf = (u: string) => {
       try {
         return new URL(u).hostname.replace(/^www\./i, "").toLowerCase();
@@ -2809,9 +2823,14 @@ Return ONLY a JSON array of 6 strings, no prose:
         }
       }
 
-      // Local-citation / directory presence — one SerpAPI brand search.
+      // Local-citation / directory presence — one SerpAPI brand search. This is
+      // the LAST of ~a dozen SerpAPI calls in the run, so a rate/quota blip tends
+      // to hit HERE first. If it fails, keep the previous run's result rather than
+      // letting the panel silently vanish (directory presence barely changes
+      // run-to-run) — a transient blip should never look like "no citations".
       setProgress("Checking directory / citation presence…");
-      const citations = await checkCitations(currentProperty);
+      const citations =
+        (await checkCitations(currentProperty)) ?? currentProperty.seoAudit?.citations;
 
       // PageSpeed / Core Web Vitals — Google PageSpeed Insights (mobile + desktop).
       let pageSpeed: PageSpeedResult | undefined;
