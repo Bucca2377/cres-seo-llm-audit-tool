@@ -4534,10 +4534,37 @@ function MarketingAuditTab({
             ? { status: "amber", note: "Website link points to your site, but we couldn't confirm it loads this run — verify." }
             : { status: "green", note: `Website link works and points to your site${propDomain ? ` (${propDomain})` : ""}.` };
       }
-      const websiteLinkBlock =
-        googleLink.status === "red" || googleLink.status === "amber"
-          ? `WEBSITE-LINK CHECK — DETERMINISTIC GROUND TRUTH: ${googleLink.note} This is a lead leak (a prospect clicking "Website" on the Google listing must land on the leasing site). Include a recommendation to fix the Google listing's website link.`
-          : "";
+      // Apartments.com "View Property Website" link — standard on an active
+      // listing (detected deterministically from the raw fetched content).
+      let aptLink: { status: MarketingStatus; note: string };
+      if (!aptRead || !current.apartmentsUrl) {
+        aptLink = { status: "na", note: "No Apartments.com listing provided." };
+      } else if (!aptRead.ok) {
+        aptLink = { status: "amber", note: "Could not read the Apartments.com listing this run — verify the 'View Property Website' link." };
+      } else if (aptRead.advertising === false) {
+        aptLink = { status: "na", note: "Not advertising on Apartments.com." };
+      } else if (aptRead.hasWebsiteLink === true) {
+        aptLink = { status: "green", note: "'View Property Website' link is present on the listing." };
+      } else if (aptRead.hasWebsiteLink === false) {
+        aptLink = { status: "amber", note: "Couldn't find the 'View Property Website' link — verify it's present and points to your site." };
+      } else {
+        aptLink = { status: "amber", note: "Could not confirm the 'View Property Website' link this run — verify." };
+      }
+
+      // Feed only HIGH-CONFIDENCE, actionable link problems to the rec engine:
+      // Google missing (SerpAPI-definitive) or Google pointing to a different
+      // domain, and an Apartments.com link that's genuinely absent. Uncertainty
+      // ("couldn't read/confirm") shows in the row for visibility but doesn't
+      // force a recommendation.
+      const linkIssues: string[] = [];
+      if (googleLink.status === "red") linkIssues.push(`Google listing: ${googleLink.note}`);
+      else if (googleLink.status === "amber" && gWebDomain && propDomain && gWebDomain !== propDomain)
+        linkIssues.push(`Google listing: ${googleLink.note}`);
+      if (aptRead?.ok && aptRead.advertising !== false && aptRead.hasWebsiteLink === false)
+        linkIssues.push(`Apartments.com listing: ${aptLink.note}`);
+      const websiteLinkBlock = linkIssues.length
+        ? `WEBSITE-LINK CHECK — DETERMINISTIC GROUND TRUTH: ${linkIssues.join(" ")} A prospect clicking "Website" on a listing must land on the leasing site, so a missing/broken/wrong link is a lead leak. Include a recommendation to fix the affected listing's website link.`
+        : "";
 
       setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
@@ -4668,7 +4695,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       {
         const websiteLinkRow: MarketingConsistencyRow = {
           label: "Website link works",
-          apartments: { status: "na", note: "Apartments.com routes inquiries through its own contact form — no outbound website link to test." },
+          apartments: aptLink,
           google: googleLink,
           website: { status: "na", note: "This is the destination site." },
         };
@@ -6534,6 +6561,7 @@ interface ApartmentsListingRead {
   onlineApplication: boolean | null;
   phones: string[];
   amenities: string[];
+  hasWebsiteLink: boolean | null; // "View Property Website" link present on the listing
 }
 
 /**
@@ -6550,7 +6578,7 @@ async function readApartmentsListing(url: string): Promise<ApartmentsListingRead
     ok: false, advertising: null, priceText: "", beds: "", sqft: "",
     officeHours: {}, mediaSummary: "", mediaCounts: { photos: null, virtualTours: null, videos: null },
     photoUrls: [], concessions: "", tourScheduling: null, onlineApplication: null,
-    phones: [], amenities: [],
+    phones: [], amenities: [], hasWebsiteLink: null,
   };
   if (!url) return empty;
   const prompt = `Use your web_fetch tool to load this Apartments.com listing and read it carefully: ${url}
@@ -6639,6 +6667,11 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         onlineApplication: typeof j.onlineApplication === "boolean" ? j.onlineApplication : null,
         phones: strArr(j.phones, 6),
         amenities: strArr(j.amenities, 12),
+        // The "View Property Website" link is standard on an active listing.
+        // Detect it deterministically from the raw fetched content (its visible
+        // button text), not model judgment. null = page too thin to tell.
+        hasWebsiteLink:
+          rawFetched.length > 500 ? /view\s+property\s+website|property\s+website/i.test(rawFetched) : null,
       };
       // A "thin" read (nothing substantive) is a partial/blocked fetch — retry once.
       const thin =
