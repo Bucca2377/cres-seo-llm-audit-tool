@@ -2351,7 +2351,10 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
   // panel agrees with the consistency check.
   const isAptCaveat = (r: (typeof rows)[number]) =>
     aptNotAdvertising && r.present && /^Apartments\.com/i.test(r.network);
-  const presentCount = rows.filter((r) => r.present && !isAptCaveat(r)).length;
+  // Count the caveat as present — a directory LISTING does exist on Apartments.com
+  // (that's the citation); the "not actively advertising" flag is a separate
+  // dimension shown on the chip, not a reason to drop it from the count.
+  const presentCount = rows.filter((r) => r.present).length;
   return (
     <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -2368,7 +2371,7 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
           const caveat = isAptCaveat(r);
           const active = r.present && !caveat;
           const label = caveat
-            ? `${r.network} — listed, not advertising`
+            ? `${r.network} — listed, not actively advertising`
             : active && r.foundSites.length > 1
             ? `${r.network} (${r.foundSites.length} sites)`
             : r.network;
@@ -7665,7 +7668,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               const aptNotAdv = aptListedNotAdvertising(mkt?.consistency);
               const isAptCaveat = (r: (typeof rows)[number]) =>
                 aptNotAdv && r.present && /^Apartments\.com/i.test(r.network);
-              const presentCount = rows.filter((r) => r.present && !isAptCaveat(r)).length;
+              // Count the caveat as present — a listing exists (the citation); the
+              // "not actively advertising" flag is shown in the row, not dropped.
+              const presentCount = rows.filter((r) => r.present).length;
               return (
                 <div className="pb-avoid" style={{ marginTop: 18 }}>
                   <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
@@ -7690,7 +7695,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                             <td style={findingsTd}>
                               {r.network}
                               {caveat ? (
-                                <span style={{ color: "#9a6a2a" }}> — listed, not advertising</span>
+                                <span style={{ color: "#9a6a2a" }}> — listed, not actively advertising</span>
                               ) : active && r.foundSites.length > 0 ? (
                                 <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
                               ) : null}
