@@ -4719,7 +4719,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // Narrow match (a create/launch verb within ~40 chars of concession/special)
       // so a legitimate "sync the EXISTING special to Apartments.com" card, which
       // uses "add/sync/promote", is preserved.
-      const recsFinal: AuditRecommendations = concessionText
+      const recsFiltered: AuditRecommendations = concessionText
         ? recs.filter(
             (c) =>
               !/\b(launch|create|introduc\w*|start|establish|roll[-\s]?out|implement)\b[^.!?]{0,40}\b(concession|move[-\s]?in special|move[-\s]?in incentive)\b/i.test(
@@ -4727,6 +4727,22 @@ RECOMMENDATION RULES (match the rest of the app exactly):
               )
           )
         : recs;
+      // When the Apartments.com listing is DARK (deterministically detected via the
+      // "not currently advertising" banner), inject a fixed recommendation to turn
+      // it back on — with an explicit escape hatch in case the property intends it
+      // to be off. Deterministic so the wording + escape hatch are reliable.
+      const aptIsDark = !!(aptRead && aptRead.ok && aptRead.advertising === false);
+      const aptActivationCard: RecommendationCard = {
+        priority: "STRATEGIC",
+        title: "Activate the Apartments.com listing immediately (ignore if intentionally off)",
+        what: 'Apartments.com shows "This property is not currently advertising on Apartments.com," so the listing is dark: anyone who finds you there lands on a shell and is funneled to the competitors in the "Explore Similar Rentals Nearby" panel. IF this is intentional (you have chosen not to advertise on Apartments.com), IGNORE this. Otherwise, reactivate the paid listing immediately.',
+        why: "A dark listing on the largest rental network leaks prospects straight to the competitors shown on your own shell page.",
+        effort: "~1 day · marketing manager + Apartments.com rep",
+        success: "Listing live with pricing, photos, and available units within 1 week (or confirmed intentionally off).",
+        source: 'Apartments.com: "not currently advertising" (shell listing).',
+      };
+      const recsFinal: AuditRecommendations =
+        aptIsDark && Array.isArray(recsFiltered) ? [...recsFiltered, aptActivationCard] : recsFiltered;
 
       // --- Vision pass: actually LOOK at the website gallery photos ---
       // The text audit can only confirm photos exist; here we hand the real
