@@ -1855,11 +1855,11 @@ async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> 
           });
           const d = await r.json();
           if (!r.ok || d.error) {
-            return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", error: d.error || `failed (${r.status})` };
+            return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", field: null, error: d.error || `failed (${r.status})` };
           }
-          return { strategy, score: d.score ?? null, lcp: d.lcp || "—", cls: d.cls || "—", fcp: d.fcp || "—", tbt: d.tbt || "—" };
+          return { strategy, score: d.score ?? null, lcp: d.lcp || "—", cls: d.cls || "—", fcp: d.fcp || "—", tbt: d.tbt || "—", field: d.field ?? null };
         } catch {
-          return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", error: "request failed" };
+          return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", field: null, error: "request failed" };
         }
       })
     );
@@ -2455,24 +2455,48 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
             {s.error ? (
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9aa3ad" }}>Could not measure this run.</div>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
-                {[
-                  ["LCP", s.lcp],
-                  ["CLS", s.cls],
-                  ["TBT", s.tbt],
-                  ["FCP", s.fcp],
-                ].map(([k, v]) => (
-                  <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
-                    <strong style={{ color: "#333" }}>{k}</strong> {v}
-                  </span>
-                ))}
-              </div>
+              <>
+                {s.field && (
+                  <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #f0f0f0" }}>
+                    <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#15803d", fontWeight: 600, marginBottom: 3 }}>
+                      Real users (28-day){s.field.scope === "origin" ? ", site-wide" : ""}{s.field.category ? ` · ${s.field.category.toLowerCase()}` : ""}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                      {[
+                        ["LCP", s.field.lcp],
+                        ["CLS", s.field.cls],
+                        ["INP", s.field.inp],
+                        ["FCP", s.field.fcp],
+                      ].map(([k, v]) => (
+                        <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
+                          <strong style={{ color: "#333" }}>{k}</strong> {v}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                  {s.field && (
+                    <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#9aa3ad", width: "100%" }}>Lab estimate (varies run to run):</span>
+                  )}
+                  {[
+                    ["LCP", s.lcp],
+                    ["CLS", s.cls],
+                    ["TBT", s.tbt],
+                    ["FCP", s.fcp],
+                  ].map(([k, v]) => (
+                    <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
+                      <strong style={{ color: "#333" }}>{k}</strong> {v}
+                    </span>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         ))}
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
-        Google PageSpeed Insights · {new Date(ps.checkedAt).toLocaleString()}. 90+ is good, 50–89 needs work, under 50 is poor. Mobile is what Google ranks on.
+        Google PageSpeed Insights · {new Date(ps.checkedAt).toLocaleString()}. 90+ is good, 50–89 needs work, under 50 is poor. Mobile is what Google ranks on. The <strong>score and lab metrics are a synthetic single-run test, so they move run-to-run</strong>; the &ldquo;Real users&rdquo; line (when shown) is Google&rsquo;s 28-day field data and is the stable benchmark.
       </p>
     </div>
   );
@@ -7789,8 +7813,17 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     ))}
                   </tbody>
                 </table>
+                {seo.pageSpeed.strategies.some((s) => s.field) && (
+                  <p style={{ ...bodyP, fontSize: 10, color: "#15803d", marginTop: 4 }}>
+                    Real users (Google 28-day field data — the stable benchmark):{" "}
+                    {seo.pageSpeed.strategies
+                      .filter((s) => s.field)
+                      .map((s) => `${s.strategy} LCP ${s.field!.lcp}, CLS ${s.field!.cls}, INP ${s.field!.inp}`)
+                      .join(" · ")}
+                  </p>
+                )}
                 <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 4 }}>
-                  90+ good · 50–89 needs work · under 50 poor. Mobile is Google&apos;s ranking signal.
+                  Score and lab metrics above are a synthetic single-run test and move run-to-run; 90+ good · 50–89 needs work · under 50 poor. Mobile is Google&apos;s ranking signal.
                 </p>
               </div>
             )}

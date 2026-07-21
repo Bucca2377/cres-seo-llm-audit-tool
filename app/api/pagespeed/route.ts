@@ -38,12 +38,18 @@ export async function POST(req: NextRequest) {
   const key = process.env["PAGESPEED_API_KEY"] || process.env["GOOGLE_PSI_KEY"] || "";
   if (key) params.set("key", key);
 
+  type CruxExperience = {
+    overall_category?: string;
+    metrics?: Record<string, { percentile?: number; category?: string }>;
+  };
   let data: {
     error?: { message?: string };
     lighthouseResult?: {
       categories?: { performance?: { score?: number } };
       audits?: Record<string, { displayValue?: string }>;
     };
+    loadingExperience?: CruxExperience;
+    originLoadingExperience?: CruxExperience;
   };
   try {
     const r = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${params.toString()}`);
@@ -67,6 +73,35 @@ export async function POST(req: NextRequest) {
   const score = typeof rawScore === "number" ? Math.round(rawScore * 100) : null;
   const dv = (k: string) => audits[k]?.displayValue || "—";
 
+  // CrUX field data — REAL users over a 28-day rolling window, so it's STABLE
+  // run-to-run (unlike the synthetic Lighthouse lab numbers above, which vary).
+  // Prefer this-page data; fall back to origin-level. Absent for low-traffic
+  // sites (not enough real visitors to be in the Chrome UX Report) -> field:null.
+  const hasMetrics = (e?: CruxExperience) => !!(e?.metrics && Object.keys(e.metrics).length);
+  const crux = hasMetrics(data.loadingExperience)
+    ? data.loadingExperience
+    : hasMetrics(data.originLoadingExperience)
+    ? data.originLoadingExperience
+    : undefined;
+  const pct = (k: string) =>
+    typeof crux?.metrics?.[k]?.percentile === "number" ? (crux.metrics[k].percentile as number) : null;
+  const field = crux
+    ? (() => {
+        const lcp = pct("LARGEST_CONTENTFUL_PAINT_MS");
+        const cls = pct("CUMULATIVE_LAYOUT_SHIFT_SCORE");
+        const inp = pct("INTERACTION_TO_NEXT_PAINT");
+        const fcp = pct("FIRST_CONTENTFUL_PAINT_MS");
+        return {
+          scope: hasMetrics(data.loadingExperience) ? "page" : "origin",
+          category: crux.overall_category || "",
+          lcp: lcp != null ? (lcp / 1000).toFixed(1) + " s" : "—",
+          cls: cls != null ? (cls / 100).toFixed(2) : "—",
+          inp: inp != null ? Math.round(inp) + " ms" : "—",
+          fcp: fcp != null ? (fcp / 1000).toFixed(1) + " s" : "—",
+        };
+      })()
+    : null;
+
   return NextResponse.json({
     strategy,
     score,
@@ -75,5 +110,6 @@ export async function POST(req: NextRequest) {
     fcp: dv("first-contentful-paint"),
     tbt: dv("total-blocking-time"),
     speedIndex: dv("speed-index"),
+    field,
   });
 }

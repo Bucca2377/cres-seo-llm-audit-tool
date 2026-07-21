@@ -101,13 +101,24 @@ export interface TechnicalSeoResult {
 }
 
 /** PageSpeed / Core Web Vitals for one strategy (mobile or desktop). */
+/** CrUX real-user field data (28-day rolling) — stable run-to-run, unlike lab. */
+export interface PageSpeedField {
+  scope: "page" | "origin"; // this URL's data, or origin-wide fallback
+  category: string; // FAST | AVERAGE | SLOW (overall)
+  lcp: string; // e.g. "2.4 s"
+  cls: string; // e.g. "0.08"
+  inp: string; // Interaction to Next Paint, e.g. "180 ms"
+  fcp: string; // e.g. "1.6 s"
+}
+
 export interface PageSpeedStrategyResult {
   strategy: "mobile" | "desktop";
-  score: number | null; // Lighthouse performance score 0-100
-  lcp: string; // Largest Contentful Paint (display value, e.g. "2.4 s")
-  cls: string; // Cumulative Layout Shift
-  fcp: string; // First Contentful Paint
-  tbt: string; // Total Blocking Time
+  score: number | null; // Lighthouse LAB performance score 0-100 (synthetic; varies run-to-run)
+  lcp: string; // Largest Contentful Paint (lab display value, e.g. "2.4 s")
+  cls: string; // Cumulative Layout Shift (lab)
+  fcp: string; // First Contentful Paint (lab)
+  tbt: string; // Total Blocking Time (lab)
+  field?: PageSpeedField | null; // CrUX real-user data — stable; null when the site has no CrUX data
   error?: string;
 }
 
