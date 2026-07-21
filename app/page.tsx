@@ -60,7 +60,8 @@ const LLM_ITEMS: { id: number; label: string; pts: number; description: string; 
   { id: 3, label: "Review Volume (30+ target)", pts: 12, description: "30+ reviews across Google, Apartments.com, and Yelp", group: "profile" },
   { id: 4, label: "Review Quality (4.0+ avg)", pts: 10, description: "Average rating of 4.0 stars or higher", group: "profile" },
   { id: 5, label: "Consistent Name, Address & Phone", pts: 10, description: "Name, address, and phone match across every listing site", group: "profile" },
-  { id: 10, label: "Owner Response to Reviews", pts: 7, description: "Management responds to all reviews, recent and old", group: "profile" },
+  // "Owner Response to Reviews" (was id 10) removed — the automatic owner-response
+  // detection was unreliable, and the Reviews audit already covers response rate.
   { id: 2, label: "Apartment Schema Markup", pts: 15, description: "JSON-LD RentalApartment structured data on the property website", group: "website" },
   { id: 6, label: "Structured FAQ on Website", pts: 10, description: "Q&A page with schema markup, ideal for AI citation", group: "website" },
   { id: 8, label: "Amenities Structured Data", pts: 8, description: "All amenities tagged with standard taxonomy across platforms", group: "website" },
@@ -4037,7 +4038,7 @@ In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 s
 
 IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the Google listing is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual Google listing, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the listing, mark each of those items as PARTIAL with evidence "Couldn't auto-check this — paste the property's Google listing link in Property Settings, then re-run the audit." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of automatic data alone.`;
 
-  const item10NeedsWebSearch = responseRate === null;
+  const item10NeedsWebSearch = false; // "Owner Response to Reviews" item was removed — never search for it
   const listingsCovered = confirmedPlatforms.length > 0
     ? " Items 5 and 8 are covered by the LISTINGS GROUND TRUTH above — do NOT search the web for those either."
     : "";
@@ -4095,17 +4096,11 @@ Grading rubric — when evidence is clearly visible in search results, lean towa
 
 9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
 
-10. Owner Response to Reviews — ${
-        responseRate !== null
-          ? `See ground truth above (owner response rate ${responseRate}% from actual review data). Do NOT web-search for this item.`
-          : "Ground truth couldn't capture a response rate. Web-search the property's Google reviews ONCE for visible owner/management replies. Grade per the rubric above — do NOT default to 'manual verification' when reviews clearly exist on Google."
-      }
-
 Return ONLY a JSON object, no prose before or after:
 {
   "audit": [
     {"id": 1, "status": "complete" | "partial" | "missing", "evidence": "one specific sentence citing what you found, including names/numbers"},
-    ... (entries for ALL 10 items, in id order)
+    ... (one entry for EACH item in the CHECKLIST above, in id order — do NOT add items that aren't listed)
   ],
   "recommendations": [
     {
@@ -7308,7 +7303,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     llmTs && completeCount > 0
       ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%), with ${completeCount} of ${LLM_ITEMS.length} optimization checks fully met.`
       : llmTs
-      ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%) — significant optimization headroom remains across the 10-item checklist.`
+      ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%) — significant optimization headroom remains across the ${LLM_ITEMS.length}-item checklist.`
       : "An optimization checklist audit has not yet been run for this property. Run it from the Marketing Audit tab to populate this section.";
 
   const seoSummaryLine = seo
@@ -7342,19 +7337,17 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
       ? setAsideList.filter((s) => s.audit === "marketing")
       : setAsideList;
 
-  // ONE unified recommendations list per report, dedup'd across the audits that
-  // feed it: marketing-consistency recs + optimization-checklist (LLM) recs +
-  // SEO recs. SEO-only mode carries just the SEO cards; the marketing report
-  // carries the marketing + checklist cards; combined carries all three.
+  // ONE unified FIX list per report = marketing-audit recs + SEO recs. The
+  // optimization-checklist (LLM) recs are deliberately NOT here: the checklist is
+  // presented as its own SCORECARD (score + per-item status) below, and its fixes
+  // are already covered by the marketing/SEO recommendations — showing them again
+  // as cards was pure duplication. SEO-only mode carries just the SEO cards.
   const allStructuredCards: RecommendationCard[] = dedupeRecCards(
     mode === "seo"
       ? [...(structuredSeoRecs || [])]
       : mode === "marketing"
-      ? // Marketing-only print mirrors the Marketing tab exactly — just the
-        // marketing-audit recs. The optimization-checklist (LLM) recs are a
-        // separate audit and belong only in the combined report, not here.
-        [...(structuredMktRecs || [])]
-      : [...(structuredMktRecs || []), ...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
+      ? [...(structuredMktRecs || [])]
+      : [...(structuredMktRecs || []), ...(structuredSeoRecs || [])]
   ).filter((c) => !isSetAside(c, setAsideKeys));
 
   // Group cards into priority bands for the printed report. The order
