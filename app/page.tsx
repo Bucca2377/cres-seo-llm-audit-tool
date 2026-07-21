@@ -490,23 +490,6 @@ function coverageRankAccent(avg: number | null, ranking: number, total: number, 
   return sev === 0 ? "#22c55e" : sev === 1 ? "#f59e0b" : B.tangelo;
 }
 
-function ScoreMeter({ score, max = 100 }: { score: number; max?: number }) {
-  const pct = (score / max) * 100;
-  const color = pct >= 75 ? "#22c55e" : pct >= 50 ? "#f59e0b" : B.tangelo;
-  const label = pct >= 75 ? "Strong" : pct >= 50 ? "Moderate" : "Needs Work";
-  return (
-    <div style={{ textAlign: "center" }}>
-      <svg width={140} height={80} viewBox="0 0 140 80">
-        <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke="#f0f0f0" strokeWidth={12} strokeLinecap="round" />
-        <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke={color} strokeWidth={12} strokeLinecap="round" strokeDasharray={`${(pct / 100) * 172.8} 172.8`} />
-        <text x="70" y="62" textAnchor="middle" fontFamily="'Barlow Condensed',sans-serif" fontWeight="700" fontSize="26" fill={B.oxford}>{score}</text>
-        <text x="70" y="76" textAnchor="middle" fontFamily="'Josefin Sans',sans-serif" fontSize="9" fill="#aaa" letterSpacing="1">/ {max}</text>
-      </svg>
-      <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, letterSpacing: "0.08em", color, textTransform: "uppercase", marginTop: -4 }}>{label}</div>
-    </div>
-  );
-}
-
 /* ================= RANK CHECK ===================================== */
 interface GoogleRankResult {
   map_pack_appeared: boolean;
@@ -4203,17 +4186,33 @@ function OptimizationChecklist({
     });
   };
 
+  const pct = total ? Math.round((earned / total) * 100) : 0;
+  const groupScore = (gid: string) => {
+    const items = LLM_ITEMS.filter((it) => it.group === gid);
+    return {
+      e: items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0),
+      t: items.reduce((s, it) => s + it.pts, 0),
+    };
+  };
+  const prof = groupScore("profile");
+  const web = groupScore("website");
+  const completeCount = LLM_ITEMS.filter((it) => statusOf(property, it.id) === "complete").length;
+  const pctAccent = (n: number, d: number) => (!d ? B.oxford : n / d >= 0.75 ? "#22c55e" : n / d >= 0.5 ? "#f59e0b" : B.tangelo);
+
+  // Scorecard — KPI tiles (like the SEO tab), not a to-do checklist. The
+  // item-by-item breakdown collapses behind them; fixes live in Recommendations.
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 20 }}>
-      <div style={{ background: "white", borderRadius: 10, padding: "24px 20px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", color: B.oxford, marginBottom: 16, textAlign: "center" }}>LLM Visibility Score</div>
-        <ScoreMeter score={earned} max={total} />
-        <div style={{ marginTop: 14, fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa", textAlign: "center", lineHeight: 1.6 }}>Measures how likely AI assistants are to cite {property.name} in apartment searches</div>
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 14 }}>
+        <KPI label="AI Visibility Score" value={`${pct}%`} sub={`${earned} of ${total} pts`} accent={pctAccent(earned, total)} />
+        <KPI label="Google Profile & Reviews" value={`${prof.e}/${prof.t}`} sub="profile signals" accent={pctAccent(prof.e, prof.t)} />
+        <KPI label="Website & Structured Data" value={`${web.e}/${web.t}`} sub="on-site signals" accent={pctAccent(web.e, web.t)} />
+        <KPI label="Checks Fully Met" value={`${completeCount}/${LLM_ITEMS.length}`} sub="items complete" accent={pctAccent(completeCount, LLM_ITEMS.length)} />
       </div>
-      <div style={{ background: "white", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-        <div style={{ padding: "12px 18px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", color: B.oxford }}>Optimization Checklist</span>
-        </div>
+      <details style={{ background: "white", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
+        <summary style={{ padding: "12px 18px", cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase", color: B.oxford }}>
+          Item-by-item detail &amp; evidence
+        </summary>
         <div style={{ maxHeight: 320, overflowY: "auto" }}>
           {LLM_GROUPS.map((group) => {
             const items = LLM_ITEMS.filter((it) => it.group === group.id);
@@ -4360,10 +4359,10 @@ function OptimizationChecklist({
             background: "#fafafa",
           }}
         >
-          Click any row to cycle status manually. Run the Marketing Audit below to populate statuses + evidence automatically via web search.
+          Click any row to cycle a status manually. Run the Marketing Audit to populate statuses + evidence automatically.
         </div>
-      </div>
-    </div>
+      </details>
+    </>
   );
 }
 
