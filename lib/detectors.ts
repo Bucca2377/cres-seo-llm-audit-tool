@@ -86,3 +86,22 @@ export function aptAdvertisingFromRawHtml(html: string): boolean | null {
   if (/explore similar rentals nearby/i.test(html)) return false;
   return null;
 }
+
+/**
+ * A Google Business Profile does NOT carry pricing, concessions/specials, virtual
+ * tours, preferred-employer programs, online applications, or tour scheduling — the
+ * consistency table marks those Google cells "Not a Google feature." So a
+ * recommendation telling the property to ADD one of those TO Google contradicts the
+ * report and must be dropped. True = the card targets Google with a non-Google
+ * feature (e.g. "add the concession to Google posts", "publish the virtual tour to
+ * Google"). Office hours, photos, reviews, description, and the website link ARE
+ * Google features, so recs about those correctly return false.
+ */
+export function recommendsNonGoogleFeatureOnGoogle(text: string): boolean {
+  const t = text || "";
+  const targetsGoogle = /\bgoogle\b|\bgbp\b/i.test(t);
+  if (!targetsGoogle) return false;
+  return /\b(concession|move[-\s]?in special|virtual tour|matterport|floor\s?plans?|pricing|rent range|preferred[-\s]?employer|online application|application portal|apply online|tour scheduling|schedule a tour)\b/i.test(
+    t
+  );
+}

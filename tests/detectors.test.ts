@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectWebsiteSpecial, specialFromHtml, aptAdvertisingFromRawHtml } from "../lib/detectors";
+import {
+  detectWebsiteSpecial,
+  specialFromHtml,
+  aptAdvertisingFromRawHtml,
+  recommendsNonGoogleFeatureOnGoogle,
+} from "../lib/detectors";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -67,4 +72,22 @@ test("apts: undeterminable -> null (caller keeps its prior read)", () => {
   assert.equal(aptAdvertisingFromRawHtml(""), null); // empty
   assert.equal(aptAdvertisingFromRawHtml("short"), null); // too thin
   assert.equal(aptAdvertisingFromRawHtml("<html>" + "x".repeat(600) + " generic page, no markers</html>"), null);
+});
+
+// ----- "Not a Google feature" recs must never point at Google -----------------
+
+test("recs: drops adding a non-Google feature to Google", () => {
+  // The two real offenders from the report.
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Add concession details to Google Business posts. Create a Google Business Profile post highlighting the move-in special."), true);
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Publish virtual tour to Google Street View. Publish the Matterport tour to the Google Business Profile."), true);
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Post the floor plan pricing to the Google Business Profile."), true);
+});
+
+test("recs: keeps legitimate Google recs and non-Google recs", () => {
+  // Office hours / photos / reviews / description ARE Google features.
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Fix office hours conflict on Google Business Profile."), false);
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Complete the Google Business Profile description and add the website link."), false);
+  // Preferred-employer / virtual-tour / concession recs that DON'T target Google stay.
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Launch a preferred employers corporate discount program on the website."), false);
+  assert.equal(recommendsNonGoogleFeatureOnGoogle("Add the Matterport virtual tour to the Apartments.com listing."), false);
 });
