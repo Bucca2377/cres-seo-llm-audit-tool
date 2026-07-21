@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useRoster,
   buildSystemPrompt,
@@ -10,7 +10,6 @@ import {
   callFetch,
   isStructuredRecs,
   type Property,
-  type ChecklistStatus,
   type AuditRecommendations,
   type RecommendationCard,
   type RecommendationPriority,
@@ -47,27 +46,6 @@ const B = {
   s2: "#e5bdb3",
 };
 
-/* -- DEMO DATA ------------------------------------------------------ */
-type LLMGroupId = "profile" | "website";
-
-const LLM_GROUPS: { id: LLMGroupId; label: string; hint: string }[] = [
-  { id: "profile", label: "Google Profile & Reviews", hint: "How the property shows up on Google Maps and in its reviews" },
-  { id: "website", label: "Website & Structured Data", hint: "On-site signals AI assistants read to cite the property" },
-];
-
-const LLM_ITEMS: { id: number; label: string; pts: number; description: string; group: LLMGroupId }[] = [
-  { id: 1, label: "Google Business Profile", pts: 20, description: "Verified listing with photos, hours, and a full description", group: "profile" },
-  { id: 3, label: "Review Volume (30+ target)", pts: 12, description: "30+ reviews across Google, Apartments.com, and Yelp", group: "profile" },
-  { id: 4, label: "Review Quality (4.0+ avg)", pts: 10, description: "Average rating of 4.0 stars or higher", group: "profile" },
-  { id: 5, label: "Consistent Name, Address & Phone", pts: 10, description: "Name, address, and phone match across every listing site", group: "profile" },
-  // "Owner Response to Reviews" (was id 10) removed — the automatic owner-response
-  // detection was unreliable, and the Reviews audit already covers response rate.
-  { id: 2, label: "Apartment Schema Markup", pts: 15, description: "JSON-LD RentalApartment structured data on the property website", group: "website" },
-  { id: 6, label: "Structured FAQ on Website", pts: 10, description: "Q&A page with schema markup, ideal for AI citation", group: "website" },
-  { id: 8, label: "Amenities Structured Data", pts: 8, description: "All amenities tagged with standard taxonomy across platforms", group: "website" },
-  { id: 9, label: "Perplexity / Web Citations", pts: 5, description: "Cited in third-party rental guides or local content lists", group: "website" },
-];
-
 /**
  * Condensed CRES company playbooks (Resident Reviews P&P, Leasing Lead
  * Nurturing, Sales Process Best Practices). Injected into audit prompts so
@@ -89,10 +67,6 @@ RESIDENT REVIEWS (CRES Resident Reviews P&P):
 LEAD NURTURING (CRES Leasing Lead Nurturing): Speed to lead is key. Days 1–7: call + text + email DAILY until a tour is booked or they opt out (call first, then text with a booking link, then a follow-up email). Days 8–30: all three channels every Monday. Post-tour: thank-you text + email within 1 hour; days 1–3 daily; days 4–14 every 3 days; days 15–30 weekly. Always learn where a lost lead leased and why, and log it in the CRM.
 
 SALES PROCESS (CRES Sales Process Best Practices) — the 5-step tour close: (1) Meet at the door, (2) Collect ID, (3) Build the relationship, (4) Tour the community leading with their hot buttons, (5) Close at the desk with 2–3 options and a direct ask. Post-tour checklist: update CRM, thank-you within 1 hour, follow-up within 24 hours.`;
-
-function statusOf(p: Property, itemId: number): ChecklistStatus {
-  return p.checklistStatuses?.[String(itemId)] ?? "missing";
-}
 
 /* -- RECOMMENDATION CARD RENDERER ----------------------------------- */
 /**
@@ -438,18 +412,6 @@ function RecommendationsBlock({
       {recs}
     </div>
   );
-}
-
-function earnedPoints(pts: number, status: ChecklistStatus): number {
-  if (status === "complete") return pts;
-  if (status === "partial") return Math.floor(pts / 2);
-  return 0;
-}
-
-function nextStatus(s: ChecklistStatus): ChecklistStatus {
-  if (s === "missing") return "partial";
-  if (s === "partial") return "complete";
-  return "missing";
 }
 
 const SUGGESTED_QUERIES_DEFAULT = [
@@ -3747,29 +3709,24 @@ function hasPriorMarketingBaseline(property: Property): boolean {
 
 /**
  * Deterministic diff between the previous Marketing Audit snapshot and the
- * current run — no AI. Compares the consistency grid (per row/platform) and
- * the optimization checklist so a client can see accountability run-to-run.
+ * current run — no AI. Compares the consistency grid (per row/platform) so a
+ * client can see accountability run-to-run.
  *
  * A consistency cell is a "problem" when red (ISSUE) or amber (CHECK); "ok"
  * when green (GOOD) or na (N/A).
  */
 function computeAuditProgress(
-  prev: { consistency: MarketingConsistencyRow[]; checklistStatuses: Record<string, ChecklistStatus>; timestamp: string },
-  currConsistency: MarketingConsistencyRow[],
-  currChecklist: Record<string, ChecklistStatus>
+  prev: { consistency: MarketingConsistencyRow[]; timestamp: string },
+  currConsistency: MarketingConsistencyRow[]
 ): {
   fixed: string[];
   stillOpen: string[];
   regressed: string[];
-  completed: string[];
-  slipped: string[];
   sinceTimestamp: string;
 } {
   const fixed: string[] = [];
   const stillOpen: string[] = [];
   const regressed: string[] = [];
-  const completed: string[] = [];
-  const slipped: string[] = [];
 
   const isProblem = (s: MarketingStatus) => s === "red" || s === "amber";
   const isOk = (s: MarketingStatus) => s === "green" || s === "na";
@@ -3795,19 +3752,7 @@ function computeAuditProgress(
     }
   }
 
-  // Checklist items — match by id, compare prev vs current status.
-  for (const item of LLM_ITEMS) {
-    const id = String(item.id);
-    const p = prev.checklistStatuses[id];
-    const c = currChecklist[id];
-    if (!p || !c) continue;
-    const wasIncomplete = p === "missing" || p === "partial";
-    const nowIncomplete = c === "missing" || c === "partial";
-    if (wasIncomplete && c === "complete") completed.push(item.label);
-    else if (p === "complete" && nowIncomplete) slipped.push(item.label);
-  }
-
-  return { fixed, stillOpen, regressed, completed, slipped, sinceTimestamp: prev.timestamp };
+  return { fixed, stillOpen, regressed, sinceTimestamp: prev.timestamp };
 }
 
 function MkStatusCell({ cell }: { cell: { status: MarketingStatus; note: string } }) {
@@ -3840,530 +3785,6 @@ function formatGbpHours(place: any): string {
     })
     .filter(Boolean)
     .join("; ");
-}
-
-/* ================= OPTIMIZATION CHECKLIST (shared) =============== */
-/**
- * The same web-search analysis LLMTab.runAudit performs, but pure: it RETURNS
- * the results instead of setting React state / calling onUpdateProperty. Used
- * by the Marketing Audit tab so one "Run Marketing Audit" click populates the
- * optimization checklist alongside the website/Apartments.com/Google audit.
- *
- * The prompt-building, SerpAPI pre-flights, and JSON parsing are copied
- * verbatim from LLMTab.runAudit — keep them in sync until LLMTab is removed.
- * NOTE: unlike LLMTab, this does NOT auto-capture website/gbpUrl enrichment;
- * the Marketing Audit already persists those URL fields from its own inputs.
- */
-async function runChecklistAudit(property: Property): Promise<{
-  statuses: Record<string, ChecklistStatus>;
-  evidence: Record<string, string>;
-  recommendations: AuditRecommendations;
-}> {
-  const city =
-    property.address.split(",").slice(-2, -1)[0]?.trim() ||
-    property.address.split(",")[1]?.trim() ||
-    "";
-  const itemsList = LLM_ITEMS.map(
-    (i) => `${i.id}. ${i.label} — ${i.description}`
-  ).join("\n");
-
-  // SerpAPI pre-flight: get Google Business Profile ground truth
-  let gbpGround: GBPGroundTruth | null = null;
-  try {
-    const serpQuery = buildGbpSearchQuery(property);
-    const serpData = await callSerp({
-      query: serpQuery,
-      engine: "google_maps",
-      location: extractLocation(property.address),
-    });
-    gbpGround = extractGBP(serpData, property);
-  } catch {
-    /* OK to proceed without ground truth */
-  }
-
-  // Second pre-flight: fetch reviews + owner responses via google_maps_reviews
-  let responseRate: number | null = null;
-  let responsesChecked = 0;
-  let responsesWith = 0;
-  let reviewsCallRan = false;
-  if (gbpGround) {
-    try {
-      let dataId = gbpGround.dataId || "";
-      if (!dataId) {
-        const location = extractLocation(property.address);
-        const mapsResp = await callSerp({
-          query: buildGbpSearchQuery(property),
-          engine: "google_maps",
-          location,
-        });
-        const mapsResults: any[] = [
-          ...(mapsResp?.place_results ? [mapsResp.place_results] : []),
-          ...(Array.isArray(mapsResp?.local_results) ? mapsResp.local_results : []),
-        ];
-        const match = mapsResults.find((r: any) =>
-          matchPropertyToResult(property, {
-            title: r.title || r.name,
-            website: r.website,
-            address: r.address,
-            dataId: r.data_id,
-            placeId: r.place_id,
-          })
-        );
-        dataId = match?.data_id || "";
-      }
-
-      if (dataId) {
-        reviewsCallRan = true;
-        const reviewsResp = await callSerp({
-          engine: "google_maps_reviews",
-          data_id: dataId,
-        });
-        const reviews: any[] = Array.isArray(reviewsResp?.reviews)
-          ? reviewsResp.reviews
-          : [];
-        responsesChecked = reviews.length;
-        const hasResponse = (r: any): boolean => {
-          const candidates = [r?.response, r?.owner_response];
-          for (const c of candidates) {
-            if (!c) continue;
-            if (typeof c === "string" && c.trim().length > 0) return true;
-            if (typeof c === "object") {
-              if (typeof c.snippet === "string" && c.snippet.trim().length > 0) return true;
-              if (typeof c.text === "string" && c.text.trim().length > 0) return true;
-              if (Object.keys(c).length > 0) return true;
-            }
-          }
-          if (typeof r?.owner_response_snippet === "string" && r.owner_response_snippet.trim().length > 0) {
-            return true;
-          }
-          return false;
-        };
-        responsesWith = reviews.filter(hasResponse).length;
-        responseRate =
-          responsesChecked > 0
-            ? Math.round((responsesWith / responsesChecked) * 100)
-            : null;
-      }
-    } catch {
-      /* best-effort; proceed without a response rate */
-    }
-  }
-
-  const effectiveReviewCount: number | null =
-    typeof gbpGround?.reviewCount === "number"
-      ? gbpGround.reviewCount
-      : reviewsCallRan
-      ? responsesChecked
-      : null;
-  const noReviews = effectiveReviewCount !== null && effectiveReviewCount < 5;
-
-  let confirmedPlatforms: string[] = [];
-  try {
-    const listingData = await callSerp({
-      query: `${property.name} ${city}`.trim(),
-      engine: "google",
-      location: extractLocation(property.address),
-    });
-    confirmedPlatforms = extractListingPlatforms(listingData, property);
-  } catch {
-    /* OK to proceed without listings ground truth */
-  }
-
-  const listingsBlock = confirmedPlatforms.length
-    ? `LISTINGS GROUND TRUTH (verified via Google search — authoritative, the property IS listed on these): ${confirmedPlatforms.join(", ")}.
-For Item 5 (Consistent Name, Address & Phone) and Item 8 (Amenities Structured Data), use this. Do NOT claim the property has "no presence on rental platforms" — it is demonstrably listed on ${confirmedPlatforms.length} platform(s). Do NOT web-search for items 5 or 8.
-- Item 5: COMPLETE if confirmed on ≥3 platforms; PARTIAL if 1–2. (Confirmed here: ${confirmedPlatforms.length}.)
-- Item 8: if Apartments.com is in the confirmed list, the listing exists — grade amenities completeness on that listing, never "no listing found".`
-    : `LISTINGS: the automatic check did not confirm aggregator listings this run. Web-search to verify presence on Apartments.com / Zillow / Rent.com before claiming the property is absent; if you find listings, grade items 5 and 8 against them.`;
-
-  const reviewStateBlock = noReviews
-    ? `REVIEW STATE (OVERRIDE — this property has essentially NO Google reviews, about ${effectiveReviewCount}):
-- Because there are no reviews yet, do NOT recommend "respond to every review", "pin a review", or anything about managing review responses — there is nothing to respond to.
-- The single highest review priority is GENERATING the first reviews using the CRES tactics (text residents a direct Google review link at move-in / after a work order / at lease signing, QR codes at every touchpoint, the $25/$200/$500 employee incentive).
-- Item 10 (Owner Response to Reviews): grade MISSING with evidence "No Google reviews yet, so there are no owner responses to manage — generating the first reviews is the priority." Do NOT web-search item 10 and do NOT spend a recommendation slot on responding to reviews.
-- Items 3 and 4 (review volume/quality) are MISSING — too few reviews to count or rate.`
-    : "";
-
-  const groundTruthBlock = gbpGround
-    ? `GOOGLE BUSINESS PROFILE GROUND TRUTH (verified via SerpAPI — Google's actual data):
-- Listing exists as: "${gbpGround.name}"
-- Address per Google: ${gbpGround.address}
-- Rating: ${gbpGround.rating !== null ? gbpGround.rating + " stars" : "not shown"}
-- Google review count: ${
-        typeof gbpGround.reviewCount === "number"
-          ? gbpGround.reviewCount + " reviews"
-          : effectiveReviewCount !== null
-          ? `about ${effectiveReviewCount} review${effectiveReviewCount === 1 ? "" : "s"} (Google didn't show a total; this is the count we could verify)`
-          : "not shown"
-      }
-- Hours: ${gbpGround.hasHours ? "listed" : "NOT listed"}
-- Phone: ${gbpGround.phone || "NOT listed"}
-- Website per Google: ${gbpGround.website || "NOT listed"}
-- Owner response rate: ${
-        responseRate !== null
-          ? `${responseRate}% (${responsesWith} of ${responsesChecked} top reviews have owner/management responses)`
-          : "unable to verify automatically"
-      }
-
-For items 1, 3, 4, and 10 BELOW, use the ground truth above — do not search the web for those items, just grade against the rubric:
-- Item 1 (Google Business Profile): Focus on whether the listing is LIVE and ACTIVELY MANAGED. COMPLETE if the listing exists with rating, reviews, hours, and address all present (signs of an active, used profile). PARTIAL if the listing exists but shows signs of neglect — missing hours, missing website link, no phone, or zero reviews despite the property being established. MISSING is not valid here since the listing exists. In evidence, cite signs of active management ("hours present, X reviews, rating Y") and flag any gaps ("phone not listed" / "website link missing"). Do NOT mention "claimed" or "unclaimed" — that status is unreliable and the real signal is whether the profile is live and being maintained.
-- Item 3 (Review Volume): COMPLETE if Google review count ≥30. PARTIAL if 10–29. MISSING if <10. (You may add Apartments.com/Yelp counts if helpful, but Google count is the floor.)
-- Item 4 (Review Quality): COMPLETE if rating ≥4.0. PARTIAL if 3.0–3.9. MISSING if <3.0 or no rating.
-- Item 10 (Owner Response to Reviews): ${
-        responseRate !== null
-          ? `Use the owner response rate from ground truth (${responseRate}%). COMPLETE if ≥ 50%. PARTIAL if 1-49%. MISSING if exactly 0%.`
-          : `The automatic check couldn't read the response rate this run, but reviews EXIST on Google. Web-search the property's Google reviews directly (1 search). Look for any sample of owner/management replies. If you see ANY owner responses in the search snippets → mark COMPLETE with evidence "Owner replies are visible on the property's Google reviews." If review search returns no signal at all → mark PARTIAL with evidence "Couldn't confirm owner replies automatically — open the property's Google reviews to check." Do not mark MISSING unless you can confirm zero owner responses across the visible review sample.`
-      }
-
-In your evidence sentences, cite the actual numbers (e.g., "254 reviews at 3.2 stars; 8 of 10 top reviews have owner responses").
-`
-    : `GROUND TRUTH UNAVAILABLE: SerpAPI did not return a matching Google Business Profile for this property (possibly due to a generic property name, an incorrect address, or a brand-new listing not yet in Google's index).
-
-IMPORTANT: items 1, 3, 4, and 10 must be web-searched directly — do not assume the Google listing is missing, broken, or absent. Search Google for "${property.name} apartments ${city}" and look for the property's actual Google listing, review count, and rating. If found, grade against the standard rubric. If web search ALSO can't confirm the listing, mark each of those items as PARTIAL with evidence "Couldn't auto-check this — paste the property's Google listing link in Property Settings, then re-run the audit." Do NOT mark items 1, 3, 4, or 10 as MISSING based on the lack of automatic data alone.`;
-
-  const item10NeedsWebSearch = false; // "Owner Response to Reviews" item was removed — never search for it
-  const listingsCovered = confirmedPlatforms.length > 0
-    ? " Items 5 and 8 are covered by the LISTINGS GROUND TRUTH above — do NOT search the web for those either."
-    : "";
-  const costControl = gbpGround
-    ? `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item, and only when ground truth above doesn't already answer the question. For items 1, 3, 4 the ground truth above is authoritative — do NOT search the web for those items.${
-        item10NeedsWebSearch
-          ? " For item 10 (Owner Response to Reviews), one web search IS required because the response rate couldn't be captured automatically."
-          : " For item 10 the ground truth above is authoritative — do NOT search the web."
-      }${listingsCovered}`
-    : `IMPORTANT — COST CONTROL: do at MOST 1 web search per checklist item. Because ground truth is UNAVAILABLE for this run, items 1, 3, 4, and 10 each require one web search to verify the GBP/reviews state. Do NOT skip those searches — but cap them at one each.${listingsCovered}`;
-
-  const prompt = `${groundTruthBlock}
-
-${listingsBlock}
-${reviewStateBlock ? "\n" + reviewStateBlock + "\n" : ""}
-Audit ${property.name} at ${property.address} for LLM search visibility. ${costControl}
-
-PROPERTY FACTS:
-- Name in our system: ${property.name}
-- Address: ${property.address}
-- City: ${city}
-${property.propertyType ? `- Property type: ${property.propertyType} (use this product word in recommendations, not a generic "apartments")` : ""}
-${property.bedroomTypes ? `- Bedroom types offered: ${property.bedroomTypes}` : ""}
-${property.managerName ? `- Management company: ${property.managerName}` : ""}
-${property.amenities.length ? `- Known amenities: ${property.amenities.slice(0, 6).join(", ")}` : ""}
-
-PHASE 1 — PROPERTY IDENTIFICATION:
-Use the ground truth above when present. If no ground truth, do ONE search "${property.name} ${city}" to identify the property's actual web footprint (name variations, official website). Do NOT do exploratory multi-query searches — the budget per audit is roughly 7 web searches total (1 identification + up to 1 per remaining item).
-
-PHASE 2 — GRADE EACH CHECKLIST ITEM:
-
-CHECKLIST:
-${itemsList}
-
-Grading rubric — when evidence is clearly visible in search results, lean toward "complete". Only mark "missing" when MULTIPLE varied searches turn up nothing. Use "partial" for moderate evidence that doesn't fully meet the bar.
-
-1. Google Business Profile — Detecting GBP via general web search is unreliable; the actual GBP knowledge panel often doesn't appear in search result snippets even when the GBP exists. Calibrate accordingly:
-   - COMPLETE: search results explicitly show a Google Business listing with star rating + review count + hours/address (the knowledge panel surfaced in search snippets).
-   - COMPLETE also if you find direct google.com/maps/place/ URLs in results pointing to this property.
-   - PARTIAL: GBP isn't directly visible in search snippets BUT you found strong indirect evidence the business is established online — any of: a Yelp listing with hours/phone, a working official website (e.g., edge26.trionliving.com), a phone number that responds to searches, an active social presence. Established apartment communities almost always have a Google listing — if there's clear evidence the business exists, lean PARTIAL rather than MISSING. Note in the evidence: "Google listing likely exists but didn't show up in search — add its link in Property Settings to confirm."
-   - MISSING: only if you find NO web presence for the property at all (no website, no Yelp, no listings anywhere). This should be rare for established apartment communities.
-   - Note: ${gbpGround ? "ground truth above is authoritative for this item. Do NOT search the web for GBP — use the ground truth data only." : "ground truth was UNAVAILABLE this run. Web-search this item once to verify; lean PARTIAL with the manual-verification note if the search is inconclusive."}
-
-2. Apartment Schema Markup — Check the property's official website (visit the homepage if found). COMPLETE only if you can confirm JSON-LD/RentalApartment schema. PARTIAL if the website exists and is well-structured but schema can't be confirmed from snippets. MISSING if no official website found.
-
-3. Review Volume — Sum visible review counts across Google + Apartments.com + Yelp + Apartment Ratings + any other platforms. COMPLETE if total ≥50 across platforms. PARTIAL if 20-49. MISSING if <20 or unable to find any. (A GBP with 312 Google reviews alone clearly qualifies as COMPLETE.)
-
-4. Review Quality — COMPLETE if average rating ≥4.0 on the primary platform (usually Google). PARTIAL if 3.0-3.9. MISSING if <3.0 or no reviews exist.
-
-5. Consistent Name, Address & Phone — FIRST consult the LISTINGS GROUND TRUTH block above; it lists the platforms where this property is confirmed present. COMPLETE if confirmed on ≥3 platforms; PARTIAL if 1–2; only consider MISSING if zero platforms are confirmed AND a web search also finds none. Never claim "no presence on rental platforms" when the ground truth lists any. (If platforms are confirmed, do not web-search this item.)
-
-6. Structured FAQ on Website — If you found the website in Phase 1, look for an /faq, /questions, or /resident-faq URL. COMPLETE if a dedicated FAQ page exists. PARTIAL if FAQ-style content exists but not on a dedicated page. MISSING if no FAQ content found OR no website found.
-
-8. Amenities Structured Data — If Apartments.com is in the LISTINGS GROUND TRUTH block above, the listing EXISTS; grade the amenities section's completeness, never "no listing found". COMPLETE if the listing has a fully populated amenities section (10+ amenities tagged). PARTIAL if some amenities listed but sparse (<10), or if the listing exists but amenity depth can't be confirmed from snippets. MISSING only if Apartments.com is genuinely absent from the confirmed listings AND a web search finds no listing.
-
-9. Perplexity / Web Citations — Search for queries like "best apartments ${city}" or "${city} apartment guide" or "${city} luxury apartments". COMPLETE if ${property.name} is cited in 2+ third-party blog posts/guides. PARTIAL if cited once. MISSING if no citations beyond official listings.
-
-Return ONLY a JSON object, no prose before or after:
-{
-  "audit": [
-    {"id": 1, "status": "complete" | "partial" | "missing", "evidence": "one specific sentence citing what you found, including names/numbers"},
-    ... (one entry for EACH item in the CHECKLIST above, in id order — do NOT add items that aren't listed)
-  ],
-  "recommendations": [
-    {
-      "priority": "QUICK WIN" | "FOUNDATIONAL" | "MAP PACK" | "STRATEGIC" | "CONTENT" | "LONG-TAIL",
-      "title": "Imperative phrase, max 12 words, no period",
-      "what": "1-3 sentences. Exactly what to do. Name the URL / page / system / vendor when relevant. No hedging.",
-      "why": "1-2 sentences. The audit finding that triggered this + the business impact in concrete terms. Cite numbers when available.",
-      "effort": "Format: '~<time> · <who>'. Examples: '~30 min · web developer', '~2 hrs · marketing manager', '~1 week · vendor + PM review'.",
-      "success": "Measurable outcome. Example: 'Schema validates at schema.org/validator within 1 week' or 'Google review count reaches 30+ within 90 days'.",
-      "source": "Which audit finding this addresses. Example: 'Item 2 (0/15 → target 15/15)' or 'Items 3 & 4 (review volume + quality both MISSING)'."
-    },
-    ... 5 cards total
-  ]
-}
-
-Evidence sentences must cite SPECIFIC findings (e.g., "Found the Google listing 'View Apartments by Trion Living' at 10701 N Pecos St with 312 Google reviews at 3.8 stars, hours and photos present" — NOT generic statements like "Google listing exists").
-
-PLAIN-ENGLISH RULE (applies to every evidence sentence — this is read by a property manager, not an SEO specialist): write the way you'd explain it to a busy property manager. NEVER use the jargon terms "NAP", "ground truth", "knowledge panel", "GBP", "ILS", "SERP", or "manual verification recommended" in evidence. Say "Google listing" not "GBP", "name/address/phone match" not "NAP", "listing sites" not "ILS". When something couldn't be checked automatically, say plainly "Couldn't verify automatically — paste the property's Google listing link in Property Settings, then re-run." — never "manual verification recommended."
-
-${CRES_PLAYBOOK}
-
-Recommendation rules (STRICT):
-1. EXACTLY 5 recommendations. Order by highest impact first.
-2. Each "title" is imperative and scannable — start with a verb (Add, Build, Claim, Launch, Audit, Publish, Fix).
-3. "what" must be concrete: name the specific page/URL, vendor, plugin, or platform. Forbid generic verbs without an object ("improve SEO" is unacceptable; "Add JSON-LD ApartmentComplex schema to {property website URL}/floor-plans" is correct).
-4. "why" must reference an actual audit finding (the status + score for one or more items) AND state the impact. Forbid generic statements ("important for SEO" is unacceptable; "Audit found 0/15 on Item 2 (schema); AI assistants like ChatGPT need structured data to cite specific facts" is correct).
-5. "effort" must include time + role.
-6. "success" must be measurable and time-boxed when possible.
-7. "source" must reference specific item IDs from the audit above.
-8. CRES PLAYBOOK GROUNDING: any recommendation about reviews, lead follow-up, or the tour/sales process MUST use the specific CRES tactic from the playbook above, described plainly in "what" — e.g. "text residents a direct Google review link after positive interactions", "add a review-link QR code to work-order-complete notices", "Hug a Building visits", "the $25/$200/$500 review incentive", "call + text + email daily for the first 7 days". Do NOT give generic review/lead advice when the CRES playbook covers it, and do NOT fabricate branded program names (no "CRES text-message review protocol" — that is not a real thing; only "Hug a Building" is a named program).
-9. Priority assignment guide:
-   - QUICK WIN: ≤ 4 hours, near-term measurable impact
-   - FOUNDATIONAL: GBP, schema, NAP, website hygiene — must-have before others can compound
-   - CONTENT: requires writing pages, FAQs, blog posts, social
-   - STRATEGIC: > 1 week, multi-stakeholder, ongoing program (review campaigns, backlink outreach)
-   - LONG-TAIL: niche query optimization with lower competition
-   - MAP PACK: not used for LLM audit (SEO-only) — never apply to LLM recs.`;
-
-  const data = await callAI({ prompt, maxTokens: 4000, useWebSearch: true });
-  const text = (data.content || [])
-    .filter((b: any) => b.type === "text")
-    .map((b: any) => b.text)
-    .join("\n");
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("Audit returned no JSON.");
-
-  const parsed = JSON.parse(match[0]) as {
-    audit: { id: number; status: ChecklistStatus; evidence: string }[];
-    recommendations: AuditRecommendations;
-  };
-  if (!Array.isArray(parsed.audit)) throw new Error("Audit data malformed.");
-
-  const statuses: Record<string, ChecklistStatus> = {};
-  const evidence: Record<string, string> = {};
-  for (const a of parsed.audit) {
-    if (a && typeof a.id === "number") {
-      statuses[String(a.id)] = a.status;
-      evidence[String(a.id)] = a.evidence || "";
-    }
-  }
-
-  const recs = parsed.recommendations;
-  const normalizedRecs: AuditRecommendations = isStructuredRecs(recs)
-    ? recs
-    : typeof recs === "string"
-    ? recs
-    : "";
-
-  return { statuses, evidence, recommendations: normalizedRecs };
-}
-
-/**
- * Display-only optimization checklist: the score gauge + grouped checklist with
- * manual click-to-cycle status and audit evidence. Lifted from LLMTab's render
- * (minus the run button). Reads/writes the same Property fields LLMTab uses
- * (checklistStatuses / checklistEvidence), so a run in either place shares data.
- */
-function OptimizationChecklist({
-  property,
-  onUpdateProperty,
-}: {
-  property: Property;
-  onUpdateProperty: (p: Property) => void;
-}) {
-  const earned = LLM_ITEMS.reduce(
-    (s, i) => s + earnedPoints(i.pts, statusOf(property, i.id)),
-    0
-  );
-  const total = LLM_ITEMS.reduce((s, i) => s + i.pts, 0);
-
-  const cycleStatus = (itemId: number) => {
-    const current = statusOf(property, itemId);
-    const next = nextStatus(current);
-    onUpdateProperty({
-      ...property,
-      checklistStatuses: {
-        ...(property.checklistStatuses ?? {}),
-        [String(itemId)]: next,
-      },
-    });
-  };
-
-  const pct = total ? Math.round((earned / total) * 100) : 0;
-  const groupScore = (gid: string) => {
-    const items = LLM_ITEMS.filter((it) => it.group === gid);
-    return {
-      e: items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0),
-      t: items.reduce((s, it) => s + it.pts, 0),
-    };
-  };
-  const prof = groupScore("profile");
-  const web = groupScore("website");
-  const completeCount = LLM_ITEMS.filter((it) => statusOf(property, it.id) === "complete").length;
-  const pctAccent = (n: number, d: number) => (!d ? B.oxford : n / d >= 0.75 ? "#22c55e" : n / d >= 0.5 ? "#f59e0b" : B.tangelo);
-
-  // Scorecard — KPI tiles (like the SEO tab), not a to-do checklist. The
-  // item-by-item breakdown collapses behind them; fixes live in Recommendations.
-  return (
-    <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 14 }}>
-        <KPI label="Online Presence Score" value={`${pct}%`} sub={`${earned} of ${total} pts`} accent={pctAccent(earned, total)} />
-        <KPI label="Google Profile & Reviews" value={`${prof.e}/${prof.t}`} sub="profile signals" accent={pctAccent(prof.e, prof.t)} />
-        <KPI label="Website & Structured Data" value={`${web.e}/${web.t}`} sub="on-site signals" accent={pctAccent(web.e, web.t)} />
-        <KPI label="Checks Fully Met" value={`${completeCount}/${LLM_ITEMS.length}`} sub="items complete" accent={pctAccent(completeCount, LLM_ITEMS.length)} />
-      </div>
-      <details style={{ background: "white", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}>
-        <summary style={{ padding: "12px 18px", cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase", color: B.oxford }}>
-          Item-by-item detail &amp; evidence
-        </summary>
-        <div style={{ maxHeight: 320, overflowY: "auto" }}>
-          {LLM_GROUPS.map((group) => {
-            const items = LLM_ITEMS.filter((it) => it.group === group.id);
-            const groupEarned = items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0);
-            const groupTotal = items.reduce((s, it) => s + it.pts, 0);
-            return (
-              <div key={group.id}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "7px 18px",
-                    background: "#f7f9fa",
-                    borderTop: "1px solid #eef1f3",
-                    borderBottom: "1px solid #eef1f3",
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontFamily: "'Barlow Condensed',sans-serif",
-                        fontWeight: 700,
-                        fontSize: 12,
-                        letterSpacing: "0.09em",
-                        textTransform: "uppercase",
-                        color: B.oxford,
-                      }}
-                    >
-                      {group.label}
-                    </div>
-                    <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#aaa", marginTop: 1 }}>
-                      {group.hint}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "'Barlow Condensed',sans-serif",
-                      fontWeight: 700,
-                      fontSize: 14,
-                      color: "#8a909a",
-                      flexShrink: 0,
-                      marginLeft: 10,
-                    }}
-                  >
-                    {groupEarned}/{groupTotal}
-                  </span>
-                </div>
-                {items.map((item, i) => {
-                  const status = statusOf(property, item.id);
-                  const earned = earnedPoints(item.pts, status);
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => cycleStatus(item.id)}
-                      title="Click to cycle: missing → partial → complete"
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 12,
-                        padding: "10px 18px",
-                        borderBottom: i < items.length - 1 ? "1px solid #fafafa" : "none",
-                        cursor: "pointer",
-                        transition: "background 0.1s",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fafafa")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    >
-                      <div
-                        style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: "50%",
-                          background: status === "complete" ? "#22c55e" : status === "partial" ? "#f59e0b" : "#f0f0f0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          marginTop: 1,
-                        }}
-                      >
-                        <span style={{ color: "white", fontSize: 10, fontWeight: 700 }}>
-                          {status === "complete" ? "✓" : status === "partial" ? "~" : "✗"}
-                        </span>
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span
-                            style={{
-                              fontFamily: "'Josefin Sans',sans-serif",
-                              fontSize: 13,
-                              color: "#333",
-                              fontWeight: status === "missing" ? 300 : 400,
-                            }}
-                          >
-                            {item.label}
-                          </span>
-                          <span
-                            style={{
-                              fontFamily: "'Barlow Condensed',sans-serif",
-                              fontSize: 13,
-                              fontWeight: 700,
-                              color: status === "complete" ? "#22c55e" : status === "partial" ? "#f59e0b" : "#ccc",
-                            }}
-                          >
-                            {earned}/{item.pts}
-                          </span>
-                        </div>
-                        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#bbb", marginTop: 2 }}>
-                          {item.description}
-                        </div>
-                        {property.checklistEvidence?.[String(item.id)] && (
-                          <div
-                            style={{
-                              marginTop: 4,
-                              padding: "4px 8px",
-                              background: status === "complete" ? "#f0fdf4" : status === "partial" ? "#fef9e6" : "#fdf2f0",
-                              borderRadius: 4,
-                              fontFamily: "'Josefin Sans',sans-serif",
-                              fontSize: 11,
-                              color: status === "complete" ? "#15803d" : status === "partial" ? "#9a7200" : B.tangelo,
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            <span style={{ fontWeight: 600 }}>Audit: </span>
-                            {property.checklistEvidence[String(item.id)]}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-        <div
-          style={{
-            padding: "8px 18px",
-            borderTop: "1px solid #f5f5f5",
-            fontFamily: "'Josefin Sans',sans-serif",
-            fontSize: 11,
-            color: "#aaa",
-            background: "#fafafa",
-          }}
-        >
-          Click any row to cycle a status manually. Run the Marketing Audit to populate statuses + evidence automatically.
-        </div>
-      </details>
-    </>
-  );
 }
 
 function MarketingAuditTab({
@@ -5176,27 +4597,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       onUpdateProperty(current);
       setResults(result);
 
-      // --- Optimization checklist scoring (non-fatal) ---
-      // One click also runs the LLM-visibility checklist and merges the
-      // statuses/evidence/recommendations onto the property via the same
-      // fields LLMTab reads/writes. If it throws, the consistency audit above
-      // has already been saved and shown — the checklist just stays as-is.
-      try {
-        setProgress("Scoring the optimization checklist…");
-        const checklist = await runChecklistAudit(current);
-        const now = new Date().toISOString();
-        current = {
-          ...current,
-          checklistStatuses: { ...(current.checklistStatuses ?? {}), ...checklist.statuses },
-          checklistEvidence: { ...(current.checklistEvidence ?? {}), ...checklist.evidence },
-          llmAuditRecommendations: checklist.recommendations,
-          llmAuditTimestamp: now,
-        };
-        onUpdateProperty(current);
-      } catch {
-        /* checklist scoring is best-effort; the consistency audit still stands */
-      }
-
       setStage("done");
       setProgress("");
       setRanThisSession(true);
@@ -5373,18 +4773,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           Audit error: {error}
         </div>
       )}
-
-      {/* Optimization checklist + visibility score — populated by the single
-          Run Marketing Audit button above (alongside the consistency audit). */}
-      <div style={{ marginTop: 24, marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 4 }}>
-          Online Presence Health
-        </div>
-        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 10 }}>
-          How complete, consistent, and machine-readable the property&rsquo;s online footprint is — the foundation search engines and AI assistants rely on. (Whether an AI actually names you is measured in the SEO tab&rsquo;s &ldquo;AI Assistant Visibility.&rdquo;)
-        </div>
-        <OptimizationChecklist property={property} onUpdateProperty={onUpdateProperty} />
-      </div>
 
       {!results && !running && !error && (
         <div style={{ marginTop: 16, padding: "20px 16px", background: "#fafafa", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
@@ -5680,11 +5068,10 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
         (() => {
           const prog = computeAuditProgress(
             property.marketingAuditPrev!,
-            results.consistency,
-            property.checklistStatuses ?? {}
+            results.consistency
           );
-          const resolved = [...prog.fixed, ...prog.completed];
-          const regressedAll = [...prog.regressed, ...prog.slipped];
+          const resolved = prog.fixed;
+          const regressedAll = prog.regressed;
           const empty =
             resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
           const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
@@ -6511,22 +5898,6 @@ const PRINT_ORANGE = "#f25620";
 const PRINT_MUTED = "#93b2ab";
 const PRINT_BODY = "#1f2937";
 
-const STATUS_BG: Record<ChecklistStatus, string> = {
-  complete: "#e4f2ee",
-  partial: "#fdebe1",
-  missing: "#fdebe1",
-};
-const STATUS_TEXT: Record<ChecklistStatus, string> = {
-  complete: "#15803d",
-  partial: "#9a7200",
-  missing: "#b14a2a",
-};
-const STATUS_LABEL: Record<ChecklistStatus, string> = {
-  complete: "Functional",
-  partial: "Incomplete",
-  missing: "Absent / Gap",
-};
-
 function PrintSectionHeader({ children }: { children: React.ReactNode }) {
   return (
     <h2
@@ -7237,13 +6608,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     year: "numeric",
   });
 
-  const earnedLLM = LLM_ITEMS.reduce(
-    (s, i) => s + earnedPoints(i.pts, statusOf(property, i.id)),
-    0
-  );
-  const totalLLM = LLM_ITEMS.reduce((s, i) => s + i.pts, 0);
-  const scorePct = totalLLM > 0 ? Math.round((earnedLLM / totalLLM) * 100) : 0;
-
   // SEO scorecard counts only competitive (non-branded) queries, so ranking
   // #1 for the property's own name/street doesn't inflate the numbers.
   let seoMP = 0;
@@ -7291,38 +6655,12 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   }
 }`;
 
-  const missingHigh = LLM_ITEMS.filter(
-    (i) => statusOf(property, i.id) === "missing" && i.pts >= 10
-  );
-  const partialHigh = LLM_ITEMS.filter(
-    (i) => statusOf(property, i.id) === "partial" && i.pts >= 10
-  );
-  const completeCount = LLM_ITEMS.filter(
-    (i) => statusOf(property, i.id) === "complete"
-  ).length;
-
-  const llmSummaryLine =
-    llmTs && completeCount > 0
-      ? `The property's Online Presence Health score is ${earnedLLM}/${totalLLM} (${scorePct}%), with ${completeCount} of ${LLM_ITEMS.length} presence checks fully met.`
-      : llmTs
-      ? `The property's Online Presence Health score is ${earnedLLM}/${totalLLM} (${scorePct}%) — significant headroom remains across the ${LLM_ITEMS.length} presence checks.`
-      : "An optimization checklist audit has not yet been run for this property. Run it from the Marketing Audit tab to populate this section.";
-
   const seoSummaryLine = seo
     ? `Across ${seoCompTotal} competitive search ${seoCompTotal === 1 ? "query" : "queries"} representative of in-market renter intent${seoBrandedCount > 0 ? ` (plus ${seoBrandedCount} branded/navigational ${seoBrandedCount === 1 ? "query" : "queries"} excluded from these figures)` : ""}, the property appears in the Google Map Pack for ${seoMP} and on Page 1 organically for ${seoP1}${seoAvg ? ` (average organic rank #${seoAvg} among the competitive queries it ranks for)` : ", and does not rank organically for any of them"}.`
     : "A SEO Audit has not yet been run for this property. Run it from the SEO & Rank Check tab to populate this section.";
 
-  const gapLine =
-    missingHigh.length > 0 || partialHigh.length > 0
-      ? `The most material gaps identified are: ${[...missingHigh, ...partialHigh]
-          .slice(0, 3)
-          .map((i) => i.label)
-          .join("; ")}. Detailed findings and prioritized actions follow.`
-      : "Detailed findings and prioritized actions follow.";
-
   // -- Recommendations: prefer the new structured cards; fall back to
   // legacy text + categorizer for older persisted audits.
-  const structuredLlmRecs = isStructuredRecs(llmRecs) ? llmRecs : null;
   const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
   const structuredMktRecs = isStructuredRecs(mkt?.recommendations) ? (mkt!.recommendations as RecommendationCard[]) : null;
 
@@ -7339,11 +6677,8 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
       ? setAsideList.filter((s) => s.audit === "marketing")
       : setAsideList;
 
-  // ONE unified FIX list per report = marketing-audit recs + SEO recs. The
-  // optimization-checklist (LLM) recs are deliberately NOT here: the checklist is
-  // presented as its own SCORECARD (score + per-item status) below, and its fixes
-  // are already covered by the marketing/SEO recommendations — showing them again
-  // as cards was pure duplication. SEO-only mode carries just the SEO cards.
+  // ONE unified FIX list per report = marketing-audit recs + SEO recs, deduped.
+  // SEO-only mode carries just the SEO cards; marketing-only mode just marketing.
   const allStructuredCards: RecommendationCard[] = dedupeRecCards(
     mode === "seo"
       ? [...(structuredSeoRecs || [])]
@@ -7371,12 +6706,10 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     }))
     .filter((b) => b.cards.length > 0);
 
-  // Legacy fallback (only used when both audits are still in text form)
-  const useLegacyTextRecs = !structuredLlmRecs && !structuredSeoRecs && (llmRecs || seo?.recommendations);
-  const llmRecLines = useLegacyTextRecs ? splitRecommendations(typeof llmRecs === "string" ? llmRecs : "") : [];
+  // Legacy fallback (only used when the SEO audit is still in text form)
+  const useLegacyTextRecs = !structuredSeoRecs && !!seo?.recommendations;
   const seoRecLines = useLegacyTextRecs ? splitRecommendations(typeof seo?.recommendations === "string" ? seo!.recommendations : "") : [];
   const allRecs: ParsedRec[] = [
-    ...(mode === "seo" ? [] : llmRecLines.map(categorizeRecommendation)),
     ...(mode === "marketing" ? [] : seoRecLines.map(categorizeRecommendation)),
   ];
   const recImmediate = allRecs.filter((r) => r.category === "immediate" || r.category === "other").slice(0, 5);
@@ -7956,110 +7289,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
           </section>
         )}
 
-        {/* ============ OPTIMIZATION CHECKLIST ============ */}
-        {/* Part of the Marketing report; skipped in SEO / LLM-only print. */}
-        {mode !== "seo" && (llmTs || llmRecs) && (
-          <section className="pb-before">
-            <PrintSectionHeader>Online Presence Health</PrintSectionHeader>
-            <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
-              How complete and machine-readable the property&rsquo;s online footprint is (the foundation search engines and AI assistants rely on). Audited {llmTs ? new Date(llmTs).toLocaleString() : "—"}. Score{" "}
-              <strong style={{ color: PRINT_NAVY }}>
-                {earnedLLM}/{totalLLM}
-              </strong>{" "}
-              ({scorePct}%).
-            </p>
-            <table>
-              <thead>
-                <tr>
-                  <th style={findingsTh}>Data Point</th>
-                  <th style={{ ...findingsTh, width: 110, textAlign: "center" }}>Status</th>
-                  <th style={findingsTh}>Audit Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {LLM_GROUPS.map((group) => {
-                  const items = LLM_ITEMS.filter((it) => it.group === group.id);
-                  const gEarned = items.reduce((s, it) => s + earnedPoints(it.pts, statusOf(property, it.id)), 0);
-                  const gTotal = items.reduce((s, it) => s + it.pts, 0);
-                  return (
-                    <Fragment key={group.id}>
-                      <tr className="pb-avoid">
-                        <td
-                          colSpan={3}
-                          style={{
-                            background: "#eef2f5",
-                            padding: "5px 10px",
-                            fontFamily: "'Barlow Condensed', sans-serif",
-                            fontWeight: 700,
-                            fontSize: 10.5,
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                            color: PRINT_NAVY,
-                            borderTop: "1px solid #d8dee4",
-                          }}
-                        >
-                          {group.label}{" "}
-                          <span style={{ color: "#888", fontWeight: 500 }}>· {gEarned}/{gTotal} pts</span>
-                        </td>
-                      </tr>
-                      {items.map((item) => {
-                        const status = statusOf(property, item.id);
-                        const earned = earnedPoints(item.pts, status);
-                        const ev = property.checklistEvidence?.[String(item.id)];
-                        return (
-                          <tr key={item.id} className="pb-avoid">
-                            <td
-                              style={{
-                                ...findingsTd,
-                                fontFamily: "'Josefin Sans', sans-serif",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: PRINT_NAVY,
-                                width: 170,
-                              }}
-                            >
-                              {item.label}
-                            </td>
-                            <td
-                              style={{
-                                ...findingsTd,
-                                background: STATUS_BG[status],
-                                color: STATUS_TEXT[status],
-                                fontWeight: 700,
-                                fontSize: 10,
-                                textAlign: "center",
-                                letterSpacing: "0.04em",
-                              }}
-                            >
-                              {STATUS_LABEL[status]}
-                              <div
-                                style={{
-                                  fontSize: 9,
-                                  color: STATUS_TEXT[status],
-                                  fontWeight: 500,
-                                  marginTop: 2,
-                                }}
-                              >
-                                {earned}/{item.pts} pts
-                              </div>
-                            </td>
-                            <td style={findingsTd}>
-                              {ev || `No audit evidence captured. ${item.description}`}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </section>
-        )}
-
         {/* ============ RECOMMENDATIONS ============ */}
         {/* ONE unified recommendations section per report. Structured cards come
-            from allStructuredCards (marketing + checklist + SEO, deduped);
+            from allStructuredCards (marketing + SEO, deduped);
             legacy text lines are the fallback for older persisted audits. */}
         {(printBands.length > 0 || allRecs.length > 0) && (
           <section className="pb-before">
@@ -8118,11 +7350,10 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
           (() => {
             const prog = computeAuditProgress(
               property.marketingAuditPrev!,
-              mkt.consistency,
-              property.checklistStatuses ?? {}
+              mkt.consistency
             );
-            const resolved = [...prog.fixed, ...prog.completed];
-            const regressedAll = [...prog.regressed, ...prog.slipped];
+            const resolved = prog.fixed;
+            const regressedAll = prog.regressed;
             const empty =
               resolved.length === 0 && prog.stillOpen.length === 0 && regressedAll.length === 0;
             const sinceDate = new Date(prog.sinceTimestamp).toLocaleDateString("en-US", {
