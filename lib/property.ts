@@ -271,6 +271,10 @@ export interface Property {
       mentionsTarget: boolean;
       namedProperties: string[];
       note: string;
+      /** Stability: how many times the AI was asked, and how many named the property.
+       *  AI answers vary per ask, so we ask a few times and report the frequency. */
+      asks?: number;
+      mentions?: number;
     }>;
   };
   /**

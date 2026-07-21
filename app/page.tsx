@@ -2795,29 +2795,69 @@ Return ONLY a JSON array of 6 strings, no prose:
 
       // AI-assistant visibility — folded into this single run so one button
       // covers Google rank + AI rank, and the recommendations address both.
-      setProgress("Checking AI assistant visibility…");
+      setProgress("Checking AI assistant visibility (a few asks for a stable read)…");
       let llmRankResult: Property["llmRank"] | undefined;
       try {
         const aiCity = extractCity(currentProperty.address) || "the area";
         const aiType = currentProperty.propertyType?.trim() || "apartments";
         const aiQuery = `best ${aiType} to rent in ${aiCity}`;
         const aiPrompt = `A prospective renter asks an AI assistant: "What are the ${aiQuery}?"\n\nUse web search to answer the way the assistant naturally would, then report the SPECIFIC apartment communities you would actually name or recommend. The property being tracked is "${currentProperty.name}" at ${currentProperty.address}.\n\nReturn ONLY this JSON, no prose:\n{"namedProperties":["community names you would recommend, best first"],"mentionsTarget":true or false,"note":"one sentence"}`;
-        const aiData = await callAI({ prompt: aiPrompt, useWebSearch: true, maxTokens: 1500 });
-        const aiText = (aiData.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
-        const am = aiText.match(/\{[\s\S]*\}/);
-        if (am) {
-          const ap = JSON.parse(am[0]) as { namedProperties?: string[]; mentionsTarget?: boolean; note?: string };
+        // AI answers vary per ask (LLM sampling), so a single ask flip-flops
+        // between "named" and "not named". Ask a few times and report the
+        // FREQUENCY ("named in X of N") — the real, stable signal.
+        const ASKS = 3;
+        const runs = await Promise.all(
+          Array.from({ length: ASKS }, async () => {
+            try {
+              const aiData = await callAI({ prompt: aiPrompt, useWebSearch: true, maxTokens: 1500 });
+              const aiText = (aiData.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+              const am = aiText.match(/\{[\s\S]*\}/);
+              if (!am) return null;
+              const ap = JSON.parse(am[0]) as { namedProperties?: string[]; mentionsTarget?: boolean; note?: string };
+              return {
+                named: Array.isArray(ap.namedProperties) ? ap.namedProperties.filter((x): x is string => typeof x === "string") : [],
+                mentions: !!ap.mentionsTarget,
+                note: (ap.note || "").trim(),
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+        const ok = runs.filter((r): r is { named: string[]; mentions: boolean; note: string } => !!r);
+        if (ok.length) {
+          const asks = ok.length;
+          const mentions = ok.filter((r) => r.mentions).length;
+          // Merge the named communities by how many asks named each (most-consistent
+          // first) so the list is stable, not whatever one ask happened to say.
+          const freq = new Map<string, { name: string; count: number }>();
+          for (const r of ok) {
+            const seen = new Set<string>();
+            for (const n of r.named) {
+              const key = n.trim().toLowerCase();
+              if (!key || seen.has(key)) continue;
+              seen.add(key);
+              const cur = freq.get(key);
+              if (cur) cur.count++;
+              else freq.set(key, { name: n.trim(), count: 1 });
+            }
+          }
+          const merged = [...freq.values()].sort((a, b) => b.count - a.count).map((x) => x.name).slice(0, 12);
+          const note =
+            mentions === 0
+              ? `Not named in any of ${asks} AI answers.`
+              : `Named in ${mentions} of ${asks} AI answers${mentions < asks ? " (AI results vary per ask)" : ""}.`;
           llmRankResult = {
             checkedAt: new Date().toISOString(),
             query: aiQuery,
-            models: [{ model: "Claude", mentionsTarget: !!ap.mentionsTarget, namedProperties: Array.isArray(ap.namedProperties) ? ap.namedProperties.slice(0, 12) : [], note: (ap.note || "").trim() }],
+            models: [{ model: "Claude", mentionsTarget: mentions * 2 >= asks, namedProperties: merged, note, asks, mentions }],
           };
         }
       } catch {
         /* best-effort — AI visibility is non-fatal */
       }
       const aiSummary = llmRankResult
-        ? `AI ASSISTANT VISIBILITY — asked Claude "${llmRankResult.query}": Claude ${llmRankResult.models[0].mentionsTarget ? "NAMES" : "does NOT name"} ${currentProperty.name}. Communities Claude recommended: ${llmRankResult.models[0].namedProperties.join(", ") || "(none returned)"}. ${llmRankResult.models[0].note}`
+        ? `AI ASSISTANT VISIBILITY — asked Claude "${llmRankResult.query}" ${llmRankResult.models[0].asks ?? 1}x (AI answers vary per ask, so this is a frequency): ${currentProperty.name} was named in ${llmRankResult.models[0].mentions ?? (llmRankResult.models[0].mentionsTarget ? 1 : 0)} of ${llmRankResult.models[0].asks ?? 1} answers. Communities Claude recommended (most-consistent first): ${llmRankResult.models[0].namedProperties.join(", ") || "(none returned)"}. ${llmRankResult.models[0].note}`
         : "AI ASSISTANT VISIBILITY: could not be checked this run.";
 
       // Technical / on-page crawl — read the real site (title, meta, H1s,
@@ -3630,12 +3670,24 @@ Recommendation rules (STRICT):
                 <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.oxford }}>
                   AI Assistant Visibility
                 </span>
-                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", padding: "3px 10px", borderRadius: 20, background: property.llmRank.models[0].mentionsTarget ? "#E0F0E8" : "#FCE4E4", color: property.llmRank.models[0].mentionsTarget ? "#15803d" : "#b14a2a" }}>
-                  {property.llmRank.models[0].model}: {property.llmRank.models[0].mentionsTarget ? `names ${property.name}` : `does not name ${property.name}`}
-                </span>
+                {(() => {
+                  const m = property.llmRank!.models[0];
+                  const hasFreq = typeof m.asks === "number" && typeof m.mentions === "number";
+                  const maj = hasFreq && m.mentions! * 2 >= m.asks!;
+                  const bg = hasFreq ? (m.mentions === 0 ? "#FCE4E4" : maj ? "#E0F0E8" : "#FBF0D9") : m.mentionsTarget ? "#E0F0E8" : "#FCE4E4";
+                  const color = hasFreq ? (m.mentions === 0 ? "#b14a2a" : maj ? "#15803d" : "#9a7200") : m.mentionsTarget ? "#15803d" : "#b14a2a";
+                  const text = hasFreq
+                    ? `${m.model}: named in ${m.mentions} of ${m.asks} AI answers`
+                    : `${m.model}: ${m.mentionsTarget ? `names ${property.name}` : `does not name ${property.name}`}`;
+                  return (
+                    <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", padding: "3px 10px", borderRadius: 20, background: bg, color }}>
+                      {text}
+                    </span>
+                  );
+                })()}
               </div>
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#888", marginBottom: 8 }}>
-                Asked “{property.llmRank.query}” — what an AI assistant recommends to renters.
+                Asked “{property.llmRank.query}”{property.llmRank.models[0].asks ? ` ${property.llmRank.models[0].asks}× ` : " "}— what an AI assistant recommends to renters. AI answers vary per ask, so this is how often you&apos;re named, not a fixed rank.
               </div>
               {property.llmRank.models[0].note && (
                 <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#444", lineHeight: 1.55, margin: "0 0 10px" }}>{property.llmRank.models[0].note}</p>
