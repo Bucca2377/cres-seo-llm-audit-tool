@@ -105,3 +105,40 @@ export function recommendsNonGoogleFeatureOnGoogle(text: string): boolean {
     t
   );
 }
+
+/** Verbs that mean "put a NEW special on the site" (invent/introduce one). */
+const CONCESSION_CREATE_VERB =
+  /\b(add|adding|create|creating|launch\w*|introduc\w*|start\w*|establish\w*|roll[-\s]?out|implement\w*|design\w*|develop\w*|offer\w*|build\w*|feature\w*|display\w*|promot\w*|advertis\w*|run|highlight\w*|put|include)\b/i;
+/** Move-in-concession / limited-time-offer nouns (NOT generic "discount"/"waived fees",
+ *  which would wrongly catch a preferred-employer program card). */
+const CONCESSION_NOUN =
+  /\b(concession|move[-\s]?in\s+(?:special|incentive|offer)|limited[-\s]?time\s+(?:special|offer|promo\w*)|specials?\s+section|rent\s+special)\b/i;
+/** Third-party listing platforms — if a rec names one, it's DISTRIBUTING/syncing an
+ *  existing special there, not inventing one on the property's own site. */
+const CONCESSION_PLATFORM =
+  /\b(apartments\.?com|apartmentfinder|for\s?rent|zillow|google|gbp|facebook|instagram|apartment\s?list|zumper|rent\.com)\b/i;
+
+/**
+ * Does a recommendation propose CREATING / ADDING a move-in concession or
+ * limited-time special to the property's own site (i.e. inventing one)? This audit
+ * is marketing HYGIENE, not revenue strategy — telling a property to invent a
+ * discount is out of scope, and when a special already runs the rec is also just
+ * wrong. Either way it must never reach the client. It has relapsed repeatedly
+ * ("Add move-in concession or limited-time offer to website", "Design a move-in
+ * special…") because the model reintroduces it every few runs and the old filter
+ * (a) missed the verbs "add"/"design" and (b) only fired when we happened to detect
+ * the banner that run. This is UNCONDITIONAL by design.
+ *
+ * It deliberately does NOT fire on SYNCING an EXISTING special to a named
+ * third-party platform (e.g. "add the current move-in special to the Apartments.com
+ * listing") — those name a platform and are legitimate distribution recs — nor on
+ * unrelated programs that merely mention a discount (e.g. a preferred-employer
+ * program), which don't use concession/special nouns.
+ */
+export function recommendsCreatingConcession(text: string): boolean {
+  const t = text || "";
+  if (!CONCESSION_NOUN.test(t)) return false;
+  if (!CONCESSION_CREATE_VERB.test(t)) return false;
+  if (CONCESSION_PLATFORM.test(t)) return false; // distributing an existing special, not inventing one
+  return true;
+}

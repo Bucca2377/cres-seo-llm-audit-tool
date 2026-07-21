@@ -32,7 +32,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle, recommendsCreatingConcession } from "@/lib/detectors";
 import PropertySettings from "./property-settings";
 
 /* -- BRAND ---------------------------------------------------------- */
@@ -4259,20 +4259,17 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
         ? (parsed.recommendations as RecommendationCard[])
         : [];
-      // Deterministic backstop: with a concession already running, never let a
-      // "launch/create a concession" card reach the client — the model has
-      // fabricated that recommendation before, even with the ground-truth block.
-      // Narrow match (a create/launch verb within ~40 chars of concession/special)
-      // so a legitimate "sync the EXISTING special to Apartments.com" card, which
-      // uses "add/sync/promote", is preserved.
+      // Deterministic backstop: NEVER let a "create/add a concession to the site"
+      // card reach the client. The model reintroduces this every few runs (with or
+      // without the ground-truth block), and it's out of scope regardless — a
+      // marketing-hygiene audit doesn't tell a property to invent a discount, and
+      // when a special already runs the rec is flat wrong. UNCONDITIONAL (not gated
+      // on whether we detected a banner this run — that detection is crawl-flaky and
+      // was letting the rec relapse). Tested in tests/detectors.test.ts; a legitimate
+      // "sync the EXISTING special to Apartments.com" card names a platform and is kept.
       const recsFiltered: AuditRecommendations = recs.filter((c) => {
         const t = `${c.title || ""}. ${c.what || ""}`;
-        // Drop fabricated "launch/create a concession" when one already runs.
-        if (
-          concessionText &&
-          /\b(launch|create|introduc\w*|start|establish|roll[-\s]?out|implement)\b[^.!?]{0,40}\b(concession|move[-\s]?in special|move[-\s]?in incentive)\b/i.test(t)
-        )
-          return false;
+        if (recommendsCreatingConcession(t)) return false;
         // Drop "add/sync the concession to Apartments.com" when that listing is DARK —
         // you can't put a special on a listing that isn't advertising. The "activate
         // the listing" card (below) is the correct recommendation instead.

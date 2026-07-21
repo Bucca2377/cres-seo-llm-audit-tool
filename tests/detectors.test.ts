@@ -5,6 +5,7 @@ import {
   specialFromHtml,
   aptAdvertisingFromRawHtml,
   recommendsNonGoogleFeatureOnGoogle,
+  recommendsCreatingConcession,
 } from "../lib/detectors";
 
 /**
@@ -90,4 +91,29 @@ test("recs: keeps legitimate Google recs and non-Google recs", () => {
   // Preferred-employer / virtual-tour / concession recs that DON'T target Google stay.
   assert.equal(recommendsNonGoogleFeatureOnGoogle("Launch a preferred employers corporate discount program on the website."), false);
   assert.equal(recommendsNonGoogleFeatureOnGoogle("Add the Matterport virtual tour to the Apartments.com listing."), false);
+});
+
+// ----- "Create a concession on the site" recs must never reach the client -------
+
+test("recs: DROPS 'create/add a concession to the website' cards (the recurring relapse)", () => {
+  // The exact offending card the model keeps re-emitting (title + body combined,
+  // as the filter sees it). Note the verbs are "Add"/"Design" — the old filter's
+  // launch|create|introduce list missed both, so it slipped through.
+  const offender =
+    "Add move-in concession or limited-time offer to website. Design a move-in special (e.g. first month free on select floor plans, $500 off first month, or waived application fees for July move-ins) and add a prominent banner or Specials section to the homepage and floor plans page. Include expiration date and contact CTA. The website shows no concessions.";
+  assert.equal(recommendsCreatingConcession(offender), true);
+  assert.equal(recommendsCreatingConcession("Launch a move-in special to differentiate the property."), true);
+  assert.equal(recommendsCreatingConcession("Create a limited-time offer and feature it in a Specials section on the homepage."), true);
+  assert.equal(recommendsCreatingConcession("Introduce a rent special for the slow season."), true);
+});
+
+test("recs: KEEPS legitimate concession-distribution and unrelated cards", () => {
+  // Syncing an EXISTING special to a named third-party platform is legitimate.
+  assert.equal(recommendsCreatingConcession("Add the current move-in special to the Apartments.com listing so it matches the website."), false);
+  assert.equal(recommendsCreatingConcession("Promote the existing concession on the Google Business Profile posts."), false);
+  // A preferred-employer discount program is NOT a concession/special (different noun).
+  assert.equal(recommendsCreatingConcession("Build a preferred employer discount program: $200 off first month or waived admin fees; create a Preferred Employers page."), false);
+  // Unrelated hygiene recs are untouched.
+  assert.equal(recommendsCreatingConcession("Fix Google hours to match the actual Saturday closure."), false);
+  assert.equal(recommendsCreatingConcession("Add professional photos to the Apartments.com listing."), false);
 });
