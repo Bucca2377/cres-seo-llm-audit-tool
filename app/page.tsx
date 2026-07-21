@@ -4622,6 +4622,40 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
+      // Deterministic backstop: a red office-hours CONFLICT is the single most
+      // damaging hygiene finding — a prospect who trusts the wrong hours drives to
+      // a locked leasing office — and the model SOMETIMES omits the fix even though
+      // the rules require every red cell to be covered (pure LLM variance). If the
+      // consistency table flags an hours conflict and no recommendation addresses
+      // it, inject the fix so the finding is never left unresolved.
+      {
+        const recsList: RecommendationCard[] = Array.isArray(recsFinal) ? recsFinal : [];
+        const hoursRow = consistency.find((r) => /\bhours?\b/i.test(r?.label || ""));
+        const hoursConflict =
+          !!hoursRow && (["google", "website", "apartments"] as const).some((col) => hoursRow[col]?.status === "red");
+        const hoursCovered = recsList.some((c) => /\bhours?\b/i.test(`${c.title || ""}. ${c.what || ""}`));
+        if (hoursConflict && !hoursCovered) {
+          const detail =
+            (hoursRow!.google?.status === "red" ? hoursRow!.google?.note : "") ||
+            (hoursRow!.website?.status === "red" ? hoursRow!.website?.note : "") ||
+            hoursRow!.google?.note ||
+            "";
+          const platforms = aptIsDark
+            ? "the Google Business Profile and the website footer"
+            : "the Google Business Profile, the website footer, and the Apartments.com listing";
+          const hoursCard: RecommendationCard = {
+            priority: "FOUNDATIONAL",
+            title: "Fix the office-hours conflict across listings",
+            what: `The office hours don't match across your listings${detail ? ` (${detail})` : ""}. Decide the correct schedule, then update ${platforms} so every platform shows the SAME hours. Verify with a live check afterward.`,
+            why: "Mismatched hours send prospects to a closed leasing office, destroying trust and losing tours on the spot.",
+            effort: "~15 min · marketing manager with Google Business access",
+            success: "All listings show identical office hours within 48 hours, confirmed by a live check.",
+            source: "Fixes the office-hours conflict in the consistency check.",
+          };
+          recsFinal = [hoursCard, ...recsList];
+        }
+      }
+
       const result: MarketingAuditResult = {
         executiveSummary: parsed.executiveSummary || [],
         websiteFindings,
