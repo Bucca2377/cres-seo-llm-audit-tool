@@ -4120,12 +4120,15 @@ function MarketingAuditTab({
           ? { status: "red", note: `Google's website link (${gWebDomain}) doesn't load — a broken click-through for prospects.` }
           : { status: "amber", note: `Google's website link goes to ${gWebDomain}, not your site (${propDomain}) — verify it's intended.` };
       } else {
-        // Link points to the property's own site. It's up if our render got content;
-        // if our browser was blocked (Cloudflare) we can't confirm, so say "verify".
-        googleLink =
-          siteBlocked && !siteText
-            ? { status: "amber", note: "Website link points to your site, but we couldn't confirm it loads this run — verify." }
-            : { status: "green", note: `Website link works and points to your site${propDomain ? ` (${propDomain})` : ""}.` };
+        // Link points to the property's OWN domain, so the link itself is CORRECT —
+        // that's the meaningful, deterministic check (SerpAPI gives the URL; we
+        // compare hostnames). We deliberately do NOT downgrade this on whether our
+        // headless crawler could render the page: a Cloudflare block returns 403 but
+        // the site loads fine in a real prospect's browser (this very run pulled the
+        // site's live pricing/photos via the web_fetch fallback), and keying off our
+        // bot's success made the row flip GREEN↔"couldn't confirm" run to run. A
+        // genuinely dead property site surfaces as empty website rows elsewhere.
+        googleLink = { status: "green", note: `Website link on Google points to your site${propDomain ? ` (${propDomain})` : ""}.` };
       }
       // Apartments.com "View Property Website" link — standard on an active
       // listing (detected deterministically from the raw fetched content).
