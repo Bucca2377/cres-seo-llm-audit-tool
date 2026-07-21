@@ -4582,6 +4582,28 @@ function MarketingAuditTab({
       // just reports them instead of re-fetching (see readApartmentsListing).
       setProgress("Reading the Apartments.com listing…");
       const aptRead = current.apartmentsUrl ? await readApartmentsListing(current.apartmentsUrl) : null;
+      // AUTHORITATIVE advertising verdict from the raw HTML (Bright Data). The
+      // web_fetch-based read flip-flops: the "not currently advertising" banner is
+      // JS-painted (absent from HTML), and the pricing proxy false-positives on the
+      // nearby-listings section. This checks the raw HTML for the property's OWN
+      // pricing section (active) vs "Explore Similar Rentals Nearby" (dark shell)
+      // and overrides when determinable. Null result -> keep the web_fetch read.
+      if (current.apartmentsUrl && aptRead) {
+        try {
+          const sr = await fetch("/api/apts-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: current.apartmentsUrl }),
+          });
+          const sj = (await sr.json()) as { advertising?: boolean | null };
+          if (typeof sj.advertising === "boolean") {
+            aptRead.advertising = sj.advertising;
+            aptRead.ok = true;
+          }
+        } catch {
+          /* keep the web_fetch-based read */
+        }
+      }
 
       const apartmentsBlock = !current.apartmentsUrl
         ? "APARTMENTS.COM LISTING: no listing URL was provided."
@@ -4782,6 +4804,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 - "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
 - "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
 - NO COMPETITOR CLAIMS: this audit does NOT research competing properties, so you have ZERO competitor data. NEVER name a specific competing property, and NEVER assert anything about one (their rents, specials/concessions, incentives, occupancy, amenities, or programs). Do not write phrases like "competing properties nearby offer specials" or invent competitor names — that would be fabricated. Ground every recommendation ONLY in what THIS audit observed about THIS property.
+- GOOGLE PHOTOS: the Google Business Profile gallery is a MIX of owner- and visitor-uploaded photos the property does NOT control. NEVER recommend removing, curating, hiding, or "auditing" visitor/user-uploaded Google photos, and do NOT write a generic "verify Google photo quality / could not be assessed" recommendation — a Google profile that has photos is fine. The ONLY acceptable Google-photos recommendation is to POST more of the property's own professional photos to the profile, and ONLY when the audit found the profile is genuinely missing that professional set.
 - Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.${setAsidePromptNote(current)}`;
 
       // Website content is provided (Playwright); Apartments.com is fetched by
@@ -4836,26 +4859,22 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         success: "Listing live with pricing, photos, and available units within 1 week (or confirmed intentionally off).",
         source: 'Apartments.com: "not currently advertising" (shell listing).',
       };
-      // Exactly ONE Apartments.com activation rec. The model tends to ALSO write its
-      // own reactivation card, so this deduped: replace the FIRST model apts-activation
-      // rec in place (keeping its ranking) with the deterministic card (which carries
-      // the "ignore if intentional" escape hatch), drop any extras, and append only if
-      // the model wrote none.
+      // When the Apartments.com listing is DARK it can't take ANY feature fix —
+      // office hours, photos, syncing a special, application links — because there's
+      // no live listing to change; all of that is moot until it's reactivated. So
+      // collapse EVERY model Apartments.com rec into the single deterministic
+      // reactivation card (which carries the "ignore if intentional" escape hatch):
+      // replace the FIRST apts rec in place (keeping its ranking), drop the rest, and
+      // append the card if the model wrote none.
       let recsFinal: AuditRecommendations = recsFiltered;
       if (aptIsDark && Array.isArray(recsFiltered)) {
-        const isAptActivation = (c: RecommendationCard) => {
-          const t = `${c.title || ""}. ${c.what || ""}`;
-          return (
-            /apartments\.?com/i.test(t) &&
-            /\b(activat\w*|reactivat\w*|re-?launch\w*|relist\w*|go live|turn (it|the listing).{0,10}on|advertis\w*)\b/i.test(t)
-          );
-        };
-        const firstIdx = recsFiltered.findIndex(isAptActivation);
+        const isApt = (c: RecommendationCard) => /apartments\.?com/i.test(`${c.title || ""}. ${c.what || ""}`);
+        const firstIdx = recsFiltered.findIndex(isApt);
         recsFinal =
           firstIdx >= 0
             ? recsFiltered
                 .map((c, i) => (i === firstIdx ? aptActivationCard : c))
-                .filter((c, i) => i === firstIdx || !isAptActivation(c))
+                .filter((c, i) => i === firstIdx || !isApt(c))
             : [...recsFiltered, aptActivationCard];
       }
 
