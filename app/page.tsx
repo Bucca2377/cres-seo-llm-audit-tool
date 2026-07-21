@@ -791,6 +791,36 @@ const ILS_PLATFORMS: { domain: string; label: string }[] = [
 ];
 
 /**
+ * Aggregator / ILS domains. Used by diagnose() and by the organic-column label to
+ * explain WHY the property's own site isn't in organic: when the top organic results
+ * are mostly these, "aggregators dominate" is the honest reason (a single property
+ * essentially can't out-rank Apartments.com/Zillow for a head term). When they're
+ * NOT — e.g. individual competing communities out-rank it — we don't claim aggregator
+ * dominance; "who's beating you" already shows who.
+ */
+const AGGREGATOR_DOMAINS = [
+  "apartments.com", "zillow.com", "rent.com", "apartmentfinder.com", "apartmentguide.com",
+  "apartmentratings.com", "realtor.com", "redfin.com", "trulia.com", "hotpads.com", "rentcafe.com",
+  "forrent.com", "zumper.com", "apartmentlist.com", "apartmenthomeliving.com", "homes.com",
+  "padmapper.com", "rentals.com",
+];
+function aggregatorsDominateOrganic(topOrganic: { name: string; domain: string }[] | undefined): boolean {
+  const top = (topOrganic || []).slice(0, 5);
+  if (!top.length) return false;
+  const agg = top.filter((o) => {
+    const d = (o.domain || "").toLowerCase().replace(/^www\./, "");
+    return AGGREGATOR_DOMAINS.some((a) => d === a || d.endsWith("." + a));
+  }).length;
+  return agg >= Math.ceil(top.length / 2); // a majority of the visible organic results are aggregators
+}
+/** Organic-column label when the property's own site isn't in the top 30. */
+function organicAbsentLabel(topOrganic: { name: string; domain: string }[] | undefined): string {
+  return aggregatorsDominateOrganic(topOrganic)
+    ? "Not in organic top 30 — aggregators dominate"
+    : "Not in organic top 30";
+}
+
+/**
  * Scan a `google` engine SerpAPI response's organic results for ILS /
  * aggregator listings that actually reference THIS property. Returns the
  * de-duplicated platform labels found.
@@ -982,20 +1012,6 @@ function extractCity(address: string): string {
   const parts = loc.split(",").map((s) => s.trim()).filter(Boolean);
   return parts.length > 0 ? parts[0] : "";
 }
-
-const AGGREGATOR_DOMAINS = [
-  "apartments.com",
-  "zillow.com",
-  "rent.com",
-  "trulia.com",
-  "homes.com",
-  "rentcafe.com",
-  "apartmentlist.com",
-  "zumper.com",
-  "hotpads.com",
-  "padmapper.com",
-  "realtor.com",
-];
 
 function diagnose(
   mapPackRank: number | null,
@@ -1530,7 +1546,7 @@ function RankCheck({ property }: { property: Property }) {
                     >
                       {googleResult.organic_rank
                         ? `#${googleResult.organic_rank} · Page ${googleResult.organic_page ?? Math.ceil(googleResult.organic_rank / 10)}`
-                        : "Property not ranking"}
+                        : organicAbsentLabel(googleResult.top_organic)}
                     </div>
                     {googleResult.top_organic && googleResult.top_organic.length > 0 && (
                       <div
@@ -3607,7 +3623,7 @@ Recommendation rules (STRICT):
                             fontWeight: 600,
                           }}
                         >
-                          {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : "Property not ranking"}
+                          {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : organicAbsentLabel(r.top_organic)}
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px", fontSize: 11 }} title="Rank change vs the first tracked audit (baseline)">
@@ -7148,7 +7164,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     : "#888";
                   const orgText = r.organic_rank
                     ? `#${r.organic_rank} · P${r.organic_page}`
-                    : "Property not ranking";
+                    : organicAbsentLabel(r.top_organic);
                   const orgColor =
                     r.organic_rank && r.organic_rank <= 10
                       ? "#15803d"
