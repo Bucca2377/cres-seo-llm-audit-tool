@@ -2772,11 +2772,14 @@ Return ONLY a JSON array of 6 strings, no prose:
               const am = aiText.match(/\{[\s\S]*\}/);
               if (!am) return null;
               const ap = JSON.parse(am[0]) as { namedProperties?: string[]; mentionsTarget?: boolean; note?: string };
-              return {
-                named: Array.isArray(ap.namedProperties) ? ap.namedProperties.filter((x): x is string => typeof x === "string") : [],
-                mentions: !!ap.mentionsTarget,
-                note: (ap.note || "").trim(),
-              };
+              const named = Array.isArray(ap.namedProperties) ? ap.namedProperties.filter((x): x is string => typeof x === "string") : [];
+              // Decide "named" DETERMINISTICALLY from the recommended list the user
+              // actually sees (same fuzzy matcher used everywhere — handles "Saw Mill"
+              // vs "Sawmill"). Don't trust the model's self-reported mentionsTarget
+              // boolean, which can disagree with its own list. Fall back to the boolean
+              // only if the list came back empty.
+              const mentions = named.length ? nameMatches(named.join(" || "), currentProperty.name) : !!ap.mentionsTarget;
+              return { named, mentions, note: (ap.note || "").trim() };
             } catch {
               return null;
             }
