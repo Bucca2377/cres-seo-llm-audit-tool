@@ -33,6 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
+import { detectWebsiteSpecial } from "@/lib/detectors";
 import PropertySettings from "./property-settings";
 
 /* -- BRAND ---------------------------------------------------------- */
@@ -2019,29 +2020,8 @@ function aptListedNotAdvertising(consistency: MarketingConsistencyRow[] | undefi
   return consistency.some((r) => /not advertising on apartments/i.test(r?.apartments?.note || ""));
 }
 
-/**
- * Deterministic website concession detector — HIGH-PRECISION phrases only
- * (waived/reduced fees, half-off/free/reduced deposit, N months/weeks free,
- * move-in/limited-time special, $/% off). Verified NOT to fire on "security
- * deposit", "application fee: $X", or "no specials". Returns the special's own
- * wording (cleaned, <=90 chars) or null. Used BOTH to feed the audit prompt as
- * ground truth AND to force the consistency cell green — so the model can neither
- * miss the concession nor contradict it in the recommendations.
- */
-const WEBSITE_CONCESSION_RE = /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|\$0\s+(security\s+)?deposit|deposit\s+special|rent\s+special|months?\s+free\s+rent/i;
-function detectWebsiteSpecial(siteText: string): string | null {
-  const flat = siteText.replace(/\s+/g, " ");
-  const sentence = flat.match(new RegExp("[^.!?\\n]*(?:" + WEBSITE_CONCESSION_RE.source + ")[^.!?\\n]*", "i"));
-  if (!sentence) return null;
-  return (
-    sentence[0]
-      .replace(/\\+/g, " ") // drop JSON-escape residue (\/, \", \\) that leaks in from raw HTML
-      .replace(/\s+/g, " ")
-      .replace(/^[^A-Za-z0-9$]+/, "")
-      .trim()
-      .slice(0, 90) || null
-  );
-}
+// detectWebsiteSpecial (concession detection) now lives in @/lib/detectors as the
+// single source of truth (shared with the crawler + covered by tests/detectors.test.ts).
 
 /** Strip protocol + trailing slash for compact display of a page URL. */
 function shortUrl(u: string): string {

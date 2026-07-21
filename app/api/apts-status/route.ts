@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aptAdvertisingFromRawHtml } from "@/lib/detectors";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -40,14 +41,7 @@ export async function POST(req: NextRequest) {
     });
     if (!r.ok) return NextResponse.json({ advertising: null });
     const html = await r.text();
-    if (!html || html.length < 500) return NextResponse.json({ advertising: null });
-
-    const ownPricing = /pricing\s*&?\s*floor\s*plans|monthly\s+rent/i.test(html);
-    const nearby = /explore similar rentals nearby/i.test(html);
-    // Own pricing section present -> actively advertising. Otherwise, if the page
-    // is pushing nearby rentals, it's a dark shell. Neither -> unknown.
-    const advertising = ownPricing ? true : nearby ? false : null;
-    return NextResponse.json({ advertising });
+    return NextResponse.json({ advertising: aptAdvertisingFromRawHtml(html) });
   } catch {
     return NextResponse.json({ advertising: null });
   }

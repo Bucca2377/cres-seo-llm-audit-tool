@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { specialFromHtml } from "@/lib/detectors";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -101,37 +102,8 @@ async function fetchViaUnblockService(url: string): Promise<string | null> {
   }
 }
 
-/**
- * A move-in special often lives in the page's embedded JSON (a <script>), which
- * htmlToText strips out — so pull it straight from the raw HTML and JSON-unescape
- * it to a clean string. High-precision phrases (same as the audit's concession
- * detector) so it won't fire on "security deposit"/"application fee"/"no
- * specials". Returns null when no special is present. Verified on Bright Data
- * output: extracts "Lowest Prices... Half-Off Security Deposit Waived App Fees".
- */
-const CONCESSION_RE =
-  /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|deposit\s+special|rent\s+special|months?\s+free\s+rent/i;
-function specialFromHtml(html: string): string | null {
-  const m = html.match(CONCESSION_RE);
-  if (!m || m.index === undefined) return null;
-  return html
-    .slice(Math.max(0, m.index - 90), m.index + 170)
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_full, h) => {
-      try {
-        return String.fromCharCode(parseInt(h, 16));
-      } catch {
-        return " ";
-      }
-    })
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\")
-    .replace(/\\\//g, "/")
-    .replace(/\\[nrt]/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/[^\x20-\x7E]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// specialFromHtml (pull a concession out of raw HTML) now lives in @/lib/detectors
+// as the single source of truth (shared with the audit + covered by tests).
 
 /** Strip a rendered HTML document to readable text (scripts/styles removed). */
 function htmlToText(html: string): string {
