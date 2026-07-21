@@ -4828,16 +4828,36 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // turn it back on — with an explicit escape hatch in case the property intends
       // it to be off. Deterministic so the wording + escape hatch are reliable.
       const aptActivationCard: RecommendationCard = {
-        priority: "STRATEGIC",
-        title: "Activate the Apartments.com listing immediately (ignore if intentionally off)",
-        what: 'Apartments.com shows "This property is not currently advertising on Apartments.com," so the listing is dark: anyone who finds you there lands on a shell and is funneled to the competitors in the "Explore Similar Rentals Nearby" panel. IF this is intentional (you have chosen not to advertise on Apartments.com), IGNORE this. Otherwise, reactivate the paid listing immediately.',
+        priority: "FOUNDATIONAL",
+        title: "Reactivate the Apartments.com listing (ignore if intentionally off)",
+        what: 'Apartments.com shows "This property is not currently advertising on Apartments.com," so the listing is dark: anyone who finds you there lands on a shell and is funneled to the competitors in the "Explore Similar Rentals Nearby" panel. IF this is intentional (you have chosen not to advertise on Apartments.com), IGNORE this. Otherwise, contact your Apartments.com rep and reactivate the paid listing — upload the floor plans, current pricing, the active move-in special, photos, and the Matterport tour so it matches the website.',
         why: "A dark listing on the largest rental network leaks prospects straight to the competitors shown on your own shell page.",
         effort: "~1 day · marketing manager + Apartments.com rep",
         success: "Listing live with pricing, photos, and available units within 1 week (or confirmed intentionally off).",
         source: 'Apartments.com: "not currently advertising" (shell listing).',
       };
-      const recsFinal: AuditRecommendations =
-        aptIsDark && Array.isArray(recsFiltered) ? [...recsFiltered, aptActivationCard] : recsFiltered;
+      // Exactly ONE Apartments.com activation rec. The model tends to ALSO write its
+      // own reactivation card, so this deduped: replace the FIRST model apts-activation
+      // rec in place (keeping its ranking) with the deterministic card (which carries
+      // the "ignore if intentional" escape hatch), drop any extras, and append only if
+      // the model wrote none.
+      let recsFinal: AuditRecommendations = recsFiltered;
+      if (aptIsDark && Array.isArray(recsFiltered)) {
+        const isAptActivation = (c: RecommendationCard) => {
+          const t = `${c.title || ""}. ${c.what || ""}`;
+          return (
+            /apartments\.?com/i.test(t) &&
+            /\b(activat\w*|reactivat\w*|re-?launch\w*|relist\w*|go live|turn (it|the listing).{0,10}on|advertis\w*)\b/i.test(t)
+          );
+        };
+        const firstIdx = recsFiltered.findIndex(isAptActivation);
+        recsFinal =
+          firstIdx >= 0
+            ? recsFiltered
+                .map((c, i) => (i === firstIdx ? aptActivationCard : c))
+                .filter((c, i) => i === firstIdx || !isAptActivation(c))
+            : [...recsFiltered, aptActivationCard];
+      }
 
       // --- Vision pass: actually LOOK at the website gallery photos ---
       // The text audit can only confirm photos exist; here we hand the real
