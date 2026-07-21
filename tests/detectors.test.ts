@@ -7,6 +7,7 @@ import {
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
 } from "../lib/detectors";
+import { missingFindingCards } from "../lib/coverage";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -116,4 +117,88 @@ test("recs: KEEPS legitimate concession-distribution and unrelated cards", () =>
   // Unrelated hygiene recs are untouched.
   assert.equal(recommendsCreatingConcession("Fix Google hours to match the actual Saturday closure."), false);
   assert.equal(recommendsCreatingConcession("Add professional photos to the Apartments.com listing."), false);
+});
+
+// ----- Completeness backstop: every RED finding must have a covering rec ---------
+
+const hoursConflictRow = {
+  label: "Office hours listed",
+  apartments: { status: "na", note: "Not advertising on Apartments.com" },
+  google: { status: "red", note: "Google shows Saturday 9 AM-5 PM, but website shows Saturday closed" },
+  website: { status: "green", note: "Mon-Fri 9 AM-5 PM, Sat-Sun closed" },
+};
+
+test("coverage: injects an office-hours fix when the model omitted it (the exact miss)", () => {
+  const recs = [
+    { title: "Reactivate the Apartments.com listing", what: "..." },
+    { title: "Launch a preferred-employer program", what: "..." },
+  ];
+  const cards = missingFindingCards([hoursConflictRow], recs, { aptIsDark: true });
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].title, /hours/i);
+  assert.equal(cards[0].priority, "FOUNDATIONAL");
+  // aptIsDark -> the fix must NOT tell them to update the dark Apartments.com listing.
+  assert.doesNotMatch(cards[0].what, /Apartments\.com/i);
+});
+
+test("coverage: does NOT double-inject when the model already wrote the fix", () => {
+  const recs = [{ title: "Fix Saturday office-hours conflict on Google", what: "Update the hours..." }];
+  assert.equal(missingFindingCards([hoursConflictRow], recs, { aptIsDark: true }).length, 0);
+});
+
+test("coverage: injects for an uncovered virtual-tour red, naming the right platform", () => {
+  const row = {
+    label: "Virtual tour",
+    apartments: { status: "na" },
+    google: { status: "na", note: "Not a Google feature" },
+    website: { status: "red", note: "No virtual tour on the website" },
+  };
+  const cards = missingFindingCards([row], [], { aptIsDark: false });
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].title, /virtual tour/i);
+  assert.match(cards[0].what, /the website/i);
+});
+
+test("coverage: NEVER injects a Google-photos card (hard rule)", () => {
+  const row = {
+    label: "Photos quality",
+    apartments: { status: "na" },
+    google: { status: "red", note: "Mostly visitor snapshots" },
+    website: { status: "green" },
+  };
+  assert.equal(missingFindingCards([row], [], { aptIsDark: false }).length, 0);
+});
+
+test("coverage: skips a dark-Apartments.com red (reactivation card covers it) and green/na rows", () => {
+  const aptOnlyRed = {
+    label: "Online application",
+    apartments: { status: "red", note: "No apply link on the listing" },
+    google: { status: "na" },
+    website: { status: "green" },
+  };
+  assert.equal(missingFindingCards([aptOnlyRed], [], { aptIsDark: true }).length, 0);
+  // Nothing red at all -> nothing injected.
+  const clean = {
+    label: "Pricing / availability",
+    apartments: { status: "na" },
+    google: { status: "na" },
+    website: { status: "green", note: "$1,660-$2,144" },
+  };
+  assert.equal(missingFindingCards([clean], [], { aptIsDark: false }).length, 0);
+});
+
+test("coverage: covers multiple uncovered reds in one pass", () => {
+  const rows = [
+    hoursConflictRow,
+    { label: "Tour scheduling", apartments: { status: "na" }, google: { status: "na" }, website: { status: "red", note: "No scheduler" } },
+    { label: "Online application", apartments: { status: "na" }, google: { status: "na" }, website: { status: "red", note: "No apply link" } },
+  ];
+  const cards = missingFindingCards(rows, [], { aptIsDark: true });
+  assert.equal(cards.length, 3);
+});
+
+test("coverage: never injects an optional-promo (concession) card", () => {
+  // Even if a concession row somehow arrives red, it's not a required feature.
+  const row = { label: "Concessions listed", apartments: { status: "na" }, google: { status: "na" }, website: { status: "red", note: "none" } };
+  assert.equal(missingFindingCards([row], [], { aptIsDark: false }).length, 0);
 });
