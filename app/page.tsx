@@ -1799,13 +1799,13 @@ async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> 
           const r = await fetch("/api/pagespeed", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, strategy }),
+            body: JSON.stringify({ url, strategy, samples: 3 }),
           });
           const d = await r.json();
           if (!r.ok || d.error) {
             return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", field: null, error: d.error || `failed (${r.status})` };
           }
-          return { strategy, score: d.score ?? null, lcp: d.lcp || "—", cls: d.cls || "—", fcp: d.fcp || "—", tbt: d.tbt || "—", field: d.field ?? null };
+          return { strategy, score: d.score ?? null, lcp: d.lcp || "—", cls: d.cls || "—", fcp: d.fcp || "—", tbt: d.tbt || "—", field: d.field ?? null, samples: d.samples ?? 1, scoreRange: d.scoreRange ?? null };
         } catch {
           return { strategy, score: null, lcp: "—", cls: "—", fcp: "—", tbt: "—", field: null, error: "request failed" };
         }
@@ -2342,6 +2342,19 @@ function pageSpeedColor(s: number | null): string {
   return s >= 90 ? "#15803d" : s >= 50 ? "#9a7200" : B.tangelo;
 }
 
+/**
+ * CrUX field verdict → {label, color}. This is the REAL-USER result, so it's what
+ * we headline when present. PSI reports overall_category as FAST/AVERAGE/SLOW (older)
+ * or GOOD/NEEDS_IMPROVEMENT/POOR (newer) — map both to a plain-English verdict.
+ */
+function fieldVerdict(category: string): { label: string; color: string } {
+  const c = (category || "").toUpperCase();
+  if (c === "FAST" || c === "GOOD") return { label: "Good", color: "#15803d" };
+  if (c === "SLOW" || c === "POOR") return { label: "Poor", color: B.tangelo };
+  if (c === "AVERAGE" || c === "NEEDS_IMPROVEMENT") return { label: "Needs work", color: "#9a7200" };
+  return { label: "Measured", color: "#555" };
+}
+
 /** On-screen PageSpeed / Core Web Vitals panel (SEO tab). */
 function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
   if (!ps || ps.strategies.length === 0) return null;
@@ -2368,16 +2381,31 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
         </span>
       </div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-        {ps.strategies.map((s) => (
+        {ps.strategies.map((s) => {
+          const verdict = s.field ? fieldVerdict(s.field.category) : null;
+          return (
           <div key={s.strategy} style={{ flex: "1 1 240px", minWidth: 220, border: "1px solid #e6e9ec", borderRadius: 8, padding: "12px 16px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666" }}>
                 {s.strategy}
               </span>
-              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 30, lineHeight: 1, color: pageSpeedColor(s.score) }}>
-                {s.score == null ? "—" : s.score}
-                {s.score != null && <span style={{ fontSize: 13, color: "#aaa" }}> /100</span>}
-              </span>
+              {/* Headline = the REAL-USER verdict when we have it (accurate + stable).
+                  The lab score is only the headline when there's no field data. */}
+              {verdict ? (
+                <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 26, lineHeight: 1, color: verdict.color }}>
+                    {verdict.label}
+                  </span>
+                  {s.score != null && (
+                    <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa" }}>lab {s.score}</span>
+                  )}
+                </span>
+              ) : (
+                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 30, lineHeight: 1, color: pageSpeedColor(s.score) }}>
+                  {s.score == null ? "—" : s.score}
+                  {s.score != null && <span style={{ fontSize: 13, color: "#aaa" }}> /100</span>}
+                </span>
+              )}
             </div>
             {s.error ? (
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9aa3ad" }}>Could not measure this run.</div>
@@ -2386,7 +2414,7 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
                 {s.field && (
                   <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #f0f0f0" }}>
                     <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#15803d", fontWeight: 600, marginBottom: 3 }}>
-                      Real users (28-day){s.field.scope === "origin" ? ", site-wide" : ""}{s.field.category ? ` · ${s.field.category.toLowerCase()}` : ""}
+                      Real users, 28-day{s.field.scope === "origin" ? " (site-wide)" : ""} — the accurate benchmark
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
                       {[
@@ -2403,9 +2431,10 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
                   </div>
                 )}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
-                  {s.field && (
-                    <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#9aa3ad", width: "100%" }}>Lab estimate (varies run to run):</span>
-                  )}
+                  <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#9aa3ad", width: "100%" }}>
+                    Lab estimate{s.samples && s.samples > 1 ? ` · median of ${s.samples} runs` : ""}
+                    {s.scoreRange && s.scoreRange.max > s.scoreRange.min ? ` (ranged ${s.scoreRange.min}–${s.scoreRange.max})` : ""}:
+                  </span>
                   {[
                     ["LCP", s.lcp],
                     ["CLS", s.cls],
@@ -2420,10 +2449,11 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
               </>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
-        Google PageSpeed Insights · {new Date(ps.checkedAt).toLocaleString()}. 90+ is good, 50–89 needs work, under 50 is poor. Mobile is what Google ranks on. The <strong>score and lab metrics are a synthetic single-run test, so they move run-to-run</strong>; the &ldquo;Real users&rdquo; line (when shown) is Google&rsquo;s 28-day field data and is the stable benchmark.
+        Google PageSpeed Insights · measured {new Date(ps.checkedAt).toLocaleString()} (cached between audits — it re-measures about every 2 weeks, or after &ldquo;Reset SEO history&rdquo;, since a synthetic lab score swings run-to-run). 90+ is good, 50–89 needs work, under 50 is poor. Mobile is what Google ranks on. The &ldquo;Real users&rdquo; line (when shown) is Google&rsquo;s 28-day field data and is the accurate benchmark.
       </p>
     </div>
   );
@@ -2850,11 +2880,23 @@ Return ONLY a JSON array of 6 strings, no prose:
         };
       }
 
-      // PageSpeed / Core Web Vitals — Google PageSpeed Insights (mobile + desktop).
+      // PageSpeed / Core Web Vitals. This is a periodic MEASUREMENT, not a per-run
+      // thing — the site's real speed doesn't change between audit runs, only
+      // Lighthouse's noisy synthetic lab number does. So REUSE the last measurement
+      // (stops the score bouncing every re-run) and only re-measure when it's
+      // missing, previously failed, or older than ~14 days. "Reset SEO history"
+      // clears it and forces a fresh measurement.
       let pageSpeed: PageSpeedResult | undefined;
       if (currentProperty.website) {
-        setProgress("Measuring page speed (Core Web Vitals)…");
-        pageSpeed = await callPageSpeed(currentProperty.website);
+        const prior = currentProperty.seoAudit?.pageSpeed;
+        const priorHasScore = !!prior?.strategies?.some((s) => s.score != null);
+        const priorAgeMs = prior?.checkedAt ? Date.now() - new Date(prior.checkedAt).getTime() : Infinity;
+        if (priorHasScore && priorAgeMs < 14 * 24 * 60 * 60 * 1000) {
+          pageSpeed = prior; // stable measurement — don't re-roll the noisy lab test
+        } else {
+          setProgress("Measuring page speed (Core Web Vitals)…");
+          pageSpeed = await callPageSpeed(currentProperty.website);
+        }
       }
 
       const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
@@ -7234,7 +7276,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                   </p>
                 )}
                 <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 4 }}>
-                  Score and lab metrics above are a synthetic single-run test and move run-to-run; 90+ good · 50–89 needs work · under 50 poor. Mobile is Google&apos;s ranking signal.
+                  Score and lab metrics above are a synthetic lab test (measured periodically, not live); the Real-users line is the accurate benchmark. 90+ good · 50–89 needs work · under 50 poor. Mobile is Google&apos;s ranking signal.
                 </p>
               </div>
             )}

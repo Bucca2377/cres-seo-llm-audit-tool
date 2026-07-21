@@ -120,6 +120,8 @@ export interface PageSpeedStrategyResult {
   fcp: string; // First Contentful Paint (lab)
   tbt: string; // Total Blocking Time (lab)
   field?: PageSpeedField | null; // CrUX real-user data — stable; null when the site has no CrUX data
+  samples?: number; // how many lab runs the reported score is the median of
+  scoreRange?: { min: number; max: number } | null; // spread across those samples (run-to-run noise)
   error?: string;
 }
 
