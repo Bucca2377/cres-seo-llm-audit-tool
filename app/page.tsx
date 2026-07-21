@@ -102,6 +102,7 @@ const PRIORITY_STYLES: Record<RecommendationPriority, { bg: string; fg: string; 
   "QUICK WIN":    { bg: "#e7f6ec", fg: "#0f7b3a", border: "#bce5c9" },
   "FOUNDATIONAL": { bg: "#feeee7", fg: "#b1410f", border: "#fcd5c4" },
   "MAP PACK":     { bg: "#e6f1f8", fg: "#1c5b8a", border: "#bcd6e8" },
+  "AI VISIBILITY":{ bg: "#e3f4f5", fg: "#0e6f7a", border: "#bce2e6" },
   "STRATEGIC":    { bg: "#efeaf7", fg: "#4d2f8f", border: "#d3c4ee" },
   "CONTENT":      { bg: "#fff6e0", fg: "#9b6a08", border: "#f5deaa" },
   "LONG-TAIL":    { bg: "#eef0f3", fg: "#3d4a5c", border: "#c6cdda" },
@@ -7349,7 +7350,10 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     mode === "seo"
       ? [...(structuredSeoRecs || [])]
       : mode === "marketing"
-      ? [...(structuredMktRecs || []), ...(structuredLlmRecs || [])]
+      ? // Marketing-only print mirrors the Marketing tab exactly — just the
+        // marketing-audit recs. The optimization-checklist (LLM) recs are a
+        // separate audit and belong only in the combined report, not here.
+        [...(structuredMktRecs || [])]
       : [...(structuredMktRecs || []), ...(structuredLlmRecs || []), ...(structuredSeoRecs || [])]
   ).filter((c) => !isSetAside(c, setAsideKeys));
 
@@ -7358,10 +7362,13 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   // multi-month work.
   const printBandOrder: { label: string; priorities: RecommendationPriority[] }[] = [
     { label: "Immediate Priority — This Week",      priorities: ["QUICK WIN"] },
-    { label: "High Priority — Within 2 Weeks",      priorities: ["FOUNDATIONAL", "MAP PACK"] },
+    { label: "High Priority — Within 2 Weeks",      priorities: ["FOUNDATIONAL", "MAP PACK", "AI VISIBILITY"] },
     { label: "Content & Strategy — Within 30 Days", priorities: ["CONTENT", "STRATEGIC"] },
     { label: "Long-Tail — Ongoing",                 priorities: ["LONG-TAIL"] },
   ];
+  // NB: every RecommendationPriority MUST appear in exactly one band above, or a
+  // card with that priority silently drops from the printed report (that's how
+  // "AI VISIBILITY" SEO cards were vanishing).
   const printBands = printBandOrder
     .map((b) => ({
       label: b.label,

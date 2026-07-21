@@ -19,6 +19,7 @@ export type RecommendationPriority =
   | "QUICK WIN"
   | "FOUNDATIONAL"
   | "MAP PACK"
+  | "AI VISIBILITY"
   | "STRATEGIC"
   | "CONTENT"
   | "LONG-TAIL";
