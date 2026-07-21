@@ -4204,7 +4204,7 @@ function OptimizationChecklist({
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 14 }}>
-        <KPI label="AI Visibility Score" value={`${pct}%`} sub={`${earned} of ${total} pts`} accent={pctAccent(earned, total)} />
+        <KPI label="Online Presence Score" value={`${pct}%`} sub={`${earned} of ${total} pts`} accent={pctAccent(earned, total)} />
         <KPI label="Google Profile & Reviews" value={`${prof.e}/${prof.t}`} sub="profile signals" accent={pctAccent(prof.e, prof.t)} />
         <KPI label="Website & Structured Data" value={`${web.e}/${web.t}`} sub="on-site signals" accent={pctAccent(web.e, web.t)} />
         <KPI label="Checks Fully Met" value={`${completeCount}/${LLM_ITEMS.length}`} sub="items complete" accent={pctAccent(completeCount, LLM_ITEMS.length)} />
@@ -5377,8 +5377,11 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       {/* Optimization checklist + visibility score — populated by the single
           Run Marketing Audit button above (alongside the consistency audit). */}
       <div style={{ marginTop: 24, marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 10 }}>
-          Optimization Checklist
+        <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, letterSpacing: "0.06em", textTransform: "uppercase", color: B.oxford, marginBottom: 4 }}>
+          Online Presence Health
+        </div>
+        <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#aaa", marginBottom: 10 }}>
+          How complete, consistent, and machine-readable the property&rsquo;s online footprint is — the foundation search engines and AI assistants rely on. (Whether an AI actually names you is measured in the SEO tab&rsquo;s &ldquo;AI Assistant Visibility.&rdquo;)
         </div>
         <OptimizationChecklist property={property} onUpdateProperty={onUpdateProperty} />
       </div>
@@ -7300,9 +7303,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
 
   const llmSummaryLine =
     llmTs && completeCount > 0
-      ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%), with ${completeCount} of ${LLM_ITEMS.length} optimization checks fully met.`
+      ? `The property's Online Presence Health score is ${earnedLLM}/${totalLLM} (${scorePct}%), with ${completeCount} of ${LLM_ITEMS.length} presence checks fully met.`
       : llmTs
-      ? `The property's LLM Visibility Score is ${earnedLLM}/${totalLLM} (${scorePct}%) — significant optimization headroom remains across the ${LLM_ITEMS.length}-item checklist.`
+      ? `The property's Online Presence Health score is ${earnedLLM}/${totalLLM} (${scorePct}%) — significant headroom remains across the ${LLM_ITEMS.length} presence checks.`
       : "An optimization checklist audit has not yet been run for this property. Run it from the Marketing Audit tab to populate this section.";
 
   const seoSummaryLine = seo
@@ -7957,9 +7960,9 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
         {/* Part of the Marketing report; skipped in SEO / LLM-only print. */}
         {mode !== "seo" && (llmTs || llmRecs) && (
           <section className="pb-before">
-            <PrintSectionHeader>Optimization Checklist</PrintSectionHeader>
+            <PrintSectionHeader>Online Presence Health</PrintSectionHeader>
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
-              Audited {llmTs ? new Date(llmTs).toLocaleString() : "—"}. Score{" "}
+              How complete and machine-readable the property&rsquo;s online footprint is (the foundation search engines and AI assistants rely on). Audited {llmTs ? new Date(llmTs).toLocaleString() : "—"}. Score{" "}
               <strong style={{ color: PRINT_NAVY }}>
                 {earnedLLM}/{totalLLM}
               </strong>{" "}
