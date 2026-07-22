@@ -1784,6 +1784,100 @@ function isBrandedQuery(query: string, property: Property): boolean {
   return streetTokens.length > 0 && streetTokens.some((tok) => q.includes(tok));
 }
 
+/**
+ * Compute the SEO scorecard summary (Map Pack + organic coverage, best/avg ranks,
+ * branded vs competitive split, strongest query + winnable opportunity) from a
+ * finished run. SINGLE SOURCE so the on-screen scorecard and the print report can't
+ * drift — both call this. Competitive-only headline numbers; branded/navigational
+ * queries (own name/street) are split out so a #1 for your own name can't inflate them.
+ */
+// Minimal rank shape this reads — satisfied by GoogleRankResult AND the print
+// component's slightly looser stored variant (expanded_map_pack_rank optional).
+type RankForSummary = {
+  map_pack_rank: number | null;
+  expanded_map_pack_rank?: number | null;
+  map_pack_appeared: boolean;
+  organic_rank: number | null;
+  organic_page: number | null;
+};
+function computeSeoSummary(seo: { queries: string[]; ranks: RankForSummary[] }, property: Property) {
+  const { queries, ranks } = seo;
+  const branded = ranks.map((_, i) => isBrandedQuery(queries[i], property));
+  const compIdx = ranks.map((_, i) => i).filter((i) => !branded[i]);
+  const compRanks = compIdx.map((i) => ranks[i]);
+
+  const mapPackCount = compRanks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
+  const mapPackPartialRanks = compRanks
+    .filter((r) => !(r.map_pack_rank && r.map_pack_rank <= 3) && r.expanded_map_pack_rank)
+    .map((r) => r.expanded_map_pack_rank!);
+  const mapPackPartial = mapPackPartialRanks.length;
+  const bestPartialMP = mapPackPartialRanks.length ? Math.min(...mapPackPartialRanks) : null;
+  const page1Count = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
+  const compValid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
+  const avgRank = compValid.length ? Math.round(compValid.reduce((a, b) => a + b, 0) / compValid.length) : null;
+  const compMapPackPositions = compRanks
+    .map((r) => r.map_pack_rank ?? r.expanded_map_pack_rank ?? null)
+    .filter((x): x is number => typeof x === "number");
+  const avgMapPackRank = compMapPackPositions.length
+    ? Math.round(compMapPackPositions.reduce((a, b) => a + b, 0) / compMapPackPositions.length)
+    : null;
+  const mapPackRankingCount = compMapPackPositions.length;
+  const bestMapPackRank = compMapPackPositions.length ? Math.min(...compMapPackPositions) : null;
+
+  let strongestIdx = -1;
+  let strongestScore = -1;
+  let weakestIdx = -1;
+  let weakestScore = Infinity;
+  let opportunityIdx = -1;
+  let oppScore = -1;
+  compIdx.forEach((i) => {
+    const r = ranks[i];
+    const mpScore = r.map_pack_rank ? 100 - r.map_pack_rank * 10 : 0;
+    const orgScore = r.organic_rank ? Math.max(0, 110 - r.organic_rank) : 0;
+    const score = mpScore + orgScore;
+    if (score > strongestScore) {
+      strongestScore = score;
+      strongestIdx = i;
+    }
+    if (score < weakestScore) {
+      weakestScore = score;
+      weakestIdx = i;
+    }
+    if (r.map_pack_rank && r.map_pack_rank <= 3) return;
+    let prox = 0;
+    if (r.expanded_map_pack_rank) prox = Math.max(prox, 100 - r.expanded_map_pack_rank);
+    else if (r.map_pack_appeared) prox = Math.max(prox, 45);
+    if (r.organic_rank && r.organic_rank <= 30) prox = Math.max(prox, 60 - r.organic_rank);
+    if (prox > oppScore) {
+      oppScore = prox;
+      opportunityIdx = i;
+    }
+  });
+  const oppIsWinnable = opportunityIdx >= 0 && oppScore > 0;
+  const finalOppIdx = oppIsWinnable ? opportunityIdx : weakestIdx;
+
+  return {
+    total: queries.length,
+    competitiveTotal: compRanks.length,
+    brandedCount: ranks.length - compRanks.length,
+    mapPackCount,
+    mapPackPartial,
+    bestPartialMP,
+    page1Count,
+    avgRank,
+    avgMapPackRank,
+    mapPackRankingCount,
+    bestMapPackRank,
+    rankingCount: compValid.length,
+    strongestQuery: strongestIdx >= 0 && strongestScore > 0 ? queries[strongestIdx] : null,
+    strongestRank: strongestIdx >= 0 && strongestScore > 0 ? ranks[strongestIdx] : null,
+    weakestQuery: weakestIdx >= 0 ? queries[weakestIdx] : null,
+    opportunityQuery: finalOppIdx >= 0 ? queries[finalOppIdx] : null,
+    opportunityRank: finalOppIdx >= 0 ? ranks[finalOppIdx] : null,
+    opportunityWinnable: oppIsWinnable,
+  };
+}
+
 /* -- SEO AUDIT (parallel rank check across 6 queries) --------------- */
 type AuditStage = "idle" | "queries" | "checking" | "analyzing" | "done";
 
@@ -3106,113 +3200,7 @@ Recommendation rules (STRICT):
   };
 
   // Aggregate metrics
-  const summary = (() => {
-    if (!results) return null;
-    const { queries, ranks } = results;
-
-    // Split branded/navigational queries from competitive ones. The headline
-    // scorecard is built ONLY from competitive queries — ranking #1 for your
-    // own name or street is expected and would otherwise inflate the numbers.
-    const branded = ranks.map((_, i) => isBrandedQuery(queries[i], property));
-    const compIdx = ranks.map((_, i) => i).filter((i) => !branded[i]);
-    const compRanks = compIdx.map((i) => ranks[i]);
-
-    const mapPackCount = compRanks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
-    // Partial credit: competitive queries where the property appears in the
-    // Map Pack but below the top-3 3-pack (the "More places" expanded view,
-    // e.g. #19). Present, just not prominent.
-    const mapPackPartialRanks = compRanks
-      .filter((r) => !(r.map_pack_rank && r.map_pack_rank <= 3) && r.expanded_map_pack_rank)
-      .map((r) => r.expanded_map_pack_rank!);
-    const mapPackPartial = mapPackPartialRanks.length;
-    const bestPartialMP = mapPackPartialRanks.length ? Math.min(...mapPackPartialRanks) : null;
-    const page1Count = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
-    const compValid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
-    const avgRank = compValid.length
-      ? Math.round(compValid.reduce((a, b) => a + b, 0) / compValid.length)
-      : null;
-    // Average MAP PACK position across competitive queries where the property
-    // appears in the pack (top-3 3-pack OR the expanded "More places" list) —
-    // the parallel to avgRank (organic). Excludes queries absent from the pack
-    // entirely, exactly as avgRank excludes non-ranking organic.
-    const compMapPackPositions = compRanks
-      .map((r) => r.map_pack_rank ?? r.expanded_map_pack_rank ?? null)
-      .filter((x): x is number => typeof x === "number");
-    const avgMapPackRank = compMapPackPositions.length
-      ? Math.round(compMapPackPositions.reduce((a, b) => a + b, 0) / compMapPackPositions.length)
-      : null;
-    const mapPackRankingCount = compMapPackPositions.length;
-    // The property's single BEST (closest-to-#1) Map Pack position across
-    // competitive queries — surfaced so the scorecard shows the peak, not just
-    // the average dragged up by an expanded-pack outlier.
-    const bestMapPackRank = compMapPackPositions.length ? Math.min(...compMapPackPositions) : null;
-
-    // Strongest / weakest are chosen among COMPETITIVE queries so the cards
-    // surface a real win and a real gap, not "you rank #1 for your own name".
-    let strongestIdx = -1;
-    let strongestScore = -1;
-    let weakestIdx = -1;
-    let weakestScore = Infinity;
-    // The "biggest opportunity" is the most WINNABLE competitive query — one
-    // where the property already shows traction (in the expanded Map Pack, or
-    // ranking page 2-3) and just needs a push — NOT the query it's furthest
-    // from (usually a broad, hyper-competitive head term that's the slowest
-    // and most expensive to win). Fall back to the weakest only if nothing is
-    // close.
-    let opportunityIdx = -1;
-    let oppScore = -1;
-    compIdx.forEach((i) => {
-      const r = ranks[i];
-      const mpScore = r.map_pack_rank ? 100 - r.map_pack_rank * 10 : 0;
-      const orgScore = r.organic_rank ? Math.max(0, 110 - r.organic_rank) : 0;
-      const score = mpScore + orgScore;
-      if (score > strongestScore) {
-        strongestScore = score;
-        strongestIdx = i;
-      }
-      if (score < weakestScore) {
-        weakestScore = score;
-        weakestIdx = i;
-      }
-      // Winnable proximity: already top-3 in the pack = already winning (skip).
-      if (r.map_pack_rank && r.map_pack_rank <= 3) return;
-      let prox = 0;
-      if (r.expanded_map_pack_rank) prox = Math.max(prox, 100 - r.expanded_map_pack_rank);
-      else if (r.map_pack_appeared) prox = Math.max(prox, 45);
-      if (r.organic_rank && r.organic_rank <= 30) prox = Math.max(prox, 60 - r.organic_rank);
-      if (prox > oppScore) {
-        oppScore = prox;
-        opportunityIdx = i;
-      }
-    });
-    // Prefer a winnable query; fall back to the weakest if nothing is close.
-    const oppIsWinnable = opportunityIdx >= 0 && oppScore > 0;
-    const finalOppIdx = oppIsWinnable ? opportunityIdx : weakestIdx;
-
-    return {
-      total: queries.length,
-      competitiveTotal: compRanks.length,
-      brandedCount: ranks.length - compRanks.length,
-      mapPackCount,
-      mapPackPartial,
-      bestPartialMP,
-      page1Count,
-      avgRank,
-      avgMapPackRank,
-      mapPackRankingCount,
-      bestMapPackRank,
-      rankingCount: compValid.length,
-      // Only call a competitive query "strongest" if it genuinely ranks
-      // somewhere — otherwise there's no real win to highlight.
-      strongestQuery: strongestIdx >= 0 && strongestScore > 0 ? queries[strongestIdx] : null,
-      strongestRank: strongestIdx >= 0 && strongestScore > 0 ? ranks[strongestIdx] : null,
-      weakestQuery: weakestIdx >= 0 ? queries[weakestIdx] : null,
-      // The winnable opportunity (or weakest fallback) surfaced in the callout.
-      opportunityQuery: finalOppIdx >= 0 ? queries[finalOppIdx] : null,
-      opportunityRank: finalOppIdx >= 0 ? ranks[finalOppIdx] : null,
-      opportunityWinnable: oppIsWinnable,
-    };
-  })();
+  const summary = results ? computeSeoSummary(results, property) : null;
 
   return (
     <div style={{ background: "white", borderRadius: 10, padding: 24, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", marginBottom: 24 }}>
@@ -6757,28 +6745,21 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     year: "numeric",
   });
 
-  // SEO scorecard counts only competitive (non-branded) queries, so ranking
-  // #1 for the property's own name/street doesn't inflate the numbers.
-  let seoMP = 0;
-  let seoMPPartial = 0;
-  let seoP1 = 0;
-  let seoAvg: number | null = null;
-  let seoCompTotal = 0;
-  let seoBrandedCount = 0;
-  let seoRankingCount = 0;
-  if (seo) {
-    const compRanks = seo.ranks.filter((r, i) => !isBrandedQuery(seo.queries[i], property));
-    seoCompTotal = compRanks.length;
-    seoBrandedCount = seo.ranks.length - compRanks.length;
-    seoMP = compRanks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
-    seoMPPartial = compRanks.filter(
-      (r) => !(r.map_pack_rank && r.map_pack_rank <= 3) && r.expanded_map_pack_rank
-    ).length;
-    seoP1 = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
-    const valid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
-    seoAvg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
-    seoRankingCount = valid.length;
-  }
+  // SEO scorecard — SAME computation as the on-screen scorecard (single source:
+  // computeSeoSummary) so the print report shows the identical figures and can't
+  // drift. Counts only competitive (non-branded) queries.
+  const seoSummary = seo ? computeSeoSummary(seo, property) : null;
+  const seoMP = seoSummary?.mapPackCount ?? 0;
+  const seoMPPartial = seoSummary?.mapPackPartial ?? 0;
+  const seoP1 = seoSummary?.page1Count ?? 0;
+  const seoAvg = seoSummary?.avgRank ?? null;
+  const seoCompTotal = seoSummary?.competitiveTotal ?? 0;
+  const seoBrandedCount = seoSummary?.brandedCount ?? 0;
+  const seoRankingCount = seoSummary?.rankingCount ?? 0;
+  const seoAvgMP = seoSummary?.avgMapPackRank ?? null;
+  const seoBestMP = seoSummary?.bestMapPackRank ?? null;
+  const seoMPRankingCount = seoSummary?.mapPackRankingCount ?? 0;
+  const seoTotal = seoSummary?.total ?? 0;
 
   const cssName = property.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const pageStyles = `
@@ -7134,6 +7115,13 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     `${seoMP}/${seoCompTotal}`,
                     seoMPPartial > 0 ? `+${seoMPPartial} more in pack` : "Competitive searches",
                   ],
+                  [
+                    "Avg Map Pack Rank",
+                    seoAvgMP ? `#${seoAvgMP}` : "—",
+                    seoAvgMP
+                      ? `Best #${seoBestMP} · avg of ${seoMPRankingCount} in pack${seoCompTotal - seoMPRankingCount > 0 ? ` · absent on ${seoCompTotal - seoMPRankingCount} of ${seoCompTotal}` : ""}`
+                      : "Not in the Map Pack",
+                  ],
                   ["Page 1 Organic", `${seoP1}/${seoCompTotal}`, "Competitive searches"],
                   [
                     "Avg Organic Rank",
@@ -7141,6 +7129,11 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     seoAvg
                       ? `avg of ${seoRankingCount} of ${seoCompTotal} that rank${seoCompTotal - seoRankingCount > 0 ? ` · absent on ${seoCompTotal - seoRankingCount} (not in top 30)` : ""}`
                       : "Not ranking (competitive)",
+                  ],
+                  [
+                    "Queries Audited",
+                    `${seoTotal}`,
+                    seoBrandedCount > 0 ? `${seoCompTotal} competitive · ${seoBrandedCount} branded` : "Real-time Google search",
                   ],
                 ] as [string, string, string][]
               ).map(([label, val, sub]) => (
@@ -7182,6 +7175,72 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 </div>
               ))}
             </div>
+
+            {/* Map Pack location caveat — ranks are hyper-local */}
+            <p
+              className="pb-avoid"
+              style={{ ...bodyP, fontSize: 10, color: "#7a5b1e", background: "#fff8ec", border: "1px solid #f5e2bd", borderRadius: 6, padding: "7px 12px", marginBottom: 12, lineHeight: 1.5 }}
+            >
+              <strong>Checked from {seo.location || "the property’s city"}.</strong> Google&rsquo;s Map Pack is hyper-local
+              &mdash; it changes with the searcher&rsquo;s exact location and personalization, so a Map Pack rank here may not
+              match what you see from your own device. Treat Map Pack positions as &ldquo;visible to a searcher near the
+              property,&rdquo; not an absolute rank. Organic ranks are far more stable.
+            </p>
+
+            {/* Strongest query / winnable opportunity */}
+            {seoSummary && (seoSummary.strongestQuery || seoSummary.opportunityQuery) && (
+              <div className="pb-avoid" style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                {seoSummary.strongestQuery && (
+                  <div style={{ flex: 1, padding: "8px 12px", background: "#f0fdf4", borderLeft: "3px solid #22c55e", borderRadius: 4 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "#15803d", marginBottom: 3 }}>
+                      Strongest Query
+                    </div>
+                    <div style={{ ...bodyP, fontSize: 10.5, color: "#333", margin: "0 0 2px 0" }}>&ldquo;{seoSummary.strongestQuery}&rdquo;</div>
+                    {seoSummary.strongestRank && (
+                      <div style={{ ...bodyP, fontSize: 9.5, color: "#15803d", margin: 0 }}>
+                        {seoSummary.strongestRank.map_pack_rank ? `Map Pack #${seoSummary.strongestRank.map_pack_rank}` : ""}
+                        {seoSummary.strongestRank.map_pack_rank && seoSummary.strongestRank.organic_rank ? " · " : ""}
+                        {seoSummary.strongestRank.organic_rank ? `Organic #${seoSummary.strongestRank.organic_rank}` : ""}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {seoSummary.opportunityQuery && (
+                  <div style={{ flex: 1, padding: "8px 12px", background: "#feeee7", borderLeft: "3px solid #e2662f", borderRadius: 4 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "#b14a2a", marginBottom: 3 }}>
+                      {seoSummary.opportunityWinnable ? "Biggest Opportunity (Winnable)" : "Longer-Term Target"}
+                    </div>
+                    <div style={{ ...bodyP, fontSize: 10.5, color: "#333", margin: "0 0 2px 0" }}>&ldquo;{seoSummary.opportunityQuery}&rdquo;</div>
+                    <div style={{ ...bodyP, fontSize: 9.5, color: "#b14a2a", margin: 0 }}>
+                      {(() => {
+                        const r = seoSummary.opportunityRank;
+                        if (!r) return "";
+                        if (seoSummary.opportunityWinnable) {
+                          if (r.expanded_map_pack_rank) return `In the expanded Map Pack (#${r.expanded_map_pack_rank}) — push into the top 3`;
+                          if (r.organic_rank) return `Organic #${r.organic_rank} (P${r.organic_page}) — close; winnable to page 1`;
+                          if (r.map_pack_appeared) return "Appears in the Map Pack — push into the top 3";
+                          return "Close — winnable with focused work";
+                        }
+                        return "Not ranking yet — longer-term target (broad term)";
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Branded vs competitive explainer */}
+            {seoBrandedCount > 0 && (
+              <p
+                className="pb-avoid"
+                style={{ ...bodyP, fontSize: 9.5, color: "#44505c", background: "#f4f7f9", border: "1px solid #e2e8ec", borderRadius: 6, padding: "7px 12px", marginBottom: 14, lineHeight: 1.5 }}
+              >
+                <strong style={{ color: PRINT_NAVY }}>How to read this:</strong> the scorecard counts only the {seoCompTotal}{" "}
+                competitive search{seoCompTotal === 1 ? "" : "es"} &mdash; the ones a stranger would type. The {seoBrandedCount}{" "}
+                branded/navigational {seoBrandedCount === 1 ? "query" : "queries"} (your own name or street) {seoBrandedCount === 1 ? "is" : "are"}{" "}
+                kept out of these numbers &mdash; ranking #1 for those is expected and doesn&rsquo;t reflect competitive visibility.
+              </p>
+            )}
 
             <table>
               <thead>
