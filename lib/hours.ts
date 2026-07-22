@@ -110,6 +110,69 @@ export function parseWeekHours(text: string): Record<string, string> {
   return out;
 }
 
+const FULL_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+function fullDayIndex(s: string): number {
+  return FULL_DAYS.indexOf((s || "").trim().toLowerCase());
+}
+function to12h(hh: number, mm: number): string {
+  const ap = hh >= 12 ? "PM" : "AM";
+  let h = hh % 12;
+  if (h === 0) h = 12;
+  return mm ? `${h}:${String(mm).padStart(2, "0")} ${ap}` : `${h} ${ap}`;
+}
+
+/**
+ * Parse Apartments.com office hours out of its RAW HTML (via Bright Data). The
+ * visible listing collapses hours behind a "View All Hours" expander, so the model
+ * reader only sees "open today" and wrongly infers the rest (e.g. Monday 9-5 when
+ * the listing actually says Monday CLOSED). The full weekly schedule IS in the raw
+ * HTML — the "daysHoursContainer" spans ("Monday, Closed" / "Tuesday - Friday, 9am -
+ * 5pm" / ...), with a JSON-LD OpeningHoursSpecification fallback. Returns a full
+ * 7-day map (unlisted days = Closed) or null when the block isn't present this fetch
+ * (Apartments.com's raw HTML varies run-to-run) — null means "couldn't verify", so
+ * the caller must NOT fall back to the model's unreliable guess.
+ */
+export function aptOfficeHoursFromRawHtml(html: string): Record<string, string> | null {
+  if (!html) return null;
+  const out: Record<string, string> = {};
+  let found = false;
+
+  // Primary: the visible "daysHoursContainer" spans (display text incl. closed days).
+  for (const m of html.matchAll(/daysHoursContainer[^>]*>([\s\S]*?)<\/span>/gi)) {
+    const txt = m[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
+    const mm = txt.match(/^([A-Za-z]+(?:\s*[-–—]\s*[A-Za-z]+)?)\s*[,:]\s*(.+)$/);
+    if (!mm) continue;
+    const hours = /clos/i.test(mm[2]) ? "Closed" : mm[2].trim();
+    const range = mm[1].split(/\s*[-–—]\s*/);
+    if (range.length === 2) {
+      const a = fullDayIndex(range[0]);
+      const b = fullDayIndex(range[1]);
+      if (a >= 0 && b >= 0 && a <= b) for (let i = a; i <= b; i++) { out[FULL_DAYS[i]] = hours; found = true; }
+    } else {
+      const i = fullDayIndex(mm[1]);
+      if (i >= 0) { out[FULL_DAYS[i]] = hours; found = true; }
+    }
+  }
+
+  // Fallback: JSON-LD OpeningHoursSpecification (listed days = open; absent = closed).
+  if (!found) {
+    for (const s of html.matchAll(
+      /"OpeningHoursSpecification"[\s\S]{0,300}?"dayOfWeek":\s*\[([^\]]*)\][\s\S]{0,160}?"opens":"(\d{1,2}):(\d{2})"[\s\S]{0,60}?"closes":"(\d{1,2}):(\d{2})"/gi
+    )) {
+      const days = [...s[1].matchAll(/"([A-Za-z]+)"/g)].map((x) => x[1]);
+      const disp = `${to12h(+s[2], +s[3])} - ${to12h(+s[4], +s[5])}`;
+      for (const d of days) {
+        const i = fullDayIndex(d);
+        if (i >= 0) { out[FULL_DAYS[i]] = disp; found = true; }
+      }
+    }
+  }
+
+  if (!found) return null;
+  for (const d of FULL_DAYS) if (!out[d]) out[d] = "Closed"; // a day the listing omits = closed
+  return out;
+}
+
 export interface HoursCellVerdict {
   status: "green" | "amber" | "red";
   note: string;

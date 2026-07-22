@@ -8,7 +8,7 @@ import {
   recommendsCreatingConcession,
 } from "../lib/detectors";
 import { missingFindingCards } from "../lib/coverage";
-import { parseWeekHours, reconcileOfficeHours } from "../lib/hours";
+import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -260,6 +260,43 @@ test("hours: an authoritative outlier (Google) is a RED conflict", () => {
   assert.equal(v.google.status, "red");
   assert.equal(v.website.status, "green");
   assert.equal(v.apartments.status, "green");
+});
+
+test("hours: parses Apartments.com weekly schedule from raw HTML (incl. closed Monday)", () => {
+  // The real Apartments.com markup — hours live in daysHoursContainer spans behind
+  // "View All Hours", which the model reader misses (it only sees "open today").
+  const raw =
+    '<div class="hoursReview"><span class="hoursTitle">Office Hours</span>' +
+    '<span class="daysHoursContainer"> Monday, Closed </span>' +
+    '<span class="daysHoursContainer"> Tuesday - Friday, 9am - 5pm </span>' +
+    '<span class="daysHoursContainer"> Saturday, 10am - 4pm </span>' +
+    '<span class="daysHoursContainer"> Sunday, Closed </span></div>';
+  const h = aptOfficeHoursFromRawHtml(raw)!;
+  assert.ok(h);
+  assert.match(h.monday, /closed/i); // the bug: was read as 9-5
+  assert.match(h.tuesday, /9am - 5pm/i);
+  assert.match(h.friday, /9am - 5pm/i);
+  assert.match(h.saturday, /10am - 4pm/i);
+  assert.match(h.sunday, /closed/i);
+  // No hours block in this fetch -> null (caller must NOT fall back to the model guess).
+  assert.equal(aptOfficeHoursFromRawHtml("<html><body>no hours here</body></html>"), null);
+});
+
+test("hours: raw-HTML apts hours reconcile clean with website+Google (no false conflict)", () => {
+  const apts = aptOfficeHoursFromRawHtml(
+    '<span class="daysHoursContainer">Monday, Closed</span>' +
+      '<span class="daysHoursContainer">Tuesday - Friday, 9am - 5pm</span>' +
+      '<span class="daysHoursContainer">Saturday, 10am - 4pm</span>' +
+      '<span class="daysHoursContainer">Sunday, Closed</span>'
+  )!;
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
+    { key: "google", label: "Google", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
+    { key: "apartments", label: "Apartments.com", hours: apts, authoritative: false },
+  ])!;
+  assert.equal(v.website.status, "green");
+  assert.equal(v.google.status, "green");
+  assert.equal(v.apartments.status, "green"); // now that apts is read correctly, all agree
 });
 
 test("hours: two sources that simply disagree (no majority) -> amber verify, null when <2", () => {

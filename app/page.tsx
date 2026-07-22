@@ -4097,6 +4097,10 @@ function MarketingAuditTab({
       // nearby-listings section. This checks the raw HTML for the property's OWN
       // pricing section (active) vs "Explore Similar Rentals Nearby" (dark shell)
       // and overrides when determinable. Null result -> keep the web_fetch read.
+      // Does the accurate weekly schedule from the raw HTML back the apts hours?
+      // The model reader misreads collapsed days, so unless we confirm hours from
+      // the raw HTML we must NOT trust its apts hours for the consistency check.
+      let aptHoursVerified = false;
       if (current.apartmentsUrl && aptRead) {
         try {
           const sr = await fetch("/api/apts-status", {
@@ -4104,10 +4108,16 @@ function MarketingAuditTab({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: current.apartmentsUrl }),
           });
-          const sj = (await sr.json()) as { advertising?: boolean | null };
+          const sj = (await sr.json()) as { advertising?: boolean | null; officeHours?: Record<string, string> | null };
           if (typeof sj.advertising === "boolean") {
             aptRead.advertising = sj.advertising;
             aptRead.ok = true;
+          }
+          // AUTHORITATIVE hours from the raw HTML (includes closed days). Overrides
+          // the model's collapsed-view guess.
+          if (sj.officeHours && Object.keys(sj.officeHours).length) {
+            aptRead.officeHours = sj.officeHours;
+            aptHoursVerified = true;
           }
         } catch {
           /* keep the web_fetch-based read */
@@ -4165,7 +4175,10 @@ function MarketingAuditTab({
       const hoursVerdicts = reconcileOfficeHours([
         { key: "website", label: "the website", hours: websiteHoursParsed, authoritative: true },
         { key: "google", label: "Google", hours: officeHours, authoritative: true },
-        { key: "apartments", label: "Apartments.com", hours: aptIsDark || !aptRead?.ok ? undefined : aptRead.officeHours, authoritative: false },
+        // Only trust apts hours confirmed from the RAW HTML — the model reader
+        // misreads collapsed days. Unverified -> excluded from the comparison so it
+        // can't manufacture a false conflict.
+        { key: "apartments", label: "Apartments.com", hours: aptIsDark || !aptRead?.ok || !aptHoursVerified ? undefined : aptRead.officeHours, authoritative: false },
       ]);
       const hoursReconciled = !!hoursVerdicts;
       const hoursConflictReal = !!hoursVerdicts && Object.values(hoursVerdicts).some((v) => v.status !== "green");
@@ -4521,6 +4534,15 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           if (hoursVerdicts.website) hoursRow.website = hoursVerdicts.website;
           if (hoursVerdicts.google) hoursRow.google = hoursVerdicts.google;
           if (hoursVerdicts.apartments && !aptIsDark) hoursRow.apartments = hoursVerdicts.apartments;
+          // Apts active but hours NOT confirmed from raw HTML -> don't show the model's
+          // collapsed-view guess as a graded schedule; mark it verify (and it was never
+          // fed into the comparison, so it didn't create a false conflict either).
+          else if (!aptIsDark && !aptHoursVerified && aptRead?.ok) {
+            hoursRow.apartments = {
+              status: "amber",
+              note: "Full weekly hours weren’t readable from the listing this run — verify on Apartments.com (the listing collapses them behind “View All Hours”).",
+            };
+          }
         }
       }
       // Virtual tour on Apartments.com is deterministic from the listing's media

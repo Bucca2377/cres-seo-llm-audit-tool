@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aptAdvertisingFromRawHtml } from "@/lib/detectors";
+import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   }
   const token = process.env.BRIGHTDATA_API_TOKEN;
   const zone = process.env.BRIGHTDATA_ZONE;
-  if (!token || !zone || !url) return NextResponse.json({ advertising: null });
+  if (!token || !zone || !url) return NextResponse.json({ advertising: null, officeHours: null });
 
   try {
     const r = await fetch("https://api.brightdata.com/request", {
@@ -39,10 +40,17 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({ zone, url, format: "raw" }),
       signal: AbortSignal.timeout(60000),
     });
-    if (!r.ok) return NextResponse.json({ advertising: null });
+    if (!r.ok) return NextResponse.json({ advertising: null, officeHours: null });
     const html = await r.text();
-    return NextResponse.json({ advertising: aptAdvertisingFromRawHtml(html) });
+    // Office hours from the RAW HTML are AUTHORITATIVE — the visible listing collapses
+    // the weekly schedule behind "View All Hours", so the model reader misreads closed
+    // days (e.g. Monday) as open. null = not present this fetch (caller must not fall
+    // back to the model's guess).
+    return NextResponse.json({
+      advertising: aptAdvertisingFromRawHtml(html),
+      officeHours: aptOfficeHoursFromRawHtml(html),
+    });
   } catch {
-    return NextResponse.json({ advertising: null });
+    return NextResponse.json({ advertising: null, officeHours: null });
   }
 }
