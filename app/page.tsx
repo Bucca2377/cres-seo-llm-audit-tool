@@ -1945,6 +1945,46 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
         apt.url = property.apartmentsUrl;
       }
     }
+    // TARGETED PROBE for any network the single brand search didn't surface.
+    // Aggregator listings rank inconsistently for a bare brand query, so pass 1
+    // throws false "not found"s (e.g. Rent.com shows a full active listing but
+    // doesn't crack page 1 for the brand term). For each still-missing network,
+    // ask Google directly with a site:-scoped search whether the property has a
+    // page on that domain, and require the property NAME to match the result so we
+    // can only UPGRADE a false negative — never invent presence. Runs once per
+    // audit (citations is the last step); stops at the first sibling that confirms.
+    const loc = extractLocation(property.address);
+    for (const net of CITATION_NETWORKS) {
+      const netSources = net.sites
+        .map((s) => sources.find((x) => x.domain === s.domain))
+        .filter((x): x is NonNullable<typeof x> => !!x);
+      if (netSources.some((s) => s.present)) continue; // already confirmed in pass 1
+      for (const site of net.sites) {
+        let probe: { organic_results?: unknown } | undefined;
+        try {
+          probe = await callSerp({ query: `${q} site:${site.domain}`, engine: "google", location: loc });
+        } catch {
+          continue; // best-effort per site
+        }
+        const orgs: unknown[] = Array.isArray(probe?.organic_results) ? (probe!.organic_results as unknown[]) : [];
+        const hit = orgs.find((o) => {
+          const link = (o as { link?: string }).link || "";
+          const h = hostOf(link);
+          const onDomain = h === site.domain || h.endsWith("." + site.domain);
+          if (!onDomain) return false;
+          const title = (o as { title?: string }).title || "";
+          return nameMatches(`${title} ${link}`, property.name);
+        }) as { link?: string } | undefined;
+        if (hit) {
+          const src = sources.find((s) => s.domain === site.domain);
+          if (src) {
+            src.present = true;
+            src.url = hit.link;
+          }
+          break; // network confirmed via this sibling
+        }
+      }
+    }
     return { sources, checkedAt: new Date().toISOString() };
   } catch {
     return undefined;
