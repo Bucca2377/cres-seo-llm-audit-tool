@@ -34,6 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle, recommendsCreatingConcession } from "@/lib/detectors";
 import { missingFindingCards } from "@/lib/coverage";
+import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import PropertySettings from "./property-settings";
 
 /* -- BRAND ---------------------------------------------------------- */
@@ -4152,6 +4153,23 @@ function MarketingAuditTab({
         ? `CONCESSION — DETERMINISTIC GROUND TRUTH (verified in code from the actual content): the ${concessionSource} IS currently advertising this move-in special: "${concessionText}". Treat the concession as PRESENT. Mark the website "Concessions" cell GREEN with this wording. Do NOT state anywhere — executive summary, findings, or recommendations — that the property has "no concession", "no advertised specials", or similar. Do NOT recommend LAUNCHING, CREATING, ADDING, or INTRODUCING a concession: it already has one. ${concessionSyncGuidance}`
         : "";
 
+      // OFFICE HOURS — DETERMINISTIC RECONCILIATION (see lib/hours). Office hours
+      // were model-judged and unreliable: the model flip-flopped, flagged the
+      // consensus instead of the outlier, and fabricated per-page website
+      // differences. Compare the STRUCTURED hours we already have — website parsed
+      // from the crawl footer, Google from SerpAPI, Apartments.com from the reader —
+      // and flag the real minority. Website + Google are authoritative (a genuine
+      // conflict between them is RED); a reader-derived ILS outlier is AMBER "verify".
+      // Computed up-front so BOTH the rec filter and the consistency row use it.
+      const websiteHoursParsed = parseWeekHours(siteText || "");
+      const hoursVerdicts = reconcileOfficeHours([
+        { key: "website", label: "the website", hours: websiteHoursParsed, authoritative: true },
+        { key: "google", label: "Google", hours: officeHours, authoritative: true },
+        { key: "apartments", label: "Apartments.com", hours: aptIsDark || !aptRead?.ok ? undefined : aptRead.officeHours, authoritative: false },
+      ]);
+      const hoursReconciled = !!hoursVerdicts;
+      const hoursConflictReal = !!hoursVerdicts && Object.values(hoursVerdicts).some((v) => v.status !== "green");
+
       // --- Website-link check: does the "Website" link on the Google listing
       // actually reach the property's live site? A missing, broken, or wrong-domain
       // link there is a MAJOR lead leak — a prospect clicks "Website" on Google and
@@ -4359,6 +4377,16 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         // tour scheduling) TO Google — the consistency table says Google doesn't carry
         // those, so pointing a rec at Google for them contradicts the report.
         if (recommendsNonGoogleFeatureOnGoogle(t)) return false;
+        // Drop a fabricated "fix/align the office hours" card when the hours actually
+        // reconcile cleanly across platforms (the model sometimes invents a conflict
+        // from a misread). Deterministic hours truth wins over the model's reading.
+        if (
+          hoursReconciled &&
+          !hoursConflictReal &&
+          /\bhours?\b/i.test(t) &&
+          /\b(fix|updat\w*|correct\w*|align\w*|conflict\w*|mismatch\w*|discrepan\w*|inconsist\w*)\b/i.test(t)
+        )
+          return false;
         return true;
       });
       // When the Apartments.com listing is DARK, inject a fixed recommendation to
@@ -4479,6 +4507,20 @@ RECOMMENDATION RULES (match the rest of the app exactly):
                 : { status: "na", note: "No concession currently offered (not a deficiency)." };
             }
           }
+        }
+      }
+      // Office-hours row — OVERWRITE with the deterministic reconciliation computed
+      // up-front (structured website/Google/Apartments.com hours). Replaces the
+      // model's unreliable judgment that flip-flopped, flagged the consensus instead
+      // of the outlier, and fabricated per-page differences. Only overwrites the
+      // cells we have a deterministic verdict for; leaves the rest (e.g. a dark
+      // Apartments.com listing stays "na").
+      if (hoursVerdicts) {
+        const hoursRow = consistency.find((r) => /\bhours?\b/i.test(r?.label || ""));
+        if (hoursRow) {
+          if (hoursVerdicts.website) hoursRow.website = hoursVerdicts.website;
+          if (hoursVerdicts.google) hoursRow.google = hoursVerdicts.google;
+          if (hoursVerdicts.apartments && !aptIsDark) hoursRow.apartments = hoursVerdicts.apartments;
         }
       }
       // Virtual tour on Apartments.com is deterministic from the listing's media

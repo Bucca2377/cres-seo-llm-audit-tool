@@ -8,6 +8,7 @@ import {
   recommendsCreatingConcession,
 } from "../lib/detectors";
 import { missingFindingCards } from "../lib/coverage";
+import { parseWeekHours, reconcileOfficeHours } from "../lib/hours";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -201,4 +202,73 @@ test("coverage: never injects an optional-promo (concession) card", () => {
   // Even if a concession row somehow arrives red, it's not a required feature.
   const row = { label: "Concessions listed", apartments: { status: "na" }, google: { status: "na" }, website: { status: "red", note: "none" } };
   assert.equal(missingFindingCards([row], [], { aptIsDark: false }).length, 0);
+});
+
+// ----- Deterministic office-hours reconciliation --------------------------------
+
+test("hours: parseWeekHours reads a footer, ignores day names in prose", () => {
+  const footer =
+    "OFFICE HOURS Mon: Closed Tue: 9:00 AM-5:00 PM Wed: 9:00 AM-5:00 PM Thu: 9:00 AM-5:00 PM Fri: 9:00 AM-5:00 PM Sat: 10:00 AM-4:00 PM Sun: Closed";
+  const h = parseWeekHours(footer);
+  assert.match(h.monday, /closed/i);
+  assert.match(h.tuesday, /9:00 AM-5:00 PM/i);
+  assert.match(h.saturday, /10:00 AM-4:00 PM/i);
+  assert.match(h.sunday, /closed/i);
+  // A day name in prose with no adjacent hours must NOT produce an entry.
+  assert.equal(Object.keys(parseWeekHours("Move in by Monday to save big!")).length, 0);
+});
+
+const WEEK_9_5 = { monday: "9 AM-5 PM", tuesday: "9 AM-5 PM", wednesday: "9 AM-5 PM", thursday: "9 AM-5 PM", friday: "9 AM-5 PM", saturday: "10 AM-4 PM", sunday: "Closed" };
+
+test("hours: the Village at Snowfield case — flags the Apartments.com outlier, not the consensus", () => {
+  // Website + Google both say Mon closed; Apartments.com (reader-derived) says Mon 9-5.
+  const website = { ...WEEK_9_5, monday: "Closed" };
+  const google = { ...WEEK_9_5, monday: "Closed" };
+  const apartments = { ...WEEK_9_5 }; // monday 9-5 — the outlier
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: website, authoritative: true },
+    { key: "google", label: "Google", hours: google, authoritative: true },
+    { key: "apartments", label: "Apartments.com", hours: apartments, authoritative: false },
+  ])!;
+  assert.equal(v.website.status, "green");
+  assert.equal(v.google.status, "green");
+  // Apartments.com is the lone outlier AND reader-derived -> AMBER "verify", not a hard ISSUE,
+  // and definitely not the two that actually agree.
+  assert.equal(v.apartments.status, "amber");
+  assert.match(v.apartments.note, /Mon 9 AM–5 PM/);
+});
+
+test("hours: all platforms agree -> all green (kills the false positive)", () => {
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
+    { key: "google", label: "Google", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
+    { key: "apartments", label: "Apartments.com", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: false },
+  ])!;
+  assert.equal(v.website.status, "green");
+  assert.equal(v.google.status, "green");
+  assert.equal(v.apartments.status, "green");
+});
+
+test("hours: an authoritative outlier (Google) is a RED conflict", () => {
+  // Website + Apartments.com say Mon 9-5; Google says Mon closed -> Google is the
+  // outlier and it's high-confidence, so it's a real operational conflict.
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: WEEK_9_5, authoritative: true },
+    { key: "apartments", label: "Apartments.com", hours: WEEK_9_5, authoritative: false },
+    { key: "google", label: "Google", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
+  ])!;
+  assert.equal(v.google.status, "red");
+  assert.equal(v.website.status, "green");
+  assert.equal(v.apartments.status, "green");
+});
+
+test("hours: two sources that simply disagree (no majority) -> amber verify, null when <2", () => {
+  const tie = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: { ...WEEK_9_5 }, authoritative: true },
+    { key: "google", label: "Google", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
+  ])!;
+  assert.equal(tie.website.status, "amber");
+  assert.equal(tie.google.status, "amber");
+  // Only one source with parseable hours -> nothing to compare.
+  assert.equal(reconcileOfficeHours([{ key: "website", label: "the website", hours: WEEK_9_5, authoritative: true }]), null);
 });
