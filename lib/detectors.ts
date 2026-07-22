@@ -71,6 +71,40 @@ export function specialFromHtml(html: string): string | null {
 }
 
 /**
+ * Extract the Apartments.com listing's OWN concession from its RAW HTML. The model
+ * reader misreads this (it has reported stale/fabricated offers like "Apply by July
+ * 3" when the listing actually shows the current Summer Savings offer). The real
+ * offer lives in the listing's rent-specials section — the `<p class="copy">` terms,
+ * with the short `data-specials-label` attribute as a fallback. Deliberately reads
+ * ONLY the property's own specials section (not `specialFromHtml`, which scans the
+ * whole page and can grab a nearby-listing offer or raw attribute markup). Returns a
+ * clean string or null when the listing shows no special this fetch.
+ */
+export function aptConcessionFromRawHtml(html: string): string | null {
+  if (!html) return null;
+  const secStart = html.search(/id="rentSpecialsSection"/i);
+  if (secStart >= 0) {
+    const gt = html.indexOf(">", secStart);
+    const chunk = gt >= 0 ? html.slice(gt + 1, gt + 1200) : "";
+    const copy = chunk.match(/<p[^>]*class="[^"]*copy[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
+    const raw = copy ? copy[1] : chunk;
+    const text = raw
+      .replace(/&bull;|&#8226;|•/gi, " · ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/[^\x20-\x7E·]/g, " ") // drop mangled emoji / non-ASCII
+      .replace(/\s+/g, " ")
+      .replace(/^[\s·*]+/, "")
+      .trim();
+    if (text && text.length > 5) return text.slice(0, 150);
+  }
+  const label = html.match(/data-specials-label="([^"]{2,80})"/i);
+  if (label && label[1].trim()) return label[1].trim();
+  return null;
+}
+
+/**
  * Is an Apartments.com listing actively advertising, judged from its RAW HTML?
  * The "not currently advertising" banner is painted by JavaScript and is in NO
  * fetched HTML, so it can't be matched. The stable structural signals ARE in the

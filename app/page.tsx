@@ -4108,9 +4108,14 @@ function MarketingAuditTab({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: current.apartmentsUrl }),
           });
-          const sj = (await sr.json()) as { advertising?: boolean | null; officeHours?: Record<string, string> | null };
-          if (typeof sj.advertising === "boolean") {
-            aptRead.advertising = sj.advertising;
+          const sj = (await sr.json()) as {
+            advertising?: boolean | null;
+            officeHours?: Record<string, string> | null;
+            concession?: string | null;
+          };
+          const rawFetchOk = typeof sj.advertising === "boolean";
+          if (rawFetchOk) {
+            aptRead.advertising = sj.advertising as boolean;
             aptRead.ok = true;
           }
           // AUTHORITATIVE hours from the raw HTML (includes closed days). Overrides
@@ -4119,6 +4124,12 @@ function MarketingAuditTab({
             aptRead.officeHours = sj.officeHours;
             aptHoursVerified = true;
           }
+          // AUTHORITATIVE concession from the raw HTML. Overrides the model's read
+          // (which has reported stale/fabricated offers like "Apply by July 3"). When
+          // the good raw fetch shows NO concession, clear the model's guess rather
+          // than assert a wrong one.
+          if (sj.concession) aptRead.concessions = sj.concession;
+          else if (rawFetchOk && sj.advertising !== false) aptRead.concessions = "";
         } catch {
           /* keep the web_fetch-based read */
         }

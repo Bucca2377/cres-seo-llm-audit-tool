@@ -4,6 +4,7 @@ import {
   detectWebsiteSpecial,
   specialFromHtml,
   aptAdvertisingFromRawHtml,
+  aptConcessionFromRawHtml,
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
 } from "../lib/detectors";
@@ -75,6 +76,28 @@ test("apts: undeterminable -> null (caller keeps its prior read)", () => {
   assert.equal(aptAdvertisingFromRawHtml(""), null); // empty
   assert.equal(aptAdvertisingFromRawHtml("short"), null); // too thin
   assert.equal(aptAdvertisingFromRawHtml("<html>" + "x".repeat(600) + " generic page, no markers</html>"), null);
+});
+
+test("apts: reads the listing's OWN concession from raw HTML (not 'July 3', not junk)", () => {
+  // The real Apartments.com rent-specials markup for Village at Snowfield.
+  const raw =
+    '<div class="rentSpecialsSection mortar-wrapper" id="rentSpecialsSection" data-specials-label="1 Month Free">' +
+    '<p class="specialTitle">?? Summer Savings Are Here!</p>' +
+    '<p class="copy">Waived Application Fees &bull; *$250 Security Deposit* &bull; First Month Rent FREE *For qualified applicants.</p></div>';
+  const c = aptConcessionFromRawHtml(raw)!;
+  assert.ok(c);
+  assert.match(c, /Waived Application Fees/i);
+  assert.match(c, /\$250 Security Deposit/i);
+  assert.match(c, /First Month Rent FREE/i);
+  assert.doesNotMatch(c, /July 3/i); // the fabricated value must be gone
+  assert.doesNotMatch(c, /class=|rentSpecialsSection|<|>/); // no raw markup residue
+  // Fallback to the short data-specials-label when there's no copy paragraph.
+  assert.equal(
+    aptConcessionFromRawHtml('<div id="rentSpecialsSection" data-specials-label="6 Weeks Free"></div>'),
+    "6 Weeks Free"
+  );
+  // No specials section at all -> null.
+  assert.equal(aptConcessionFromRawHtml("<html><body>no specials</body></html>"), null);
 });
 
 // ----- "Not a Google feature" recs must never point at Google -----------------

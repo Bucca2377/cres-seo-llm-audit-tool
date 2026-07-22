@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aptAdvertisingFromRawHtml } from "@/lib/detectors";
+import { aptAdvertisingFromRawHtml, aptConcessionFromRawHtml } from "@/lib/detectors";
 import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
@@ -40,17 +40,20 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({ zone, url, format: "raw" }),
       signal: AbortSignal.timeout(60000),
     });
-    if (!r.ok) return NextResponse.json({ advertising: null, officeHours: null });
+    if (!r.ok) return NextResponse.json({ advertising: null, officeHours: null, concession: null });
     const html = await r.text();
-    // Office hours from the RAW HTML are AUTHORITATIVE — the visible listing collapses
-    // the weekly schedule behind "View All Hours", so the model reader misreads closed
-    // days (e.g. Monday) as open. null = not present this fetch (caller must not fall
-    // back to the model's guess).
+    // Office hours + concession from the RAW HTML are AUTHORITATIVE. The visible
+    // listing collapses hours behind "View All Hours" (model misreads closed days as
+    // open) and the model has also misread the concession banner (e.g. reporting a
+    // stale "Apply by July 3" when the listing shows the current Summer Savings offer).
+    // The advertising flag doubles as a "was this a good raw fetch?" signal for the
+    // caller (boolean = good; null = fetch too thin to trust).
     return NextResponse.json({
       advertising: aptAdvertisingFromRawHtml(html),
       officeHours: aptOfficeHoursFromRawHtml(html),
+      concession: aptConcessionFromRawHtml(html),
     });
   } catch {
-    return NextResponse.json({ advertising: null, officeHours: null });
+    return NextResponse.json({ advertising: null, officeHours: null, concession: null });
   }
 }
