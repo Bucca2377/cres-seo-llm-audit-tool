@@ -35,6 +35,7 @@ import {
 import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle, recommendsCreatingConcession } from "@/lib/detectors";
 import { missingFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
+import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
 
 /* -- BRAND ---------------------------------------------------------- */
@@ -4194,6 +4195,13 @@ function MarketingAuditTab({
       const hoursReconciled = !!hoursVerdicts;
       const hoursConflictReal = !!hoursVerdicts && Object.values(hoursVerdicts).some((v) => v.status !== "green");
 
+      // Deterministic website-feature detection (see lib/website-features). Computed
+      // up-front so BOTH the rec filter (drop "add a feature we already have") and the
+      // consistency override use the same truth. JS-heavy sites hide features behind
+      // sub-pages/widgets, so the model marks present features "missing" — but the
+      // signals survive in the crawled nav/buttons/footer text.
+      const websiteFeatures = detectWebsiteFeatures(siteText || "");
+
       // --- Website-link check: does the "Website" link on the Google listing
       // actually reach the property's live site? A missing, broken, or wrong-domain
       // link there is a MAJOR lead leak — a prospect clicks "Website" on Google and
@@ -4411,6 +4419,16 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           /\b(fix|updat\w*|correct\w*|align\w*|conflict\w*|mismatch\w*|discrepan\w*|inconsist\w*)\b/i.test(t)
         )
           return false;
+        // Drop a rec telling the property to ADD a website feature it ALREADY HAS
+        // (deterministically detected). The model marks present features "missing" on
+        // JS-heavy sites and then recommends building them — contradicting reality.
+        const proposesAdding = /\b(add|adding|build|creat\w*|implement\w*|introduc\w*|launch\w*|set up|enable|embed|install)\b/i.test(t);
+        if (proposesAdding) {
+          if (websiteFeatures.preferredEmployer && /preferred[-\s]?employer/i.test(t)) return false;
+          if (websiteFeatures.virtualTour && /virtual\s*tour|matterport|3d\s*tour/i.test(t)) return false;
+          if (websiteFeatures.tourScheduling && /schedule\s+(a\s+|your\s+)?tour|self[-\s]?schedul|tour\s+scheduling|booking\s+widget/i.test(t)) return false;
+          if (websiteFeatures.onlineApplication && /online\s+application|apply\s+(now|online)|application\s+portal|lease\s+now/i.test(t)) return false;
+        }
         return true;
       });
       // When the Apartments.com listing is DARK, inject a fixed recommendation to
@@ -4543,6 +4561,15 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         const hoursRow = consistency.find((r) => /\bhours?\b/i.test(r?.label || ""));
         if (hoursRow) {
           if (hoursVerdicts.website) hoursRow.website = hoursVerdicts.website;
+          else if (hoursRow.website?.status === "red") {
+            // We couldn't parse hours from the site capture, but Google/Apartments.com
+            // have them — that's a CAPTURE miss (hours are often only on the Contact
+            // page), not a confirmed absence. Verify, don't red.
+            hoursRow.website = {
+              status: "amber",
+              note: "Hours weren’t found in the site capture — verify live (often on the Contact page) and align them.",
+            };
+          }
           if (hoursVerdicts.google) hoursRow.google = hoursVerdicts.google;
           if (hoursVerdicts.apartments && !aptIsDark) hoursRow.apartments = hoursVerdicts.apartments;
           // Apts active but hours NOT confirmed from raw HTML -> don't show the model's
@@ -4554,6 +4581,57 @@ RECOMMENDATION RULES (match the rest of the app exactly):
               note: "Full weekly hours weren’t readable from the listing this run — verify on Apartments.com (the listing collapses them behind “View All Hours”).",
             };
           }
+        }
+      }
+      // WEBSITE FEATURE RECONCILIATION. On JS-heavy sites the features live on
+      // sub-pages / widgets our crawler can't fully render, so the model turned
+      // CAPTURE FAILURES ("page not accessible", "images not rendered") into red
+      // ISSUEs — false negatives. Rule: a website feature is GREEN when we positively
+      // detect it (crawled text or the Apartments.com read), and it must NEVER be red
+      // just because we couldn't capture it — unconfirmed red -> amber "verify live".
+      {
+        const feats = websiteFeatures;
+        const aptVT = !!(aptRead?.ok && aptRead.mediaCounts.virtualTours && aptRead.mediaCounts.virtualTours > 0);
+        const aptPhotosGood = consistency.find((r) => /photo/i.test(r?.label || ""))?.apartments?.status === "green";
+        const setWeb = (labelRe: RegExp, present: boolean, greenNote: string, verifyNote: string) => {
+          const row = consistency.find((r) => labelRe.test(r?.label || ""));
+          if (!row) return;
+          if (present) row.website = { status: "green", note: greenNote };
+          else if (row.website?.status === "red") row.website = { status: "amber", note: verifyNote };
+        };
+        setWeb(
+          /preferred employer/i,
+          feats.preferredEmployer,
+          "Preferred Employer Program page is present on the site.",
+          "Couldn’t confirm a preferred-employer page from the capture — verify live."
+        );
+        setWeb(
+          /virtual tour/i,
+          feats.virtualTour || aptVT,
+          feats.virtualTour ? "Virtual tour available on the site." : "Virtual tours confirmed (present on the Apartments.com listing).",
+          "Couldn’t confirm a virtual tour from the capture — verify live (often on the floor-plans page)."
+        );
+        setWeb(
+          /tour scheduling/i,
+          feats.tourScheduling,
+          "Self-serve tour scheduling is present on the site.",
+          "Couldn’t confirm a self-serve scheduler from the capture — verify live."
+        );
+        setWeb(
+          /online application/i,
+          feats.onlineApplication,
+          "Online application / Apply is present on the site.",
+          "Couldn’t confirm an online application from the capture — verify live."
+        );
+        // Photos: if our image capture failed (vision pass couldn't run) but the
+        // gallery exists and the Apartments.com listing has professional photos, treat
+        // the website gallery as present rather than flagging a capture miss.
+        const photoRow = consistency.find((r) => /photo/i.test(r?.label || ""));
+        if (photoRow && photoRow.website && photoRow.website.status !== "green" && /captur|render|not.*shown|could/i.test(photoRow.website.note || "")) {
+          photoRow.website =
+            feats.gallery && aptPhotosGood
+              ? { status: "green", note: "Professional gallery present (matches the Apartments.com listing); site images weren’t captured this run." }
+              : { status: "amber", note: "Gallery page exists but images weren’t captured this run — verify live." };
         }
       }
       // Virtual tour on Apartments.com is deterministic from the listing's media

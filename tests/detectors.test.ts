@@ -10,6 +10,7 @@ import {
 } from "../lib/detectors";
 import { missingFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
+import { detectWebsiteFeatures } from "../lib/website-features";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -331,4 +332,28 @@ test("hours: two sources that simply disagree (no majority) -> amber verify, nul
   assert.equal(tie.google.status, "amber");
   // Only one source with parseable hours -> nothing to compare.
   assert.equal(reconcileOfficeHours([{ key: "website", label: "the website", hours: WEEK_9_5, authoritative: true }]), null);
+});
+
+// ----- Website feature detection (JS-heavy sites hide features in sub-pages) -----
+
+test("website-features: detects features from crawled nav/buttons/footer text", () => {
+  // Signals as they survive in the crawled text of a Funnel/RENTCafe site like
+  // Main & Stone, even when the interactive widget itself doesn't render.
+  const siteText =
+    "Amenities Floorplans Neighborhood Gallery Residents FAQs Contact Preferred Employer Program ... " +
+    "Book Your Tour Find Your Home ... Davis Studio 1 bath 360 Virtual Tour ... Lease Now Check Availability";
+  const f = detectWebsiteFeatures(siteText);
+  assert.equal(f.preferredEmployer, true);
+  assert.equal(f.virtualTour, true);
+  assert.equal(f.tourScheduling, true);
+  assert.equal(f.onlineApplication, true);
+  assert.equal(f.gallery, true);
+});
+
+test("website-features: does not hallucinate features on a bare site", () => {
+  const f = detectWebsiteFeatures("Welcome home. Contact us for availability. Pet friendly community.");
+  assert.equal(f.preferredEmployer, false);
+  assert.equal(f.virtualTour, false);
+  assert.equal(f.tourScheduling, false);
+  assert.equal(f.onlineApplication, false);
 });
