@@ -142,6 +142,13 @@ export interface CitationSourceResult {
   network?: string;
   /** True when this site is its own standalone citation (not syndicated). */
   standalone?: boolean;
+  /**
+   * A directory LISTING exists (present=true) but the property is not actively
+   * advertising there — currently only meaningful for Apartments.com, determined
+   * deterministically from the raw listing at citation time so the panel doesn't
+   * depend on a separate audit's data to render the "listed, not advertising" caveat.
+   */
+  notAdvertising?: boolean;
 }
 
 /** Local-citation / directory presence check (from a brand search). */

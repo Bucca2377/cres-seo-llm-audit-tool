@@ -1927,7 +1927,7 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
         return { host: hostOf(link), url: link };
       })
       .filter((f) => f.host);
-    const sources = CITATION_NETWORKS.flatMap((net) =>
+    const sources: CitationResult["sources"] = CITATION_NETWORKS.flatMap((net) =>
       net.sites.map((s) => {
         const hit = found.find((f) => f.host === s.domain || f.host.endsWith("." + s.domain));
         return { name: s.name, domain: s.domain, present: !!hit, url: hit?.url, network: net.network, standalone: net.standalone };
@@ -1943,6 +1943,25 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
       if (apt && !apt.present) {
         apt.present = true;
         apt.url = property.apartmentsUrl;
+      }
+      // Determine the "listed, not advertising" caveat HERE, deterministically from
+      // the raw listing (same /api/apts-status check the marketing run uses), and
+      // store it on the citation itself. Previously the panel read this from the
+      // MARKETING audit's consistency table, so a stale/absent/flip-flopped marketing
+      // run made a DARK Apartments.com listing render as a plain active green citation.
+      // Self-contained here → the panel is correct regardless of the marketing audit.
+      if (apt?.present) {
+        try {
+          const sr = await fetch("/api/apts-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: property.apartmentsUrl }),
+          });
+          const sj = (await sr.json()) as { advertising?: boolean | null };
+          if (sj.advertising === false) apt.notAdvertising = true;
+        } catch {
+          /* best-effort — leave the caveat to the marketing-audit fallback */
+        }
       }
     }
     // TARGETED PROBE for any network the single brand search didn't surface.
@@ -2008,6 +2027,9 @@ function citationNetworkRows(citations: CitationResult | undefined) {
       standalone: net.standalone,
       present: foundSites.length > 0,
       foundSites,
+      // Carried from the citation data itself (see checkCitations) so the "listed,
+      // not advertising" caveat doesn't depend on a separate audit's state.
+      notAdvertising: foundSites.some((s) => s.notAdvertising),
     };
   });
 }
@@ -2333,7 +2355,7 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
   // advertising", render it as a caveat — not an active green citation — so this
   // panel agrees with the consistency check.
   const isAptCaveat = (r: (typeof rows)[number]) =>
-    aptNotAdvertising && r.present && /^Apartments\.com/i.test(r.network);
+    r.present && /^Apartments\.com/i.test(r.network) && (r.notAdvertising || aptNotAdvertising);
   // Count the caveat as present — a directory LISTING does exist on Apartments.com
   // (that's the citation); the "not actively advertising" flag is a separate
   // dimension shown on the chip, not a reason to drop it from the count.
@@ -7259,9 +7281,11 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
 
             {seo.citations && seo.citations.sources.length > 0 && (() => {
               const rows = citationNetworkRows(seo.citations);
-              const aptNotAdv = aptListedNotAdvertising(mkt?.consistency);
+              // Prefer the caveat carried by the citation data itself (determined
+              // deterministically at fetch time); fall back to the marketing audit.
+              const aptNotAdv = rows.some((r) => r.notAdvertising) || aptListedNotAdvertising(mkt?.consistency);
               const isAptCaveat = (r: (typeof rows)[number]) =>
-                aptNotAdv && r.present && /^Apartments\.com/i.test(r.network);
+                r.present && /^Apartments\.com/i.test(r.network) && (r.notAdvertising || aptListedNotAdvertising(mkt?.consistency));
               // Count the caveat as present — a listing exists (the citation); the
               // "not actively advertising" flag is shown in the row, not dropped.
               const presentCount = rows.filter((r) => r.present).length;
