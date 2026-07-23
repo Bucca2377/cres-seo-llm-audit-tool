@@ -26,6 +26,33 @@ export interface WebsiteFeatureSignals {
   gallery: boolean;
 }
 
+/**
+ * Known apartment LEASING PLATFORMS, detected from the site's raw HTML (their embed
+ * scripts/iframes). This is how we escape the per-property "dance": these widgets
+ * are what hide features (online application, self-serve tour scheduling, live
+ * availability) behind JS with no text signal — but they come from a small, finite
+ * set of vendors. Recognize the platform once and we can INFER its standard
+ * capabilities for every property that uses it. All of these provide online
+ * applications, tour scheduling, and availability as core functions.
+ */
+const LEASING_PLATFORMS: { name: string; re: RegExp }[] = [
+  { name: "Funnel", re: /funnelleasing\.com|usefunnel|funnel[-_]?leasing/i },
+  { name: "RentCafe", re: /rentcafe\.com|securecafe|yardikube|cafeportal/i },
+  { name: "Entrata", re: /entrata\.com|prospectportal|entratacdn/i },
+  { name: "RealPage", re: /realpage\.com|onesite|rpx\.realpage/i },
+  { name: "AppFolio", re: /appfolio\.com|myappfolio/i },
+  { name: "Knock", re: /knockrentals|knockcrm/i },
+  { name: "ResMan", re: /myresman|resman\.com/i },
+  { name: "RentDynamics", re: /rentdynamics/i },
+];
+
+/** Identify the leasing platform a site runs on from its RAW HTML, or null. */
+export function detectLeasingPlatform(html: string): string | null {
+  const h = html || "";
+  for (const p of LEASING_PLATFORMS) if (p.re.test(h)) return p.name;
+  return null;
+}
+
 export function detectWebsiteFeatures(siteText: string): WebsiteFeatureSignals {
   const t = siteText || "";
   return {

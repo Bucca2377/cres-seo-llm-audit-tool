@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { specialFromHtml } from "@/lib/detectors";
+import { detectLeasingPlatform } from "@/lib/website-features";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -248,6 +249,20 @@ export async function POST(req: NextRequest) {
         }
         let pageText = frameText ? `${text}\n\n[EMBEDDED WIDGETS]\n${frameText}` : text;
         const pageStatus = resp ? resp.status() : null;
+        // Detect the LEASING PLATFORM from the raw HTML (its embed scripts/iframes —
+        // e.g. Funnel, RentCafe, Entrata). Only for the homepage (pollLate) and only
+        // its resource URLs, so we can infer the platform's standard capabilities
+        // (online application, tour scheduling, availability) even when those live in
+        // a JS widget the crawl can't render as text. page.content() includes the
+        // <script src>/<iframe src> tags that document.body.innerText strips.
+        let platform: string | null = null;
+        if (pollLate) {
+          try {
+            platform = detectLeasingPlatform(await page.content());
+          } catch {
+            /* ignore — platform is best-effort */
+          }
+        }
         // If the browser got a Cloudflare/bot wall (common from Railway's
         // datacenter IP — a 403 "verify you're not a bot" page), we never saw
         // the real site or its JS-injected specials popup. Re-fetch through the
@@ -268,6 +283,9 @@ export async function POST(req: NextRequest) {
             // detector sees it in the page text.
             const special = specialFromHtml(html);
             if (special) pageText += `\n[SPECIAL] ${special}`;
+            // The bot wall hid our rendered content, so detect the platform from the
+            // rescued raw HTML instead.
+            if (!platform) platform = detectLeasingPlatform(html);
           }
         }
         let links: { href: string; text: string }[] = [];
@@ -335,7 +353,7 @@ export async function POST(req: NextRequest) {
             wordCount: words,
           };
         });
-        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo };
+        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo, platform };
       } finally {
         await ctx.close();
       }
@@ -357,6 +375,7 @@ export async function POST(req: NextRequest) {
       links: { href: string; text: string }[];
       images: string[];
       seo?: PageSeoData;
+      platform?: string | null;
     } = {
       status: null,
       text: "",
@@ -412,7 +431,7 @@ export async function POST(req: NextRequest) {
     }
 
     const images = Array.from(imageSet);
-    return NextResponse.json({ pages, images, _meta: { source: "playwright", pages: pages.length, images: images.length } });
+    return NextResponse.json({ pages, images, platform: home.platform ?? null, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Render failed", pages },

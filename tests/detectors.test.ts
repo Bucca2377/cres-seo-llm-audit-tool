@@ -10,7 +10,7 @@ import {
 } from "../lib/detectors";
 import { missingFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
-import { detectWebsiteFeatures } from "../lib/website-features";
+import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -356,4 +356,16 @@ test("website-features: does not hallucinate features on a bare site", () => {
   assert.equal(f.virtualTour, false);
   assert.equal(f.tourScheduling, false);
   assert.equal(f.onlineApplication, false);
+});
+
+test("website-features: detects the leasing platform from raw HTML embed scripts", () => {
+  // Main & Stone's real embed (confirmed live): integrations.funnelleasing.com.
+  assert.equal(
+    detectLeasingPlatform('<script src="https://integrations.funnelleasing.com/widget.js"></script>'),
+    "Funnel"
+  );
+  assert.equal(detectLeasingPlatform('<iframe src="https://property.securecafe.com/..."></iframe>'), "RentCafe");
+  assert.equal(detectLeasingPlatform('<script src="https://prospectportal.entrata.com/x.js">'), "Entrata");
+  // A plain marketing site with no leasing widget -> null (we won't infer features).
+  assert.equal(detectLeasingPlatform("<html><body>Welcome to our community</body></html>"), null);
 });

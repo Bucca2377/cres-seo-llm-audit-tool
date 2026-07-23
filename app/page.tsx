@@ -4063,6 +4063,7 @@ function MarketingAuditTab({
       let siteText = "";
       let siteImages: string[] = [];
       let siteBlocked = false;
+      let leasingPlatform: string | null = null;
       try {
         const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 8 });
         const sitePages = siteRes.pages || [];
@@ -4070,6 +4071,7 @@ function MarketingAuditTab({
           .map((p) => `=== ${p.url} (status ${p.status ?? "?"}) ===\n${(p.text || "").trim() || "[no content rendered]"}`)
           .join("\n\n");
         siteImages = siteRes.images || [];
+        leasingPlatform = (siteRes as { platform?: string | null }).platform ?? null;
         // "Blocked" = nothing usable came back (empty, or every page 403/thin) —
         // e.g. an aggressive Cloudflare challenge our headless browser can't pass.
         // In that case we tell Claude to fetch the site with its OWN web_fetch,
@@ -4426,8 +4428,8 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         if (proposesAdding) {
           if (websiteFeatures.preferredEmployer && /preferred[-\s]?employer/i.test(t)) return false;
           if (websiteFeatures.virtualTour && /virtual\s*tour|matterport|3d\s*tour/i.test(t)) return false;
-          if (websiteFeatures.tourScheduling && /schedule\s+(a\s+|your\s+)?tour|self[-\s]?schedul|tour\s+scheduling|booking\s+widget/i.test(t)) return false;
-          if (websiteFeatures.onlineApplication && /online\s+application|apply\s+(now|online)|application\s+portal|lease\s+now/i.test(t)) return false;
+          if ((websiteFeatures.tourScheduling || leasingPlatform) && /schedule\s+(a\s+|your\s+)?tour|self[-\s]?schedul|tour\s+scheduling|booking\s+widget/i.test(t)) return false;
+          if ((websiteFeatures.onlineApplication || leasingPlatform) && /online\s+application|apply\s+(now|online)|application\s+portal|lease\s+now/i.test(t)) return false;
         }
         return true;
       });
@@ -4611,16 +4613,20 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           feats.virtualTour ? "Virtual tour available on the site." : "Virtual tours confirmed (present on the Apartments.com listing).",
           "Couldn’t confirm a virtual tour from the capture — verify live (often on the floor-plans page)."
         );
+        // A recognized leasing platform (Funnel/RentCafe/Entrata/…) provides
+        // self-serve tour scheduling, online application, and availability as core
+        // functions — so a detected platform confirms these even when the widget
+        // itself renders no text signal for the crawl to catch.
         setWeb(
           /tour scheduling/i,
-          feats.tourScheduling,
-          "Self-serve tour scheduling is present on the site.",
+          feats.tourScheduling || !!leasingPlatform,
+          leasingPlatform ? `Self-serve tour scheduling via ${leasingPlatform}.` : "Self-serve tour scheduling is present on the site.",
           "Couldn’t confirm a self-serve scheduler from the capture — verify live."
         );
         setWeb(
           /online application/i,
-          feats.onlineApplication,
-          "Online application / Apply is present on the site.",
+          feats.onlineApplication || !!leasingPlatform,
+          leasingPlatform ? `Online application via ${leasingPlatform}.` : "Online application / Apply is present on the site.",
           "Couldn’t confirm an online application from the capture — verify live."
         );
         // Photos: if our image capture failed (vision pass couldn't run) but the
