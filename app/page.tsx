@@ -2561,20 +2561,22 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
           const verdict = s.field ? fieldVerdict(s.field.category) : null;
           return (
           <div key={s.strategy} style={{ flex: "1 1 240px", minWidth: 220, border: "1px solid #e6e9ec", borderRadius: 8, padding: "12px 16px" }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", paddingTop: 3 }}>
                 {s.strategy}
               </span>
               {/* Headline = the REAL-USER verdict when we have it (accurate + stable).
-                  The lab score is only the headline when there's no field data. */}
+                  The lab score is only the headline when there's no field data. The
+                  little caption ties the big word to real users so it doesn't read as
+                  contradicting the (usually rosier) synthetic lab score beside it. */}
               {verdict ? (
-                <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
                   <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 26, lineHeight: 1, color: verdict.color }}>
                     {verdict.label}
                   </span>
-                  {s.score != null && (
-                    <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa" }}>lab {s.score}</span>
-                  )}
+                  <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#9aa3ad", marginTop: 2 }}>
+                    real-user Core Web Vitals{s.score != null ? ` · lab score ${s.score}` : ""}
+                  </span>
                 </span>
               ) : (
                 <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 30, lineHeight: 1, color: pageSpeedColor(s.score) }}>
