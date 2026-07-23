@@ -4353,6 +4353,22 @@ function MarketingAuditTab({
         ? `WEBSITE-LINK CHECK — DETERMINISTIC GROUND TRUTH: ${linkIssues.join(" ")} A prospect clicking "Website" on a listing must land on the leasing site, so a missing/broken/wrong link is a lead leak. Include a recommendation to fix the affected listing's website link.`
         : "";
 
+      // Deterministic GROUND TRUTH for website features + leasing platform, fed to
+      // the model so its executive summary / findings / recs can't claim a present
+      // feature is "missing" — the model misreads JS-heavy sites, and we've already
+      // detected these in code (they'd otherwise contradict the corrected table).
+      const featurePresent: string[] = [];
+      if (websiteFeatures.preferredEmployer) featurePresent.push("a Preferred Employer Program page");
+      if (websiteFeatures.virtualTour || aptHasVirtualTour) featurePresent.push("a virtual tour / 3D tour");
+      if (websiteFeatures.tourScheduling || leasingPlatform) featurePresent.push("self-serve tour scheduling");
+      if (websiteFeatures.onlineApplication || leasingPlatform) featurePresent.push("an online application");
+      const websiteFeatureBlock =
+        featurePresent.length || leasingPlatform
+          ? `WEBSITE FEATURES — DETERMINISTIC GROUND TRUTH (verified in code):${leasingPlatform ? ` the website runs on ${leasingPlatform}, which provides self-serve tour scheduling, online applications, and live availability.` : ""}${featurePresent.length ? ` The website HAS ${featurePresent.join(", ")}.` : ""} Do NOT state anywhere — executive summary, findings, or recommendations — that any of these is missing, absent, or "not found", and do NOT recommend adding/building/publishing them. They exist.`
+          : "";
+      // Phone + office-hours guidance so the summary/recs stop inventing false problems.
+      const phoneHoursGuidance = `PHONE & HOURS GUIDANCE: (1) Different phone numbers across platforms — and more than one number on the site (call-tracking numbers injected by scheduling/chat widgets) — are EXPECTED and intentional (lead-source tracking). Do NOT call phone numbers "confusing" or "inconsistent", and do NOT recommend standardizing/consolidating them; the only real phone problem is a number that does not RING (dial-tested separately). (2) Office hours were confirmed CONSISTENT across the platforms we could read. If the website's hours weren't in the captured pages, that is a capture limitation (hours usually sit on the Contact page) — do NOT claim the website is "missing office hours" or recommend adding them.`;
+
       setProgress("Analyzing content and writing the report…");
       const prompt = `You are a senior multifamily marketing auditor producing a concise, client-facing Marketing Audit for ${current.name} at ${current.address}.${current.propertyType ? ` This is a ${current.propertyType} community.` : ""}
 
@@ -4365,7 +4381,9 @@ ${
 
 ${apartmentsBlock}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
-${gbpBlock}${concessionBlock ? "\n\n" + concessionBlock : ""}${websiteLinkBlock ? "\n\n" + websiteLinkBlock : ""}
+${gbpBlock}${concessionBlock ? "\n\n" + concessionBlock : ""}${websiteLinkBlock ? "\n\n" + websiteLinkBlock : ""}${websiteFeatureBlock ? "\n\n" + websiteFeatureBlock : ""}
+
+${phoneHoursGuidance}
 
 RULES (apply strictly):
 - WEBSITE: use whichever source is available above — the headless-rendered pages OR your own web_fetch of the site if the browser was blocked. READ it and report real data: mark a feature GREEN with the actual numbers/details (real prices, unit counts, special wording, hours) when present; mark it RED only when the feature is structurally ABSENT from what you can see. Mark AMBER only if BOTH the headless browser AND your web_fetch failed to load the site (truly could not verify). Do NOT mark rows amber just because the headless browser was blocked if your web_fetch reached the site.
@@ -4452,9 +4470,20 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // on whether we detected a banner this run — that detection is crawl-flaky and
       // was letting the rec relapse). Tested in tests/detectors.test.ts; a legitimate
       // "sync the EXISTING special to Apartments.com" card names a platform and is kept.
+      // Both platforms already advertise the SAME concession — a rec to make the
+      // WORDING identical is nitpicking (we've established wording differences aren't a
+      // deficiency; the substantive offer matches).
+      const concessionOnBoth = !!websiteSpecial && !!(aptRead?.ok && aptRead.concessions);
       const recsFiltered: AuditRecommendations = recs.filter((c) => {
         const t = `${c.title || ""}. ${c.what || ""}`;
         if (recommendsCreatingConcession(t)) return false;
+        if (
+          concessionOnBoth &&
+          /(concession|special|weeks?\s+free|move[-\s]?in)/i.test(t) &&
+          /\b(align|match\w*|identical|exact|synchron\w*|consistent|unif\w*|same)\b/i.test(t) &&
+          /\b(word\w*|text|messag\w*|phras\w*|language|copy)\b/i.test(t)
+        )
+          return false;
         // Drop "add/sync the concession to Apartments.com" when that listing is DARK —
         // you can't put a special on a listing that isn't advertising. The "activate
         // the listing" card (below) is the correct recommendation instead.
