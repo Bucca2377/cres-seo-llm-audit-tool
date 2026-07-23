@@ -4219,37 +4219,46 @@ function MarketingAuditTab({
       };
       const propDomain = domainOf(current.website || "");
       const gWebDomain = domainOf(googleWebsiteUrl);
+      // Actually FOLLOW the exact URL Google lists and confirm it resolves to a live
+      // page (via /api/linkcheck — follows redirects; a 403/429 bot-wall still counts
+      // as "up"). reachable=false is a genuinely broken click-through; null = we
+      // couldn't determine (often our IP being blocked), so don't cry wolf.
+      let gReach: { reachable?: boolean | null; finalDomain?: string } | null = null;
+      if (googleWebsiteUrl) {
+        try {
+          const rr = await fetch("/api/linkcheck", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: googleWebsiteUrl }),
+          });
+          gReach = await rr.json();
+        } catch {
+          gReach = null;
+        }
+      }
+      const gFinal = (gReach?.finalDomain || "").toLowerCase();
       let googleLink: { status: MarketingStatus; note: string };
       if (!gbpHadData) {
         googleLink = { status: "na", note: "No Google profile data this run." };
       } else if (!googleWebsiteUrl) {
         googleLink = { status: "red", note: "No website link on the Google listing — prospects can't click through to your site." };
       } else if (propDomain && gWebDomain && gWebDomain !== propDomain) {
-        // Google points somewhere other than the property's site — probe whether
-        // that domain even loads (403/429 = bot-protected but reachable, not dead).
-        let dead = false;
-        try {
-          const r = await callFetch({ url: googleWebsiteUrl, follow: false, maxPages: 1 });
-          const p = r.pages?.[0];
-          const st = p?.status ?? 0;
-          dead = st >= 400 && st !== 403 && st !== 429;
-          if (st === 0 && (p?.text || "").length < 50) dead = true;
-        } catch {
-          dead = true;
-        }
-        googleLink = dead
-          ? { status: "red", note: `Google's website link (${gWebDomain}) doesn't load — a broken click-through for prospects.` }
-          : { status: "amber", note: `Google's website link goes to ${gWebDomain}, not your site (${propDomain}) — verify it's intended.` };
+        // Google points to a different domain than the property's site.
+        googleLink =
+          gReach?.reachable === false
+            ? { status: "red", note: `Google's website link (${gWebDomain}) doesn't load — a broken click-through for prospects.` }
+            : { status: "amber", note: `Google's website link goes to ${gWebDomain}, not your site (${propDomain}) — verify it's intended.` };
+      } else if (gReach?.reachable === false) {
+        googleLink = { status: "red", note: `The Website link on your Google listing (${propDomain}) returned an error and didn't load — verify it's live.` };
+      } else if (gReach?.reachable === true && gFinal && propDomain && gFinal !== propDomain) {
+        // Loads, but redirects off your domain to somewhere else.
+        googleLink = { status: "amber", note: `The Google Website link redirects to ${gFinal}, not ${propDomain} — verify it's intended.` };
+      } else if (gReach?.reachable === true) {
+        googleLink = { status: "green", note: `Verified: the Website link on Google opens your live site${propDomain ? ` (${propDomain})` : ""}.` };
       } else {
-        // Link points to the property's OWN domain, so the link itself is CORRECT —
-        // that's the meaningful, deterministic check (SerpAPI gives the URL; we
-        // compare hostnames). We deliberately do NOT downgrade this on whether our
-        // headless crawler could render the page: a Cloudflare block returns 403 but
-        // the site loads fine in a real prospect's browser (this very run pulled the
-        // site's live pricing/photos via the web_fetch fallback), and keying off our
-        // bot's success made the row flip GREEN↔"couldn't confirm" run to run. A
-        // genuinely dead property site surfaces as empty website rows elsewhere.
-        googleLink = { status: "green", note: `Website link on Google points to your site${propDomain ? ` (${propDomain})` : ""}.` };
+        // Couldn't live-test (our IP likely blocked) — the link points to your own
+        // domain, so treat it as working rather than crying wolf.
+        googleLink = { status: "green", note: `Website link on Google points to your site${propDomain ? ` (${propDomain})` : ""} (couldn't live-test this run).` };
       }
       // Apartments.com "View Property Website" link — standard on an active
       // listing (detected deterministically from the raw fetched content).
