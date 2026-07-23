@@ -6,6 +6,7 @@ import {
   aptHasVirtualTourFromRawHtml,
 } from "@/lib/detectors";
 import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
+import { brightDataRaw } from "@/lib/brightdata";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -34,19 +35,14 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ advertising: null });
   }
-  const token = process.env.BRIGHTDATA_API_TOKEN;
-  const zone = process.env.BRIGHTDATA_ZONE;
-  if (!token || !zone || !url) return NextResponse.json({ advertising: null, officeHours: null });
-
   try {
-    const r = await fetch("https://api.brightdata.com/request", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ zone, url, format: "raw" }),
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!r.ok) return NextResponse.json({ advertising: null, officeHours: null, concession: null });
-    const html = await r.text();
+    // Bright Data intermittently returns an empty body on the first hit; brightDataRaw
+    // retries so a transient empty response no longer wipes the deterministic reads and
+    // falls the audit back to a false "couldn't read the hours this run." A real
+    // Apartments.com listing (active or dark shell) is hundreds of KB, so require a
+    // substantial body before trusting it.
+    const html = await brightDataRaw(url, { minLength: 5000, attempts: 4 });
+    if (!html) return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null });
     // Office hours + concession from the RAW HTML are AUTHORITATIVE. The visible
     // listing collapses hours behind "View All Hours" (model misreads closed days as
     // open) and the model has also misread the concession banner (e.g. reporting a

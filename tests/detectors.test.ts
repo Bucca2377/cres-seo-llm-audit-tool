@@ -14,6 +14,7 @@ import {
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
+import { brightDataRaw } from "../lib/brightdata";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -426,4 +427,60 @@ test("website-features: detects the leasing platform from raw HTML embed scripts
   assert.equal(detectLeasingPlatform('<script src="https://prospectportal.entrata.com/x.js">'), "Entrata");
   // A plain marketing site with no leasing widget -> null (we won't infer features).
   assert.equal(detectLeasingPlatform("<html><body>Welcome to our community</body></html>"), null);
+});
+
+// ----- Bright Data fetch: retry past the intermittent empty body -------------
+
+const restoreEnv = (key: string, val: string | undefined) => {
+  if (val === undefined) delete process.env[key];
+  else process.env[key] = val;
+};
+
+test("brightdata: retries past an empty 200 body and returns the full page", async () => {
+  // Bright Data intermittently answers HTTP 200 with an EMPTY body; the SAME url
+  // returns the full ~800KB page on an immediate retry. That empty response is what
+  // turned a readable Apartments.com hours block into a false amber "couldn't read
+  // this run." The helper must retry past it.
+  const prevToken = process.env.BRIGHTDATA_API_TOKEN;
+  const prevZone = process.env.BRIGHTDATA_ZONE;
+  const prevFetch = globalThis.fetch;
+  process.env.BRIGHTDATA_API_TOKEN = "test-token";
+  process.env.BRIGHTDATA_ZONE = "cres";
+  const bodies = ["", "", "<html>" + "x".repeat(9000) + "</html>"]; // two empties, then a full page
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    const body = bodies[Math.min(calls, bodies.length - 1)];
+    calls++;
+    return { ok: true, text: async () => body };
+  }) as unknown as typeof fetch;
+  try {
+    const html = await brightDataRaw("https://www.apartments.com/x/", { minLength: 5000, attempts: 4 });
+    assert.ok(html && html.length >= 5000, "returns the full page, not the empty body");
+    assert.equal(calls, 3, "retried past both empty responses");
+  } finally {
+    globalThis.fetch = prevFetch;
+    restoreEnv("BRIGHTDATA_API_TOKEN", prevToken);
+    restoreEnv("BRIGHTDATA_ZONE", prevZone);
+  }
+});
+
+test("brightdata: returns null without creds (never makes a live call)", async () => {
+  const prevToken = process.env.BRIGHTDATA_API_TOKEN;
+  const prevZone = process.env.BRIGHTDATA_ZONE;
+  const prevFetch = globalThis.fetch;
+  delete process.env.BRIGHTDATA_API_TOKEN;
+  delete process.env.BRIGHTDATA_ZONE;
+  let called = false;
+  globalThis.fetch = (async () => {
+    called = true;
+    return { ok: true, text: async () => "x".repeat(9000) };
+  }) as unknown as typeof fetch;
+  try {
+    assert.equal(await brightDataRaw("https://www.apartments.com/x/"), null);
+    assert.equal(called, false, "no creds -> short-circuits before fetching");
+  } finally {
+    globalThis.fetch = prevFetch;
+    restoreEnv("BRIGHTDATA_API_TOKEN", prevToken);
+    restoreEnv("BRIGHTDATA_ZONE", prevZone);
+  }
 });
