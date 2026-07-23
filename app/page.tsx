@@ -4112,6 +4112,39 @@ function MarketingAuditTab({
         siteBlocked = true;
       }
 
+      // Office hours (and the leasing phone) usually live on the CONTACT page as
+      // static HTML, but the follow-crawl can miss it or get 403'd on it — leaving us
+      // showing "couldn't read hours" for a page that plainly displays them. When the
+      // crawl surfaced no hours, fetch the Contact page directly (plain fetch, Bright
+      // Data fallback) and fold its text into siteText so the hours reconciliation,
+      // the phone inventory, AND the model all see the real Contact-page content.
+      if (current.website && Object.keys(parseWeekHours(siteText || "")).length === 0) {
+        try {
+          let origin = "";
+          try {
+            origin = new URL(/^https?:\/\//i.test(current.website) ? current.website : `https://${current.website}`).origin;
+          } catch {
+            /* ignore */
+          }
+          const crawledContact = (siteText.match(/===\s*(https?:\/\/[^\s(]*contact[^\s(]*)/i) || [])[1];
+          const contactUrl = crawledContact || (origin ? `${origin}/contact/` : "");
+          if (contactUrl) {
+            setProgress("Reading the Contact page for office hours…");
+            const pr = await fetch("/api/pagetext", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: contactUrl }),
+            });
+            const pj = (await pr.json()) as { text?: string };
+            if (pj?.text && Object.keys(parseWeekHours(pj.text)).length > 0) {
+              siteText += `\n\n=== Contact page (fetched directly: ${contactUrl}) ===\n${pj.text}`;
+            }
+          }
+        } catch {
+          /* best-effort — the hours cell stays "verify" if this fails */
+        }
+      }
+
       // Deterministic website concession detection — run BEFORE the prompt so the
       // special can be fed to the model as GROUND TRUTH. Otherwise the model
       // misses it and writes "the property offers no concessions / launch one"
