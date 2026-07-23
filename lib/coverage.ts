@@ -239,3 +239,20 @@ export function missingFindingCards(
   }
   return out;
 }
+
+/**
+ * DETERMINISTIC RECOMMENDATIONS SOURCE.
+ * Returns a fix card for EVERY red consistency finding — not just the ones a
+ * model rec missed. This is how the marketing audit builds its recommendations:
+ * entirely from the finalized consistency table, so a recommendation can only
+ * ever exist for a real, verified issue and can never contradict the table.
+ * Same rules as missingFindingCards (no Google-photo cards; a dark
+ * Apartments.com listing folds into the reactivation card handled by the caller;
+ * concession is never a required-feature card).
+ */
+export function allFindingCards(
+  rows: CovRow[],
+  ctx: { aptIsDark: boolean }
+): CoverageCard[] {
+  return missingFindingCards(rows, [], ctx);
+}

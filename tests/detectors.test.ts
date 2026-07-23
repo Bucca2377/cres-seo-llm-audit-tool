@@ -11,7 +11,7 @@ import {
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
 } from "../lib/detectors";
-import { missingFindingCards } from "../lib/coverage";
+import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 
@@ -259,6 +259,19 @@ test("coverage: never injects an optional-promo (concession) card", () => {
   // Even if a concession row somehow arrives red, it's not a required feature.
   const row = { label: "Concessions listed", apartments: { status: "na" }, google: { status: "na" }, website: { status: "red", note: "none" } };
   assert.equal(missingFindingCards([row], [], { aptIsDark: false }).length, 0);
+});
+
+test("coverage: allFindingCards emits a card for EVERY red (deterministic recs source)", () => {
+  const rows = [
+    { label: "Office hours", website: { status: "red" }, google: { status: "red" }, apartments: { status: "green" } },
+    { label: "Virtual tour", website: { status: "red" }, google: { status: "na" }, apartments: { status: "green" } },
+    { label: "Pricing & availability", website: { status: "green" }, google: { status: "na" }, apartments: { status: "green" } },
+  ];
+  const cards = allFindingCards(rows, { aptIsDark: false });
+  // 2 reds (hours, virtual tour) -> 2 cards; the all-green pricing row -> none.
+  assert.equal(cards.length, 2);
+  assert.ok(cards.some((c) => /hours/i.test(c.title)));
+  assert.ok(cards.some((c) => /virtual tour/i.test(c.title)));
 });
 
 // ----- Deterministic office-hours reconciliation --------------------------------

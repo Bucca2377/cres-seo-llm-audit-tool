@@ -32,8 +32,8 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle, recommendsCreatingConcession, recommendsGooglePhotos } from "@/lib/detectors";
-import { missingFindingCards } from "@/lib/coverage";
+import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
+import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
@@ -4256,7 +4256,7 @@ function MarketingAuditTab({
       // from the crawl footer, Google from SerpAPI, Apartments.com from the reader —
       // and flag the real minority. Website + Google are authoritative (a genuine
       // conflict between them is RED); a reader-derived ILS outlier is AMBER "verify".
-      // Computed up-front so BOTH the rec filter and the consistency row use it.
+      // Computed up-front and applied to the consistency hours row below.
       const websiteHoursParsed = parseWeekHours(siteText || "");
       const hoursVerdicts = reconcileOfficeHours([
         { key: "website", label: "the website", hours: websiteHoursParsed, authoritative: true },
@@ -4266,12 +4266,10 @@ function MarketingAuditTab({
         // can't manufacture a false conflict.
         { key: "apartments", label: "Apartments.com", hours: aptIsDark || !aptRead?.ok || !aptHoursVerified ? undefined : aptRead.officeHours, authoritative: false },
       ]);
-      const hoursReconciled = !!hoursVerdicts;
-      const hoursConflictReal = !!hoursVerdicts && Object.values(hoursVerdicts).some((v) => v.status !== "green");
 
       // Deterministic website-feature detection (see lib/website-features). Computed
-      // up-front so BOTH the rec filter (drop "add a feature we already have") and the
-      // consistency override use the same truth. JS-heavy sites hide features behind
+      // up-front and used by the consistency override below to correct false
+      // "missing" reds on features we can positively detect. JS-heavy sites hide features behind
       // sub-pages/widgets, so the model marks present features "missing" — but the
       // signals survive in the crawled nav/buttons/footer text.
       const websiteFeatures = detectWebsiteFeatures(siteText || "");
@@ -4462,31 +4460,8 @@ Return ONLY this JSON object, no prose before or after:
     "apartments": ["every phone/tracking number on the Apartments.com listing"],
     "google": ["the phone number on the Google listing if visible"]
   },
-  "apartmentsPhotos": ["direct image URLs (the actual src) of the first few photos in the Apartments.com listing's photo gallery, e.g. https://images1.apartments.com/...; up to 6; ONLY real URLs you can actually see in the fetched page, NEVER invented, guessed, or constructed; [] if you cannot see any image URLs"],
-  "recommendations": [
-    {
-      "priority": "QUICK WIN" | "FOUNDATIONAL" | "CONTENT" | "STRATEGIC",
-      "title": "Imperative phrase, max 12 words, no period",
-      "what": "1-3 sentences. The concrete action. Name the page/platform/tool. No hedging.",
-      "why": "1-2 sentences. The observed gap + its impact on lease conversion.",
-      "effort": "Format: '~<time> · <who>'. e.g. '~30 min · marketing manager', '~1 week · web vendor'.",
-      "success": "Measurable outcome with timeframe.",
-      "source": "Which finding this addresses, e.g. 'Virtual tour missing on website + Apartments.com'."
-    }
-  ]
-}
-
-RECOMMENDATION RULES (match the rest of the app exactly):
-- MUST RESOLVE THE FINDINGS: the recommendations exist to fix what THIS audit found. Every red (ISSUE) or amber (CHECK) cell in the consistency check AND every red/amber website finding must be addressed by at least one recommendation. Do not invent recommendations unrelated to the findings, and do not leave a genuine problem without a fix.
-- Order recommendations by damage: the fixes for the most harmful critical issues come first.
-- "source" MUST name the exact finding each card resolves, e.g. "Fixes the office-hours conflict (Google vs website)" or "Fixes Website + Apartments.com: Virtual tour ISSUE".
-- COUNT: aim for 5 recommendations; use up to 7 ONLY if there are more distinct critical issues / red gaps than 5 to cover. Never leave a critical issue uncovered just to hit a number.
-- "title" starts with a verb (Add, Build, Fix, Launch, Publish, Claim).
-- "what" is concrete (name the page/platform); "why" cites the observed gap + lease impact. No generic platitudes.
-- NO COMPETITOR CLAIMS: this audit does NOT research competing properties, so you have ZERO competitor data. NEVER name a specific competing property, and NEVER assert anything about one (their rents, specials/concessions, incentives, occupancy, amenities, or programs). Do not write phrases like "competing properties nearby offer specials" or invent competitor names — that would be fabricated. Ground every recommendation ONLY in what THIS audit observed about THIS property.
-- NO INVENTED CONCESSIONS / SPECIALS: NEVER recommend creating, launching, adding, designing, introducing, or "offering" a move-in concession, limited-time special, or discount. This holds WHETHER OR NOT the property currently advertises one — inventing a promotion is a pricing/revenue decision that is OUTSIDE the scope of this marketing audit, and a missing concession is NOT a deficiency. Do not write cards like "Add a limited-time move-in concession" or "Design a move-in special". (You MAY recommend SYNCING an EXISTING, already-advertised special to a specific platform that is missing it — never a brand-new one.)
-- GOOGLE PHOTOS — NEVER RECOMMEND ANYTHING ABOUT THEM. Do not write ANY recommendation touching the Google Business Profile photo gallery: not posting/uploading professional photos, not curating/removing/hiding visitor photos, not "verifying" or "auditing" the gallery, not matching it to the website. The Google gallery is a mix of owner + visitor uploads the property doesn't control, it's assessed on the scorecard elsewhere, and it is NEVER a recommendation here. Zero Google-photo cards.
-- Priority: QUICK WIN (≤4 hrs, near-term), FOUNDATIONAL (must-have hygiene: hours, listing completeness, photos), CONTENT (pages/photos/virtual tour to create), STRATEGIC (>1 week / ongoing programs). Do NOT use MAP PACK or LONG-TAIL here.${setAsidePromptNote(current)}`;
+  "apartmentsPhotos": ["direct image URLs (the actual src) of the first few photos in the Apartments.com listing's photo gallery, e.g. https://images1.apartments.com/...; up to 6; ONLY real URLs you can actually see in the fetched page, NEVER invented, guessed, or constructed; [] if you cannot see any image URLs"]
+}`;
 
       // Website content is provided (Playwright); Apartments.com is fetched by
       // Claude's web_fetch (which penetrates it where Playwright is 403'd).
@@ -4499,104 +4474,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       if (!match) throw new Error("The audit did not return a structured result. Try again.");
       const parsed = JSON.parse(match[0]) as Partial<MarketingAuditResult>;
 
-      const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
-        ? (parsed.recommendations as RecommendationCard[])
-        : [];
-      // Deterministic backstop: NEVER let a "create/add a concession to the site"
-      // card reach the client. The model reintroduces this every few runs (with or
-      // without the ground-truth block), and it's out of scope regardless — a
-      // marketing-hygiene audit doesn't tell a property to invent a discount, and
-      // when a special already runs the rec is flat wrong. UNCONDITIONAL (not gated
-      // on whether we detected a banner this run — that detection is crawl-flaky and
-      // was letting the rec relapse). Tested in tests/detectors.test.ts; a legitimate
-      // "sync the EXISTING special to Apartments.com" card names a platform and is kept.
-      // Both platforms already advertise the SAME concession — a rec to make the
-      // WORDING identical is nitpicking (we've established wording differences aren't a
-      // deficiency; the substantive offer matches).
-      const concessionOnBoth = !!websiteSpecial && !!(aptRead?.ok && aptRead.concessions);
-      const recsFiltered: AuditRecommendations = recs.filter((c) => {
-        const t = `${c.title || ""}. ${c.what || ""}`;
-        if (recommendsCreatingConcession(t)) return false;
-        if (
-          concessionOnBoth &&
-          /(concession|special|weeks?\s+free|move[-\s]?in)/i.test(t) &&
-          /\b(align|match\w*|identical|exact|synchron\w*|consistent|unif\w*|same)\b/i.test(t) &&
-          /\b(word\w*|text|messag\w*|phras\w*|language|copy)\b/i.test(t)
-        )
-          return false;
-        // Drop "add/sync the concession to Apartments.com" when that listing is DARK —
-        // you can't put a special on a listing that isn't advertising. The "activate
-        // the listing" card (below) is the correct recommendation instead.
-        if (
-          aptIsDark &&
-          /apartments\.?com/i.test(t) &&
-          /\b(concession|special|move[-\s]?in special)\b/i.test(t) &&
-          /\b(add|adding|sync|includ\w*|promot\w*|put|list|update|carry)\b/i.test(t)
-        )
-          return false;
-        // Drop any rec that tells the property to add a "Not a Google feature" item
-        // (pricing, concessions, virtual tour, preferred employers, online application,
-        // tour scheduling) TO Google — the consistency table says Google doesn't carry
-        // those, so pointing a rec at Google for them contradicts the report.
-        if (recommendsNonGoogleFeatureOnGoogle(t)) return false;
-        // Drop a fabricated "fix/align the office hours" card when the hours actually
-        // reconcile cleanly across platforms (the model sometimes invents a conflict
-        // from a misread). Deterministic hours truth wins over the model's reading.
-        if (
-          hoursReconciled &&
-          !hoursConflictReal &&
-          /\bhours?\b/i.test(t) &&
-          /\b(fix|updat\w*|correct\w*|align\w*|conflict\w*|mismatch\w*|discrepan\w*|inconsist\w*)\b/i.test(t)
-        )
-          return false;
-        // Drop a rec telling the property to ADD a website feature it ALREADY HAS
-        // (deterministically detected). The model marks present features "missing" on
-        // JS-heavy sites and then recommends building them — contradicting reality.
-        const proposesAdding = /\b(add|adding|build|creat\w*|implement\w*|introduc\w*|launch\w*|set up|enable|embed|install)\b/i.test(t);
-        if (proposesAdding) {
-          if (websiteFeatures.preferredEmployer && /preferred[-\s]?employer/i.test(t)) return false;
-          if (websiteFeatures.virtualTour && /virtual\s*tour|matterport|3d\s*tour/i.test(t)) return false;
-          if ((websiteFeatures.tourScheduling || leasingPlatform) && /schedule\s+(a\s+|your\s+)?tour|self[-\s]?schedul|tour\s+scheduling|booking\s+widget/i.test(t)) return false;
-          if ((websiteFeatures.onlineApplication || leasingPlatform) && /online\s+application|apply\s+(now|online)|application\s+portal|lease\s+now/i.test(t)) return false;
-        }
-        // HARD RULE (was prompt-only, model kept violating it): never recommend
-        // anything about the Google Business Profile photo gallery.
-        if (recommendsGooglePhotos(t)) return false;
-        // The Apartments.com listing already HAS a virtual tour (Matterport/3D
-        // confirmed in raw HTML) — drop any "add a virtual tour to Apartments.com" rec.
-        if (aptHasVirtualTour && /apartments\.?com/i.test(t) && /virtual\s*tour|matterport|3d\s*tour/i.test(t)) return false;
-        // Drop recs built on a crawl ARTIFACT: Google Street View's "Sorry, we have no
-        // imagery here" fallback on a neighborhood map isn't a content gap — the model
-        // read it as "the page has no imagery" and recommended adding photos.
-        if (/no imagery here|we have no imagery|sorry,?\s*we have no imagery/i.test(t)) return false;
-        // Drop "verify/fix the gallery renders" recs — the gallery is present (matches
-        // the Apartments.com pro photos); its images just weren't captured by OUR
-        // crawler this run. That's our limitation, not a broken site.
-        if (/\bgallery\b/i.test(t) && /(render|blank|display\s+correctly|not\s+load|doesn.?t\s+load|images?\s+(not|aren.?t|fail|missing))/i.test(t)) return false;
-        // Drop "standardize / consolidate the phone number across platforms" recs.
-        // DIFFERENT numbers per platform (and Funnel/RentCafe call-tracking numbers)
-        // are EXPECTED and intentional — the phone panel says exactly that — so the
-        // rec contradicts our own principle, and the model keeps building it from
-        // tracking numbers it extracted that aren't a visible inconsistency. A number
-        // that doesn't DIAL the property is caught separately by the dial test.
-        if (
-          /\bphone\b|\bnumber\b|tracking\s*(number|line)/i.test(t) &&
-          /\b(standardiz\w*|consolidat\w*|unif\w*|single\s+(primary\s+)?(phone|number|leasing)|one\s+(phone|number)|same\s+(phone|number)|consistent\s+(phone|number)|across\s+(all\s+)?(the\s+)?(platform|page)|fragment\w*)\b/i.test(t)
-        )
-          return false;
-        // Drop "add office hours to the website / Contact page" recs. Either the hours
-        // are already on the site (usually the Contact page footer), or our crawl just
-        // couldn't capture that page — a CAPTURE miss is NOT a confirmed absence.
-        // Recommending to add something we can't confirm is missing is the same
-        // false-negative class as "build an FAQ page" for a site that already has one.
-        if (
-          /\bhours?\b/i.test(t) &&
-          /\b(add|adding|display|show|list|include|post|put)\b/i.test(t) &&
-          /website|contact\s+page|homepage|footer|\bsite\b/i.test(t)
-        )
-          return false;
-        return true;
-      });
       // When the Apartments.com listing is DARK, inject a fixed recommendation to
       // turn it back on — with an explicit escape hatch in case the property intends
       // it to be off. Deterministic so the wording + escape hatch are reliable.
@@ -4609,24 +4486,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         success: "Listing live with pricing, photos, and available units within 1 week (or confirmed intentionally off).",
         source: 'Apartments.com: "not currently advertising" (shell listing).',
       };
-      // When the Apartments.com listing is DARK it can't take ANY feature fix —
-      // office hours, photos, syncing a special, application links — because there's
-      // no live listing to change; all of that is moot until it's reactivated. So
-      // collapse EVERY model Apartments.com rec into the single deterministic
-      // reactivation card (which carries the "ignore if intentional" escape hatch):
-      // replace the FIRST apts rec in place (keeping its ranking), drop the rest, and
-      // append the card if the model wrote none.
-      let recsFinal: AuditRecommendations = recsFiltered;
-      if (aptIsDark && Array.isArray(recsFiltered)) {
-        const isApt = (c: RecommendationCard) => /apartments\.?com/i.test(`${c.title || ""}. ${c.what || ""}`);
-        const firstIdx = recsFiltered.findIndex(isApt);
-        recsFinal =
-          firstIdx >= 0
-            ? recsFiltered
-                .map((c, i) => (i === firstIdx ? aptActivationCard : c))
-                .filter((c, i) => i === firstIdx || !isApt(c))
-            : [...recsFiltered, aptActivationCard];
-      }
 
       // --- Vision pass: actually LOOK at the website gallery photos ---
       // The text audit can only confirm photos exist; here we hand the real
@@ -5032,24 +4891,24 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
-      // COMPLETENESS BACKSTOP: guarantee that every RED ("ISSUE") cell in the
-      // consistency table has a covering recommendation. The rules require the model
-      // to write one for each red finding, but it sometimes forgets (pure LLM
-      // variance) — that's how an office-hours conflict ended up flagged with no fix.
-      // This deterministically injects a fix card for any red finding no existing rec
-      // addresses (respecting the hard rules: no Google-photo cards, and nothing for
-      // Apartments.com when it's dark — the reactivation card covers that). Single
-      // source of truth in lib/coverage.ts, covered by tests/detectors.test.ts.
-      {
-        const recsList: RecommendationCard[] = Array.isArray(recsFinal) ? recsFinal : [];
-        const injected = missingFindingCards(consistency, recsList, { aptIsDark }) as RecommendationCard[];
-        if (injected.length) {
-          // Critical hygiene leads; longer-horizon cards trail the model's list.
-          const lead = injected.filter((c) => c.priority === "FOUNDATIONAL" || c.priority === "QUICK WIN");
-          const tail = injected.filter((c) => c.priority !== "FOUNDATIONAL" && c.priority !== "QUICK WIN");
-          recsFinal = [...lead, ...recsList, ...tail];
-        }
-      }
+      // DETERMINISTIC RECOMMENDATIONS. The marketing recs are generated ENTIRELY
+      // from the finalized consistency table — never from model free-text. Every
+      // RED cell becomes a templated fix card (lib/coverage.ts) and a dark
+      // Apartments.com listing gets the reactivation card. A recommendation can
+      // therefore only exist for a real, verified issue and can never contradict
+      // the table. This replaced the model-authored rec path (and its stack of
+      // drop-filters) that kept inventing fixes for things that weren't wrong.
+      // Amber/verify cells stay as table annotations, not recs. Single source of
+      // truth in lib/coverage.ts, covered by tests/detectors.test.ts.
+      const tableCards = allFindingCards(consistency, { aptIsDark }) as RecommendationCard[];
+      let recsFinal: RecommendationCard[] = aptIsDark ? [aptActivationCard, ...tableCards] : tableCards;
+      // Stable priority ordering — critical hygiene leads, longer-horizon work trails.
+      const RECS_PRIORITY_RANK: Record<string, number> = {
+        FOUNDATIONAL: 0, "QUICK WIN": 1, "MAP PACK": 2, "AI VISIBILITY": 3, CONTENT: 4, STRATEGIC: 5, "LONG-TAIL": 6,
+      };
+      recsFinal = [...recsFinal].sort(
+        (a, b) => (RECS_PRIORITY_RANK[a.priority] ?? 9) - (RECS_PRIORITY_RANK[b.priority] ?? 9)
+      );
 
       const result: MarketingAuditResult = {
         criticalIssues: parsed.criticalIssues || [],
