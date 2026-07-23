@@ -4242,10 +4242,6 @@ function MarketingAuditTab({
       // sub-pages/widgets, so the model marks present features "missing" — but the
       // signals survive in the crawled nav/buttons/footer text.
       const websiteFeatures = detectWebsiteFeatures(siteText || "");
-      // How many DISTINCT phone numbers the crawl actually found on the website — used
-      // to guard a "standardize the phone number across pages" rec: with <2 there is
-      // no website inconsistency to fix (the model has cited numbers that aren't there).
-      const websitePhoneCount = new Set(extractPhones(siteText || "")).size;
 
       // --- Website-link check: does the "Website" link on the Google listing
       // actually reach the property's live site? A missing, broken, or wrong-domain
@@ -4504,14 +4500,26 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         // imagery here" fallback on a neighborhood map isn't a content gap — the model
         // read it as "the page has no imagery" and recommended adding photos.
         if (/no imagery here|we have no imagery|sorry,?\s*we have no imagery/i.test(t)) return false;
-        // Drop a "standardize the phone number across the website" rec unless the crawl
-        // actually found 2+ distinct numbers on the site — otherwise the model has
-        // cited a number that isn't displayed (often a widget/tracking number it
-        // hallucinated as a page inconsistency).
+        // Drop "standardize / consolidate the phone number across platforms" recs.
+        // DIFFERENT numbers per platform (and Funnel/RentCafe call-tracking numbers)
+        // are EXPECTED and intentional — the phone panel says exactly that — so the
+        // rec contradicts our own principle, and the model keeps building it from
+        // tracking numbers it extracted that aren't a visible inconsistency. A number
+        // that doesn't DIAL the property is caught separately by the dial test.
         if (
-          websitePhoneCount < 2 &&
-          /\b(phone|tracking)\s*(number|line)|\bphone\s+number\b/i.test(t) &&
-          /\b(standardiz\w*|consisten\w*|unif\w*|single|one\s+number|multiple|across\s+(all\s+)?(the\s+)?(website\s+)?pages|differ\w*|conflict\w*|fragment\w*|inconsisten\w*)\b/i.test(t)
+          /\bphone\b|\bnumber\b|tracking\s*(number|line)/i.test(t) &&
+          /\b(standardiz\w*|consolidat\w*|unif\w*|single\s+(primary\s+)?(phone|number|leasing)|one\s+(phone|number)|same\s+(phone|number)|consistent\s+(phone|number)|across\s+(all\s+)?(the\s+)?(platform|page)|fragment\w*)\b/i.test(t)
+        )
+          return false;
+        // Drop "add office hours to the website / Contact page" recs. Either the hours
+        // are already on the site (usually the Contact page footer), or our crawl just
+        // couldn't capture that page — a CAPTURE miss is NOT a confirmed absence.
+        // Recommending to add something we can't confirm is missing is the same
+        // false-negative class as "build an FAQ page" for a site that already has one.
+        if (
+          /\bhours?\b/i.test(t) &&
+          /\b(add|adding|display|show|list|include|post|put)\b/i.test(t) &&
+          /website|contact\s+page|homepage|footer|\bsite\b/i.test(t)
         )
           return false;
         return true;
@@ -4645,13 +4653,15 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         const hoursRow = consistency.find((r) => /\bhours?\b/i.test(r?.label || ""));
         if (hoursRow) {
           if (hoursVerdicts.website) hoursRow.website = hoursVerdicts.website;
-          else if (hoursRow.website?.status === "red") {
-            // We couldn't parse hours from the site capture, but Google/Apartments.com
-            // have them — that's a CAPTURE miss (hours are often only on the Contact
-            // page), not a confirmed absence. Verify, don't red.
+          else {
+            // We couldn't parse hours from the site capture. That's a CAPTURE miss —
+            // hours usually live on the Contact page, which our crawl doesn't always
+            // reach — NOT a confirmed absence. Don't show a lenient GOOD (the model
+            // did that with a contradictory "not displayed" note) and don't red it.
+            // Amber "verify"; the model's own Contact-page read is unreliable here.
             hoursRow.website = {
               status: "amber",
-              note: "Hours weren’t found in the site capture — verify live (often on the Contact page) and align them.",
+              note: "Couldn’t read office hours in the site capture this run — verify live (usually on the Contact page). Consistent with Google/Apartments.com where checked.",
             };
           }
           if (hoursVerdicts.google) hoursRow.google = hoursVerdicts.google;

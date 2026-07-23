@@ -102,10 +102,24 @@ export function parseWeekHours(text: string): Record<string, string> {
   const VAL =
     "(closed|open 24 hours|24 hours|\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?\\s*[–—-]\\s*\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?)";
   const out: Record<string, string> = {};
+  const dayTok = (s: string) => ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].indexOf((s || "").trim().toLowerCase().slice(0, 3));
+  // Pass 1 — day RANGES first ("Mon-Fri 8:30 AM - 5:30 PM", "Monday - Thursday 9-5"),
+  // the common Contact-page format. Expand the range across every day it spans.
+  const dayAlt = days.map(([, alt]) => alt).join("|");
+  const rangeRe = new RegExp(`\\b(${dayAlt})\\s*[-–—]\\s*(${dayAlt})\\b[^\\dA-Za-z]{0,8}${VAL}`, "gi");
+  for (const m of flat.matchAll(rangeRe)) {
+    const a = dayTok(m[1]);
+    const b = dayTok(m[2]);
+    const val = (m[3] || "").trim();
+    if (a >= 0 && b >= 0 && a <= b && val) for (let i = a; i <= b; i++) if (!out[days[i][0]]) out[days[i][0]] = val;
+  }
+  // Pass 2 — individual days ("Sat 10 AM - 4 PM", "Sunday Closed"), filling any day a
+  // range didn't already cover.
   for (const [full, alt] of days) {
+    if (out[full]) continue;
     const re = new RegExp(`\\b(?:${alt})\\b[^\\dA-Za-z]{0,6}${VAL}`, "i");
     const m = flat.match(re);
-    if (m && m[1] && !out[full]) out[full] = m[1].trim();
+    if (m && m[1]) out[full] = m[1].trim();
   }
   return out;
 }

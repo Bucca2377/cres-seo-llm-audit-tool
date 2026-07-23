@@ -275,6 +275,18 @@ test("hours: parseWeekHours reads a footer, ignores day names in prose", () => {
   assert.equal(Object.keys(parseWeekHours("Move in by Monday to save big!")).length, 0);
 });
 
+test("hours: parseWeekHours expands day RANGES (the Contact-page 'Mon-Fri' format)", () => {
+  // Main & Stone's Contact page: "Office Hours  Mon-Fri 8:30 AM - 5:30 PM  Sat 10:00 AM - 5:00 PM".
+  const h = parseWeekHours("Office Hours Mon-Fri 8:30 AM - 5:30 PM Sat 10:00 AM - 5:00 PM");
+  assert.match(h.monday, /8:30 AM - 5:30 PM/i); // range expanded, not just Friday
+  assert.match(h.wednesday, /8:30 AM - 5:30 PM/i);
+  assert.match(h.friday, /8:30 AM - 5:30 PM/i);
+  assert.match(h.saturday, /10:00 AM - 5:00 PM/i);
+  // "Monday - Thursday" full-name range works too.
+  const h2 = parseWeekHours("Monday - Thursday 9 AM - 6 PM");
+  assert.match(h2.tuesday, /9 AM - 6 PM/i);
+});
+
 const WEEK_9_5 = { monday: "9 AM-5 PM", tuesday: "9 AM-5 PM", wednesday: "9 AM-5 PM", thursday: "9 AM-5 PM", friday: "9 AM-5 PM", saturday: "10 AM-4 PM", sunday: "Closed" };
 
 test("hours: the Village at Snowfield case — flags the Apartments.com outlier, not the consensus", () => {
