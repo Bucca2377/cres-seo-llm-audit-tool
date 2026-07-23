@@ -452,7 +452,6 @@ export interface PhoneInventory {
 
 export interface MarketingAuditResult {
   executiveSummary: string[];
-  websiteFindings: MarketingFinding[];
   criticalIssues: MarketingCriticalIssue[];
   consistency: MarketingConsistencyRow[];
   /** Same structured-card format as the SEO/LLM audits, for visual consistency. */

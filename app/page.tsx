@@ -4381,17 +4381,6 @@ Status values are exactly "green" (found & functional / consistent), "amber" (pr
 Return ONLY this JSON object, no prose before or after:
 {
   "executiveSummary": ["paragraph 1: what was audited + key strengths", "paragraph 2: most critical gaps + impact on lease conversion"],
-  "websiteFindings": [
-    {"label":"Leasing office hours","status":"green|amber|red","note":"one short clause"},
-    {"label":"Schedule a tour","status":"...","note":"..."},
-    {"label":"Apply now / online application","status":"...","note":"..."},
-    {"label":"Available units & pricing","status":"...","note":"..."},
-    {"label":"Concessions / specials","status":"...","note":"..."},
-    {"label":"Preferred employers","status":"...","note":"..."},
-    {"label":"Photos / gallery","status":"...","note":"..."},
-    {"label":"Virtual tours","status":"...","note":"..."},
-    {"label":"Amenities page","status":"...","note":"..."}
-  ],
   "consistency": [
     {"label":"Currently advertising / active","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
     {"label":"Office hours listed","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
@@ -4530,9 +4519,8 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // --- Vision pass: actually LOOK at the website gallery photos ---
       // The text audit can only confirm photos exist; here we hand the real
       // gallery image URLs to a vision model to grade marketing quality, then
-      // overwrite the website "Photos quality" cell + gallery finding with a
+      // overwrite the website "Photos quality" cell with a
       // real verdict instead of "present, quality not assessed".
-      const websiteFindings = parsed.websiteFindings || [];
       const consistency = parsed.consistency || [];
       // Insert the DETERMINISTIC "Website link works" row (computed in code above,
       // not model judgment) near the top — a broken/missing/wrong website link on
@@ -4737,11 +4725,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
             if (pj.status === "green" || pj.status === "amber" || pj.status === "red") {
               const verdict: { status: MarketingStatus; note: string } = { status: pj.status, note: (pj.note || "").trim() || "Gallery photos assessed" };
               webPhotoStatus = verdict.status;
-              const wf = websiteFindings.find((f) => /photo|gallery/i.test(f.label));
-              if (wf) {
-                wf.status = verdict.status;
-                wf.note = verdict.note;
-              }
               const row = consistency.find((c) => /photo/i.test(c.label));
               if (row) row.website = { status: verdict.status, note: verdict.note };
             }
@@ -4938,7 +4921,6 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 
       const result: MarketingAuditResult = {
         executiveSummary: parsed.executiveSummary || [],
-        websiteFindings,
         criticalIssues: parsed.criticalIssues || [],
         consistency,
         recommendations: recsFinal,
@@ -5336,33 +5318,6 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
           {results.executiveSummary.map((p, i) => (
             <p key={i} style={para}>{p}</p>
           ))}
-        </>
-      )}
-
-      {/* Website Findings */}
-      {results.websiteFindings.length > 0 && (
-        <>
-          <div style={sectionTitle}>Website Audit Findings</div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <tbody>
-              {results.websiteFindings.map((f, i) => {
-                const s = MK_STATUS[f.status] || MK_STATUS.amber;
-                return (
-                  <tr key={i}>
-                    <td style={{ padding: "8px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", width: 190, fontWeight: 600 }}>
-                      {f.label}
-                    </td>
-                    <td style={{ padding: "8px 10px", background: s.bg, borderBottom: "1px solid #eef0f2", width: 70 }}>
-                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: s.fg }}>{s.label}</span>
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", lineHeight: 1.45 }}>
-                      {f.note}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </>
       )}
 
@@ -7183,29 +7138,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                 {mkt.executiveSummary.map((p, i) => (
                   <p key={i} style={bodyP}>{p}</p>
                 ))}
-              </div>
-            )}
-
-            {/* Website Findings */}
-            {mkt.websiteFindings.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Website Audit Findings
-                </div>
-                <table>
-                  <tbody>
-                    {mkt.websiteFindings.map((f, i) => {
-                      const s = MK_STATUS[f.status] || MK_STATUS.amber;
-                      return (
-                        <tr key={i} className="pb-avoid">
-                          <td style={{ ...findingsTd, background: "#faf5ee", fontWeight: 700, color: PRINT_NAVY, width: 150 }}>{f.label}</td>
-                          <td style={{ ...findingsTd, background: s.bg, fontWeight: 700, color: s.fg, width: 60, textAlign: "center" }}>{s.label}</td>
-                          <td style={findingsTd}>{f.note}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
               </div>
             )}
 
