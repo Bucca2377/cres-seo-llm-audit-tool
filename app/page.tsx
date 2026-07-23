@@ -4446,7 +4446,6 @@ Status values are exactly "green" (found & functional / consistent), "amber" (pr
 
 Return ONLY this JSON object, no prose before or after:
 {
-  "executiveSummary": ["paragraph 1: what was audited + key strengths", "paragraph 2: most critical gaps + impact on lease conversion"],
   "consistency": [
     {"label":"Currently advertising / active","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
     {"label":"Office hours listed","apartments":{"status":"...","note":"..."},"google":{"status":"...","note":"..."},"website":{"status":"...","note":"..."}},
@@ -5052,35 +5051,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
-      // Deterministic SCRUB of the executive summary + critical issues. Despite the
-      // ground-truth blocks, the model still slips false claims into the free-text
-      // prose that contradict the corrected table (virtual tour "confirmed to exist
-      // but not displayed", neighborhood "no imagery" from a Street View artifact,
-      // gallery "rendered blank" from OUR capture miss, phone "confusion" from
-      // tracking numbers). Drop the offending sentences so the narrative can't fight
-      // the findings. Sentence-level so the rest of the paragraph survives.
-      const scrubClaim = (s: string): boolean => {
-        if (vtPresent && /virtual\s*tour|3d\s*tour|matterport/i.test(s) && /\b(missing|absent|lack|no\s|not\s|without|neither|don.?t|doesn.?t|unable|can.?t\s+experience|request\s+tours)\b/i.test(s))
-          return true;
-        if (/no imagery here|we have no imagery|neighborhood[\s\S]{0,50}(no|lack|missing)\s+imag|imagery[\s\S]{0,30}placeholder/i.test(s)) return true;
-        if (/gallery[\s\S]{0,30}(blank|render|didn.?t\s+load|not\s+load)/i.test(s)) return true;
-        if (/\bphone\b[\s\S]{0,40}(confus|inconsist|two\s+different|multiple\s+(different\s+)?number)|(two|different|multiple)[\s\S]{0,20}phone\s+numbers[\s\S]{0,30}(confus|inconsist|homepage|contact)/i.test(s))
-          return true;
-        return false;
-      };
-      const scrubProse = (arr: unknown): string[] =>
-        (Array.isArray(arr) ? (arr as string[]) : [])
-          .map((para) =>
-            String(para)
-              .split(/(?<=[.!?])\s+/)
-              .filter((sent) => !scrubClaim(sent))
-              .join(" ")
-              .trim()
-          )
-          .filter((p) => p.length > 0);
-
       const result: MarketingAuditResult = {
-        executiveSummary: scrubProse(parsed.executiveSummary),
         criticalIssues: parsed.criticalIssues || [],
         consistency,
         recommendations: recsFinal,
@@ -5277,7 +5248,7 @@ RECOMMENDATION RULES (match the rest of the app exactly):
 
       {!results && !running && !error && (
         <div style={{ marginTop: 16, padding: "20px 16px", background: "#fafafa", borderRadius: 8, fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
-          Runs ~60–90s. Reads the three platforms, flags leasing-conversion gaps, and writes an Executive Summary, color-coded findings, critical issues, an ILS/Google consistency check, and tiered recommendations.
+          Runs ~60–90s. Reads the three platforms, flags leasing-conversion gaps, and writes color-coded findings, critical issues, an ILS/Google consistency check, and tiered recommendations.
         </div>
       )}
 
@@ -5471,16 +5442,6 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
   };
   return (
     <div>
-      {/* Executive Summary */}
-      {results.executiveSummary.length > 0 && (
-        <>
-          <div style={sectionTitle}>Executive Summary</div>
-          {results.executiveSummary.map((p, i) => (
-            <p key={i} style={para}>{p}</p>
-          ))}
-        </>
-      )}
-
       {/* ILS & Google Consistency */}
       {results.consistency.length > 0 && (
         <>
@@ -7288,18 +7249,6 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
             <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 14 }}>
               Audited {new Date(mkt.timestamp).toLocaleString()}. Sources: website, Apartments.com, Google Business Profile.
             </p>
-
-            {/* Executive Summary */}
-            {mkt.executiveSummary.length > 0 && (
-              <div className="pb-avoid" style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, marginBottom: 6 }}>
-                  Executive Summary
-                </div>
-                {mkt.executiveSummary.map((p, i) => (
-                  <p key={i} style={bodyP}>{p}</p>
-                ))}
-              </div>
-            )}
 
             {/* ILS & Google Consistency */}
             {mkt.consistency.length > 0 && (
