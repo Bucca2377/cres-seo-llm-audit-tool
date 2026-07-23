@@ -2358,6 +2358,11 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
       : `NO JSON-LD structured data (schema) found on any crawled page.`
   );
   if (i.thinContent.length) lines.push(`${i.thinContent.length} page(s) have thin content (<150 words).`);
+  const paths = tech.pages.map((p) => shortUrl(p.url)).filter(Boolean);
+  if (paths.length)
+    lines.push(
+      `Pages found on the site: ${paths.join(", ")}. Do NOT recommend CREATING a page that already exists here — if a relevant page exists (e.g. an FAQ page), recommend IMPROVING it (add schema, expand content) instead.`
+    );
   return "TECHNICAL / ON-PAGE SEO (from a live crawl):\n" + lines.map((l) => `- ${l}`).join("\n");
 }
 
@@ -3003,10 +3008,19 @@ Return ONLY a JSON array of 6 strings, no prose:
       // ~60-90s but is best-effort: if the site can't be rendered we simply
       // skip the technical section instead of failing the audit.
       let technicalSeo: TechnicalSeoResult | undefined;
+      // Does the site already have an FAQ page? Detected from the crawl (a /faq URL,
+      // or "frequently asked questions" / an "FAQ" nav link in the page text) so we
+      // never recommend CREATING an FAQ page for a site that has one — we recommend
+      // improving it (e.g. adding schema) instead.
+      let faqPagePath: string | null = null;
       if (currentProperty.website) {
         setProgress("Crawling the site for technical / on-page SEO…");
         try {
           const crawl = await callFetch({ url: currentProperty.website, follow: true, maxPages: 6 });
+          const faqUrl = (crawl.pages || []).map((p) => p.url).find((u) => /\/faqs?\b|frequently-asked/i.test(u || ""));
+          const crawlBlob = (crawl.pages || []).map((p) => `${p.url} ${(p.text || "").slice(0, 500)}`).join(" ");
+          if (faqUrl) faqPagePath = shortUrl(faqUrl);
+          else if (/frequently\s+asked\s+questions|\bfaqs\b/i.test(crawlBlob)) faqPagePath = "an FAQ page";
           const pages: PageSeo[] = (crawl.pages || [])
             .filter((p) => p.seo)
             .map((p) => ({ url: p.url, status: p.status, ...(p.seo as Omit<PageSeo, "url" | "status">) }));
@@ -3088,7 +3102,7 @@ ${queryRankSummary}
 ${aiSummary}
 
 ${technicalSeoPromptSummary(technicalSeo)}
-
+${faqPagePath ? `\nNOTE: the site ALREADY has an FAQ page (${faqPagePath}). Do NOT recommend creating/publishing a new FAQ page. If it lacks FAQPage (JSON-LD) schema, you MAY recommend adding schema to the EXISTING page instead.\n` : ""}
 ${pageSpeedPromptSummary(pageSpeed)}
 
 ${citationsPromptSummary(citations)}
@@ -3152,6 +3166,16 @@ Recommendation rules (STRICT):
         // so we never dump raw JSON to the UI.
         const rawText = rResp.content?.[0]?.text || "";
         recommendations = parseRecCards(rawText);
+        // Deterministic backstop: if the site already has an FAQ page, drop any rec
+        // that tells them to CREATE/PUBLISH a new one (the model does this when the
+        // prompt doesn't surface the existing page). "Add schema to the existing FAQ"
+        // (verb "add") is NOT dropped — only create/publish/build/launch/new + FAQ.
+        if (faqPagePath && Array.isArray(recommendations)) {
+          recommendations = recommendations.filter((c) => {
+            const t = `${c.title || ""}. ${c.what || ""}`;
+            return !(/\b(creat\w*|publish\w*|build\w*|launch\w*|develop\w*|new)\b[\s\S]{0,50}(faq|frequently[-\s]?asked)/i.test(t));
+          });
+        }
       } catch {
         /* keep recommendations empty; the audit still saves */
       }
