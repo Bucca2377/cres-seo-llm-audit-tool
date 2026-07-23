@@ -4395,10 +4395,16 @@ function MarketingAuditTab({
       if (websiteFeatures.virtualTour || aptHasVirtualTour) featurePresent.push("a virtual tour / 3D tour");
       if (websiteFeatures.tourScheduling || leasingPlatform) featurePresent.push("self-serve tour scheduling");
       if (websiteFeatures.onlineApplication || leasingPlatform) featurePresent.push("an online application");
+      const vtPresent = websiteFeatures.virtualTour || aptHasVirtualTour;
       const websiteFeatureBlock =
         featurePresent.length || leasingPlatform
-          ? `WEBSITE FEATURES — DETERMINISTIC GROUND TRUTH (verified in code):${leasingPlatform ? ` the website runs on ${leasingPlatform}, which provides self-serve tour scheduling, online applications, and live availability.` : ""}${featurePresent.length ? ` The website HAS ${featurePresent.join(", ")}.` : ""} Do NOT state anywhere — executive summary, findings, or recommendations — that any of these is missing, absent, or "not found", and do NOT recommend adding/building/publishing them. They exist.`
+          ? `WEBSITE FEATURES — DETERMINISTIC GROUND TRUTH (verified in code):${leasingPlatform ? ` the website runs on ${leasingPlatform}, which provides self-serve tour scheduling, online applications, and live availability.` : ""}${featurePresent.length ? ` The website HAS ${featurePresent.join(", ")}.` : ""} These features are LIVE and ACCESSIBLE. Do NOT state anywhere — executive summary, findings, or recommendations — that any of them is missing, absent, "not found", "not displayed", "not embedded", "confirmed to exist but not shown", or that prospects "can't experience" them, and do NOT recommend adding/building/publishing/"verifying" them.${vtPresent ? " In particular: the property HAS a virtual/3D tour that IS viewable — never frame virtual tours as a gap or a missing/undisplayed asset." : ""}`
           : "";
+      // Gallery + neighborhood are frequent FALSE flags: our crawler can't always
+      // capture gallery IMAGES (OUR limit, not a broken site), and Google Street View
+      // shows a "Sorry, we have no imagery here" fallback on neighborhood maps that
+      // the model misreads as missing content. Forbid turning either into a finding.
+      const captureCaveatBlock = `CAPTURE CAVEATS — do NOT turn our capture limits into findings: (1) If gallery/site images weren't captured this run, that is OUR crawler limitation — the gallery is present and professional (it matches the Apartments.com listing). Do NOT say the gallery "rendered blank" / "doesn't render", and do NOT recommend verifying/fixing gallery rendering. (2) Ignore any "Sorry, we have no imagery here" text — that is a Google Street View map-widget fallback, NOT missing content. Do NOT claim the neighborhood page "lacks imagery" or recommend adding neighborhood photos.`;
       // Phone + office-hours guidance so the summary/recs stop inventing false problems.
       const phoneHoursGuidance = `PHONE & HOURS GUIDANCE: (1) Different phone numbers across platforms — and more than one number on the site (call-tracking numbers injected by scheduling/chat widgets) — are EXPECTED and intentional (lead-source tracking). Do NOT call phone numbers "confusing" or "inconsistent", and do NOT recommend standardizing/consolidating them; the only real phone problem is a number that does not RING (dial-tested separately). (2) Office hours were confirmed CONSISTENT across the platforms we could read. If the website's hours weren't in the captured pages, that is a capture limitation (hours usually sit on the Contact page) — do NOT claim the website is "missing office hours" or recommend adding them.`;
 
@@ -4415,6 +4421,8 @@ ${
 ${apartmentsBlock}${aptConfirmed ? "\n[An Apartments.com listing for this property is confirmed live and indexed on Google.]" : ""}
 
 ${gbpBlock}${concessionBlock ? "\n\n" + concessionBlock : ""}${websiteLinkBlock ? "\n\n" + websiteLinkBlock : ""}${websiteFeatureBlock ? "\n\n" + websiteFeatureBlock : ""}
+
+${captureCaveatBlock}
 
 ${phoneHoursGuidance}
 
@@ -4562,6 +4570,10 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         // imagery here" fallback on a neighborhood map isn't a content gap — the model
         // read it as "the page has no imagery" and recommended adding photos.
         if (/no imagery here|we have no imagery|sorry,?\s*we have no imagery/i.test(t)) return false;
+        // Drop "verify/fix the gallery renders" recs — the gallery is present (matches
+        // the Apartments.com pro photos); its images just weren't captured by OUR
+        // crawler this run. That's our limitation, not a broken site.
+        if (/\bgallery\b/i.test(t) && /(render|blank|display\s+correctly|not\s+load|doesn.?t\s+load|images?\s+(not|aren.?t|fail|missing))/i.test(t)) return false;
         // Drop "standardize / consolidate the phone number across platforms" recs.
         // DIFFERENT numbers per platform (and Funnel/RentCafe call-tracking numbers)
         // are EXPECTED and intentional — the phone panel says exactly that — so the
@@ -4971,6 +4983,19 @@ RECOMMENDATION RULES (match the rest of the app exactly):
       // Apartments.com phones come from the dedicated reader (reliable; empty
       // when the listing isn't advertising, so no borrowed nearby-listing number).
       (aptRead?.phones ?? []).forEach((p) => addPhone(p, "Apartments.com"));
+      // Prune phantom WEBSITE numbers. Funnel/RentCafe scheduling+chat widgets inject
+      // call-tracking numbers into the DOM that extractPhones picks up but that aren't
+      // the property's displayed number — confusing (a number the client "can't find
+      // on any page"). When the site's canonical number (the one that matches the
+      // Google listing) is present, keep only that on the Website row and drop the
+      // widget-injected extras. If none matches Google, keep all (can't tell which).
+      const gNorm = googlePhone ? normalizePhone(googlePhone) : "";
+      const websiteNums = phoneEntries.filter((e) => e.source === "Website");
+      if (gNorm && websiteNums.length > 1 && websiteNums.some((e) => normalizePhone(e.number) === gNorm)) {
+        const pruned = phoneEntries.filter((e) => e.source !== "Website" || normalizePhone(e.number) === gNorm);
+        phoneEntries.length = 0;
+        phoneEntries.push(...pruned);
+      }
       let phones: PhoneInventory | undefined = phoneEntries.length
         ? { numbers: phoneEntries, collectedAt: new Date().toISOString(), officeHours }
         : undefined;
@@ -5027,8 +5052,35 @@ RECOMMENDATION RULES (match the rest of the app exactly):
         }
       }
 
+      // Deterministic SCRUB of the executive summary + critical issues. Despite the
+      // ground-truth blocks, the model still slips false claims into the free-text
+      // prose that contradict the corrected table (virtual tour "confirmed to exist
+      // but not displayed", neighborhood "no imagery" from a Street View artifact,
+      // gallery "rendered blank" from OUR capture miss, phone "confusion" from
+      // tracking numbers). Drop the offending sentences so the narrative can't fight
+      // the findings. Sentence-level so the rest of the paragraph survives.
+      const scrubClaim = (s: string): boolean => {
+        if (vtPresent && /virtual\s*tour|3d\s*tour|matterport/i.test(s) && /\b(missing|absent|lack|no\s|not\s|without|neither|don.?t|doesn.?t|unable|can.?t\s+experience|request\s+tours)\b/i.test(s))
+          return true;
+        if (/no imagery here|we have no imagery|neighborhood[\s\S]{0,50}(no|lack|missing)\s+imag|imagery[\s\S]{0,30}placeholder/i.test(s)) return true;
+        if (/gallery[\s\S]{0,30}(blank|render|didn.?t\s+load|not\s+load)/i.test(s)) return true;
+        if (/\bphone\b[\s\S]{0,40}(confus|inconsist|two\s+different|multiple\s+(different\s+)?number)|(two|different|multiple)[\s\S]{0,20}phone\s+numbers[\s\S]{0,30}(confus|inconsist|homepage|contact)/i.test(s))
+          return true;
+        return false;
+      };
+      const scrubProse = (arr: unknown): string[] =>
+        (Array.isArray(arr) ? (arr as string[]) : [])
+          .map((para) =>
+            String(para)
+              .split(/(?<=[.!?])\s+/)
+              .filter((sent) => !scrubClaim(sent))
+              .join(" ")
+              .trim()
+          )
+          .filter((p) => p.length > 0);
+
       const result: MarketingAuditResult = {
-        executiveSummary: parsed.executiveSummary || [],
+        executiveSummary: scrubProse(parsed.executiveSummary),
         criticalIssues: parsed.criticalIssues || [],
         consistency,
         recommendations: recsFinal,
