@@ -1768,22 +1768,14 @@ function SEOTab({
  * visibility, so these are split out of the headline scorecard.
  */
 function isBrandedQuery(query: string, property: Property): boolean {
-  const q = query.toLowerCase();
-  if (nameMatches(query, property.name)) return true;
-  // Street-name match: ONLY when the address's first segment is a real street
-  // line (has a house number). Otherwise the first segment is the city, and
-  // since every local query contains the city, everything would read as
-  // branded. Also exclude the city/state so they can never be a street token.
-  const streetLine = (property.address.split(",")[0] || "").toLowerCase();
-  if (!/\d/.test(streetLine)) return false; // no house number → not a usable street line
-  const city = extractCity(property.address).toLowerCase();
-  const streetTokens = streetLine
-    .replace(/^\s*\d+\s*/, "")
-    .replace(/\b(n|s|e|w|ne|nw|se|sw|north|south|east|west)\b/g, " ")
-    .replace(/\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|loop|ct|court|way|pl|place|cir|circle|ter|terrace|pkwy|parkway|hwy|highway|trl|trail)\b/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 4 && w !== city);
-  return streetTokens.length > 0 && streetTokens.some((tok) => q.includes(tok));
+  // ONLY the property NAME makes a query branded/navigational. We deliberately do
+  // NOT treat the property's STREET as branded: a stranger searching "apartments
+  // near East Stone Avenue" is doing a real competitive/local search, not typing
+  // your brand — and street-token branding wrongly pulled those out of the
+  // competitive scorecard (a street token like "stone" matched every "...Stone
+  // Avenue..." query). Name-only keeps the split intuitive and matches what a
+  // reader would call "your own name".
+  return nameMatches(query, property.name);
 }
 
 /**
