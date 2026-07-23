@@ -1808,18 +1808,27 @@ function computeSeoSummary(seo: { queries: string[]; ranks: RankForSummary[] }, 
   const compIdx = ranks.map((_, i) => i).filter((i) => !branded[i]);
   const compRanks = compIdx.map((i) => ranks[i]);
 
-  const mapPackCount = compRanks.filter((r) => r.map_pack_rank && r.map_pack_rank <= 3).length;
-  const mapPackPartialRanks = compRanks
-    .filter((r) => !(r.map_pack_rank && r.map_pack_rank <= 3) && r.expanded_map_pack_rank)
-    .map((r) => r.expanded_map_pack_rank!);
-  const mapPackPartial = mapPackPartialRanks.length;
-  const bestPartialMP = mapPackPartialRanks.length ? Math.min(...mapPackPartialRanks) : null;
+  // Effective Map Pack position per query = the SMOOTHED median shown in the table
+  // (median across recent checks — stable despite the hyper-local run-to-run bounce),
+  // falling back to this run's reading when there's no history yet. The scorecard MUST
+  // use the same value the table shows, or the KPIs disagree with the rows AND
+  // flip-flop every run (raw Map Pack ranks are volatile; the table already smooths,
+  // the KPIs didn't — that was the bug).
+  const effMapPack = (i: number): number | null => {
+    const sm = smoothedMapPack(property.seoRankSnapshots, queries[i], 5);
+    if (sm) return sm.median;
+    const r = ranks[i];
+    return r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
+  };
+  const compEff = compIdx.map(effMapPack);
+  const mapPackCount = compEff.filter((p): p is number => p != null && p <= 3).length;
+  const partialPositions = compEff.filter((p): p is number => p != null && p > 3);
+  const mapPackPartial = partialPositions.length;
+  const bestPartialMP = partialPositions.length ? Math.min(...partialPositions) : null;
   const page1Count = compRanks.filter((r) => r.organic_rank && r.organic_rank <= 10).length;
   const compValid = compRanks.filter((r) => r.organic_rank).map((r) => r.organic_rank!);
   const avgRank = compValid.length ? Math.round(compValid.reduce((a, b) => a + b, 0) / compValid.length) : null;
-  const compMapPackPositions = compRanks
-    .map((r) => r.map_pack_rank ?? r.expanded_map_pack_rank ?? null)
-    .filter((x): x is number => typeof x === "number");
+  const compMapPackPositions = compEff.filter((x): x is number => typeof x === "number");
   const avgMapPackRank = compMapPackPositions.length
     ? Math.round(compMapPackPositions.reduce((a, b) => a + b, 0) / compMapPackPositions.length)
     : null;
