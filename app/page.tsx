@@ -4104,6 +4104,7 @@ function MarketingAuditTab({
       // The model reader misreads collapsed days, so unless we confirm hours from
       // the raw HTML we must NOT trust its apts hours for the consistency check.
       let aptHoursVerified = false;
+      let aptWebsiteUrl: string | null = null;
       if (current.apartmentsUrl && aptRead) {
         try {
           const sr = await fetch("/api/apts-status", {
@@ -4115,6 +4116,7 @@ function MarketingAuditTab({
             advertising?: boolean | null;
             officeHours?: Record<string, string> | null;
             concession?: string | null;
+            websiteUrl?: string | null;
           };
           const rawFetchOk = typeof sj.advertising === "boolean";
           if (rawFetchOk) {
@@ -4133,6 +4135,9 @@ function MarketingAuditTab({
           // than assert a wrong one.
           if (sj.concession) aptRead.concessions = sj.concession;
           else if (rawFetchOk && sj.advertising !== false) aptRead.concessions = "";
+          // The listing's "View Property Website" outbound link (direct anchor to the
+          // property domain) — used below to verify it reaches the real site.
+          if (sj.websiteUrl) aptWebsiteUrl = sj.websiteUrl;
         } catch {
           /* keep the web_fetch-based read */
         }
@@ -4260,15 +4265,37 @@ function MarketingAuditTab({
         // domain, so treat it as working rather than crying wolf.
         googleLink = { status: "green", note: `Website link on Google points to your site${propDomain ? ` (${propDomain})` : ""} (couldn't live-test this run).` };
       }
-      // Apartments.com "View Property Website" link — standard on an active
-      // listing (detected deterministically from the raw fetched content).
+      // Apartments.com "View Property Website" link. When we extracted the actual
+      // outbound URL from the raw HTML (aptWebsiteUrl), VERIFY it: confirm its domain
+      // is the property's, and follow it (via /api/linkcheck) to confirm it loads.
       let aptLink: { status: MarketingStatus; note: string };
       if (!aptRead || !current.apartmentsUrl) {
         aptLink = { status: "na", note: "No Apartments.com listing provided." };
-      } else if (!aptRead.ok) {
-        aptLink = { status: "amber", note: "Could not read the Apartments.com listing this run — verify the 'View Property Website' link." };
       } else if (aptRead.advertising === false) {
         aptLink = { status: "na", note: "Not advertising on Apartments.com." };
+      } else if (aptWebsiteUrl) {
+        const linkDomain = domainOf(aptWebsiteUrl);
+        if (propDomain && linkDomain && linkDomain !== propDomain) {
+          aptLink = { status: "amber", note: `The listing's "View Property Website" link points to ${linkDomain}, not your site (${propDomain}) — verify it's intended.` };
+        } else {
+          let reach: { reachable?: boolean | null } | null = null;
+          try {
+            const rr = await fetch("/api/linkcheck", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: aptWebsiteUrl }),
+            });
+            reach = await rr.json();
+          } catch {
+            reach = null;
+          }
+          aptLink =
+            reach?.reachable === false
+              ? { status: "red", note: `The listing's website link (${linkDomain || propDomain}) returned an error and didn't load — verify it's live.` }
+              : { status: "green", note: `Verified: the "View Property Website" link opens your live site${propDomain ? ` (${propDomain})` : ""}.` };
+        }
+      } else if (!aptRead.ok) {
+        aptLink = { status: "amber", note: "Could not read the Apartments.com listing this run — verify the 'View Property Website' link." };
       } else if (aptRead.hasWebsiteLink === true) {
         aptLink = { status: "green", note: "'View Property Website' link is present on the listing." };
       } else if (aptRead.hasWebsiteLink === false) {

@@ -105,6 +105,23 @@ export function aptConcessionFromRawHtml(html: string): string | null {
 }
 
 /**
+ * Extract the "View Property Website" outbound link from an Apartments.com listing's
+ * RAW HTML, so we can confirm the listing actually links to the property's real site
+ * (not a dead/wrong URL). On apartments.com this is a direct anchor to the property
+ * domain (with a `?switch_cls[id]=…` tracking param), tagged class="propertyWebsiteLink"
+ * / title="View Property Website". Returns the href (HTML-entity-decoded) or null.
+ */
+export function aptWebsiteLinkFromRawHtml(html: string): string | null {
+  if (!html) return null;
+  const m =
+    html.match(/<a\b[^>]*\bhref="([^"]+)"[^>]*(?:class="[^"]*propertyWebsiteLink[^"]*"|title="View Property Website")/i) ||
+    html.match(/<a\b[^>]*(?:class="[^"]*propertyWebsiteLink[^"]*"|title="View Property Website")[^>]*\bhref="([^"]+)"/i);
+  if (!m) return null;
+  const href = (m[1] || "").replace(/&amp;/gi, "&").trim();
+  return /^https?:\/\//i.test(href) ? href : null;
+}
+
+/**
  * Is an Apartments.com listing actively advertising, judged from its RAW HTML?
  * The "not currently advertising" banner is painted by JavaScript and is in NO
  * fetched HTML, so it can't be matched. The stable structural signals ARE in the

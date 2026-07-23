@@ -5,6 +5,7 @@ import {
   specialFromHtml,
   aptAdvertisingFromRawHtml,
   aptConcessionFromRawHtml,
+  aptWebsiteLinkFromRawHtml,
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
 } from "../lib/detectors";
@@ -99,6 +100,21 @@ test("apts: reads the listing's OWN concession from raw HTML (not 'July 3', not 
   );
   // No specials section at all -> null.
   assert.equal(aptConcessionFromRawHtml("<html><body>no specials</body></html>"), null);
+});
+
+test("apts: extracts the 'View Property Website' outbound link from raw HTML", () => {
+  // The real Apartments.com anchor for Village at Snowfield (direct link to the
+  // property domain with a tracking param).
+  const raw =
+    '<div class="mortar-wrapper"><a href="https://www.villageatsnowfield.com/?switch_cls[id]=29769" ' +
+    'title="View Property Website" rel="nofollow noopener" class="baseAlignedIcon propertyWebsiteLink js-propertyWebsiteExternal" ' +
+    'target="_blank"><span>View Property Website</span></a></div>';
+  const link = aptWebsiteLinkFromRawHtml(raw)!;
+  assert.ok(link);
+  assert.match(link, /^https:\/\/www\.villageatsnowfield\.com\//);
+  // Entity-decodes and only returns real http(s) links; nothing to find -> null.
+  assert.equal(aptWebsiteLinkFromRawHtml("<a href=\"/local/page\">Home</a>"), null);
+  assert.equal(aptWebsiteLinkFromRawHtml("<html>no link</html>"), null);
 });
 
 // ----- "Not a Google feature" recs must never point at Google -----------------

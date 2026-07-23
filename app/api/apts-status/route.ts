@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aptAdvertisingFromRawHtml, aptConcessionFromRawHtml } from "@/lib/detectors";
+import { aptAdvertisingFromRawHtml, aptConcessionFromRawHtml, aptWebsiteLinkFromRawHtml } from "@/lib/detectors";
 import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
@@ -52,8 +52,9 @@ export async function POST(req: NextRequest) {
       advertising: aptAdvertisingFromRawHtml(html),
       officeHours: aptOfficeHoursFromRawHtml(html),
       concession: aptConcessionFromRawHtml(html),
+      websiteUrl: aptWebsiteLinkFromRawHtml(html),
     });
   } catch {
-    return NextResponse.json({ advertising: null, officeHours: null, concession: null });
+    return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null });
   }
 }
