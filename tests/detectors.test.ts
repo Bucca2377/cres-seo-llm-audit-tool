@@ -15,6 +15,7 @@ import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
+import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -427,6 +428,41 @@ test("website-features: detects the leasing platform from raw HTML embed scripts
   assert.equal(detectLeasingPlatform('<script src="https://prospectportal.entrata.com/x.js">'), "Entrata");
   // A plain marketing site with no leasing widget -> null (we won't infer features).
   assert.equal(detectLeasingPlatform("<html><body>Welcome to our community</body></html>"), null);
+});
+
+// ----- Google review rank (SEO audit: property vs local Map Pack ratings) ----
+
+test("review-rank: ranks the property against local competitors by stars", () => {
+  // Competitors gathered across queries (with a dupe from repeated Map Pack hits),
+  // plus a stray copy of the PROPERTY itself from its own Map Pack appearance.
+  const competitors = [
+    { name: "The Flats at Stone", rating: 3.4, reviews: 120 },
+    { name: "Riverside Apartments", rating: 4.6, reviews: 88 },
+    { name: "The Flats at Stone Apartments", rating: 3.4, reviews: 120 }, // dupe
+    { name: "Main & Stone", rating: 4.1, reviews: 5 }, // property's own (unreliable) map-pack row
+  ];
+  const ranked = buildLocalReviewComparison(
+    { name: "Main & Stone", rating: 4.4, reviews: 132 },
+    competitors
+  );
+  // Deduped competitors (2) + the property (1) = 3 rows; the property's own map-pack
+  // copy is dropped in favor of the authoritative 4.4 rating.
+  assert.equal(ranked.length, 3);
+  assert.deepEqual(ranked.map((r) => r.name), ["Riverside Apartments", "Main & Stone", "The Flats at Stone"]);
+  const self = ranked.find((r) => r.isSelf)!;
+  assert.equal(self.rating, 4.4);
+  assert.equal(self.reviews, 132); // authoritative count, not the "5" from the map-pack copy
+  const pos = selfReviewPosition(ranked)!;
+  assert.deepEqual(pos, { pos: 2, total: 3 });
+});
+
+test("review-rank: no ratings anywhere -> empty (nothing to render)", () => {
+  const ranked = buildLocalReviewComparison(
+    { name: "Main & Stone", rating: null, reviews: null },
+    [{ name: "Riverside Apartments", rating: null, reviews: null }]
+  );
+  assert.equal(ranked.length, 0);
+  assert.equal(selfReviewPosition(ranked), null);
 });
 
 // ----- Bright Data fetch: retry past the intermittent empty body -------------

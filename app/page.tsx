@@ -33,6 +33,7 @@ import {
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
+import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -464,6 +465,7 @@ interface GoogleRankResult {
   organic_rank: number | null;
   organic_page: number | null;
   top_organic: { name: string; domain: string }[];
+  map_pack_competitors: { name: string; rating: number | null; reviews: number | null }[];
   diagnosis: string;
   raw?: string;
   error?: string;
@@ -477,6 +479,7 @@ const EMPTY_RANK: GoogleRankResult = {
   organic_rank: null,
   organic_page: null,
   top_organic: [],
+  map_pack_competitors: [],
   diagnosis: "",
 };
 
@@ -1208,6 +1211,17 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
     // -- Map Pack matching ------------------------------------------------
     // Check knowledge_graph first (branded queries), then local_results 3-pack.
     const top3 = localResults.slice(0, 3);
+    // Capture the 3-pack competitors' star ratings (present in the local_results
+    // payload; we otherwise only keep their names) so the SEO audit can rank the
+    // property's Google rating against its local pack.
+    const mapPackCompetitors = top3
+      .map((b: any) => ({
+        name: b.title || b.name || "",
+        rating: typeof b.rating === "number" ? b.rating : null,
+        reviews:
+          typeof b.reviews === "number" ? b.reviews : typeof b.review_count === "number" ? b.review_count : null,
+      }))
+      .filter((c: { name: string }) => c.name);
     let mapPackRank: number | null = null;
     let topMapPack: string[] = [];
 
@@ -1327,6 +1341,7 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
       organic_rank: organicRank,
       organic_page: organicRank ? Math.ceil(organicRank / 10) : null,
       top_organic: topOrganic,
+      map_pack_competitors: mapPackCompetitors,
       diagnosis: diagnose(mapPackRank, expandedMapPackRank, organicRank, topMapPack, topOrganic),
     };
   } catch (e) {
@@ -1897,6 +1912,11 @@ interface SEOAuditResults {
   citations?: CitationResult;
   /** PageSpeed / Core Web Vitals (optional). */
   pageSpeed?: PageSpeedResult;
+  /** Property's Google Business Profile star rating + review count (for the review-rank card). */
+  googleRating?: number | null;
+  googleReviewCount?: number | null;
+  /** Property vs local Map Pack competitors, ranked by star rating. */
+  localReviewComparison?: ReviewEntry[];
 }
 
 /**
@@ -2908,6 +2928,29 @@ Return ONLY a JSON array of 6 strings, no prose:
       );
       const ranks = await Promise.all(rankPromises);
 
+      // Google review rank: the property's own rating + how it ranks vs the local
+      // Map Pack competitors. Best-effort — a failed lookup just omits the card.
+      let googleRating: number | null = null;
+      let googleReviewCount: number | null = null;
+      let localReviewComparison: ReviewEntry[] = [];
+      try {
+        const gbpSerp = await callSerp({
+          query: buildGbpSearchQuery(currentProperty),
+          engine: "google_maps",
+          location: extractLocation(currentProperty.address),
+        });
+        const gbpInfo = extractGBP(gbpSerp, currentProperty);
+        const gbpPlace = gbpSerp?.place_results;
+        googleRating = gbpInfo?.rating ?? (typeof gbpPlace?.rating === "number" ? gbpPlace.rating : null);
+        googleReviewCount = gbpInfo?.reviewCount ?? (typeof gbpPlace?.reviews === "number" ? gbpPlace.reviews : null);
+        localReviewComparison = buildLocalReviewComparison(
+          { name: currentProperty.name, rating: googleRating, reviews: googleReviewCount },
+          ranks.flatMap((r) => r.map_pack_competitors || [])
+        );
+      } catch {
+        /* review rank is best-effort; leave the fields empty */
+      }
+
       // Stage 3: synthesize recommendations
       setStage("analyzing");
       setProgress("Analyzing results and generating recommendations...");
@@ -3191,6 +3234,9 @@ Recommendation rules (STRICT):
         technicalSeo,
         citations,
         pageSpeed,
+        googleRating,
+        googleReviewCount,
+        localReviewComparison,
       };
       setResults(finalResults);
 
@@ -3441,7 +3487,7 @@ Recommendation rules (STRICT):
           </div>
 
           {/* Scorecard */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 18 }}>
             <KPI
               label="Map Pack hits (top 3)"
               value={`${summary.mapPackCount}/${summary.competitiveTotal}`}
@@ -3518,6 +3564,37 @@ Recommendation rules (STRICT):
               }
               accent={B.oxford}
             />
+            <KPI
+              label="Google rating"
+              value={results.googleRating != null ? `${results.googleRating.toFixed(1)} ★` : "—"}
+              sub={
+                results.googleRating != null ? (
+                  <>
+                    {results.googleReviewCount != null ? `${results.googleReviewCount} reviews` : "review count n/a"}
+                    {(() => {
+                      const p = selfReviewPosition(results.localReviewComparison || []);
+                      return p ? (
+                        <>
+                          <br />
+                          #{p.pos} of {p.total} nearby
+                        </>
+                      ) : null;
+                    })()}
+                  </>
+                ) : (
+                  "No Google rating found"
+                )
+              }
+              accent={
+                results.googleRating == null
+                  ? B.oxford
+                  : results.googleRating >= 4.5
+                  ? "#22c55e"
+                  : results.googleRating >= 4.0
+                  ? "#f59e0b"
+                  : B.tangelo
+              }
+            />
           </div>
 
           {/* Map Pack location caveat — ranks are hyper-local */}
@@ -3583,6 +3660,43 @@ Recommendation rules (STRICT):
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Google review rank vs the local Map Pack */}
+          {results.localReviewComparison && results.localReviewComparison.length >= 2 && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase", color: B.oxford, marginBottom: 8 }}>
+                Google review rank (local pack)
+              </div>
+              <div style={{ border: `1px solid #e5e7eb`, borderRadius: 8, overflow: "hidden" }}>
+                {results.localReviewComparison.map((e, i) => (
+                  <div
+                    key={`${e.name}-${i}`}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 12px",
+                      background: e.isSelf ? "#eef6f6" : i % 2 ? "#fafafa" : "#fff",
+                      fontFamily: "'Josefin Sans',sans-serif",
+                      fontSize: 12.5,
+                      fontWeight: e.isSelf ? 700 : 400,
+                      color: e.isSelf ? B.caribbean : "#333",
+                      borderTop: i === 0 ? "none" : "1px solid #eee",
+                    }}
+                  >
+                    <span>
+                      {i + 1}. {e.name}
+                      {e.isSelf ? " (you)" : ""}
+                    </span>
+                    <span style={{ whiteSpace: "nowrap" }}>
+                      {e.rating != null ? `${e.rating.toFixed(1)} ★` : "—"}
+                      {e.reviews != null ? ` · ${e.reviews} reviews` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -7257,6 +7371,15 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                     `${seoTotal}`,
                     seoBrandedCount > 0 ? `${seoCompTotal} competitive · ${seoBrandedCount} branded` : "Real-time Google search",
                   ],
+                  [
+                    "Google Rating",
+                    seo.googleRating != null ? `${seo.googleRating.toFixed(1)} ★` : "—",
+                    seo.googleRating != null
+                      ? seo.googleReviewCount != null
+                        ? `${seo.googleReviewCount} reviews`
+                        : "Review count n/a"
+                      : "No Google rating",
+                  ],
                 ] as [string, string, string][]
               ).map(([label, val, sub]) => (
                 <div
@@ -7308,6 +7431,43 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               match what you see from your own device. Treat Map Pack positions as &ldquo;visible to a searcher near the
               property,&rdquo; not an absolute rank. Organic ranks are far more stable.
             </p>
+
+            {/* Google review rank vs the local Map Pack */}
+            {seo.localReviewComparison && seo.localReviewComparison.length >= 2 && (
+              <div className="pb-avoid" style={{ marginBottom: 14 }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: PRINT_NAVY, marginBottom: 6 }}>
+                  Google Review Rank (Local Pack)
+                </div>
+                <div style={{ border: "1px solid #cfcfcf" }}>
+                  {seo.localReviewComparison.map((e, i) => (
+                    <div
+                      key={`${e.name}-${i}`}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "6px 12px",
+                        background: e.isSelf ? "#eef6f6" : i % 2 ? "#fafafa" : "#fff",
+                        fontFamily: "'Josefin Sans', sans-serif",
+                        fontSize: 10.5,
+                        fontWeight: e.isSelf ? 700 : 400,
+                        color: e.isSelf ? PRINT_TEAL : "#333",
+                        borderTop: i === 0 ? "none" : "1px solid #eee",
+                      }}
+                    >
+                      <span>
+                        {i + 1}. {e.name}
+                        {e.isSelf ? " (you)" : ""}
+                      </span>
+                      <span style={{ whiteSpace: "nowrap" }}>
+                        {e.rating != null ? `${e.rating.toFixed(1)} ★` : "—"}
+                        {e.reviews != null ? ` · ${e.reviews} reviews` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Strongest query / winnable opportunity */}
             {seoSummary && (seoSummary.strongestQuery || seoSummary.opportunityQuery) && (

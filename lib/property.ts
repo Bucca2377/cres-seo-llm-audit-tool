@@ -255,6 +255,10 @@ export interface Property {
     citations?: CitationResult;
     /** PageSpeed / Core Web Vitals (optional). */
     pageSpeed?: PageSpeedResult;
+    /** Google review rank: the property's GBP rating + how it ranks vs the local pack. */
+    googleRating?: number | null;
+    googleReviewCount?: number | null;
+    localReviewComparison?: Array<{ name: string; rating: number | null; reviews: number | null; isSelf?: boolean }>;
   };
   marketingAudit?: MarketingAuditResult;
   /**
