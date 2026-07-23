@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aptAdvertisingFromRawHtml, aptConcessionFromRawHtml, aptWebsiteLinkFromRawHtml } from "@/lib/detectors";
+import {
+  aptAdvertisingFromRawHtml,
+  aptConcessionFromRawHtml,
+  aptWebsiteLinkFromRawHtml,
+  aptHasVirtualTourFromRawHtml,
+} from "@/lib/detectors";
 import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
@@ -53,8 +58,9 @@ export async function POST(req: NextRequest) {
       officeHours: aptOfficeHoursFromRawHtml(html),
       concession: aptConcessionFromRawHtml(html),
       websiteUrl: aptWebsiteLinkFromRawHtml(html),
+      virtualTour: aptHasVirtualTourFromRawHtml(html),
     });
   } catch {
-    return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null });
+    return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null });
   }
 }

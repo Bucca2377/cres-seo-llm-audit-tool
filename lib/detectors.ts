@@ -105,6 +105,33 @@ export function aptConcessionFromRawHtml(html: string): string | null {
 }
 
 /**
+ * Google Business Profile PHOTOS are NEVER our recommendation — the gallery is a
+ * mix of owner + visitor uploads the property doesn't control, it's assessed on the
+ * scorecard, and telling a property to "refresh the Google photo gallery" has been a
+ * recurring bad rec. Drop any recommendation about the GBP photo gallery. True when
+ * the text targets Google AND is about photos/gallery/images.
+ */
+export function recommendsGooglePhotos(text: string): boolean {
+  const t = text || "";
+  const google = /\bgoogle\b|\bgbp\b|business profile/i.test(t);
+  const photos = /\bphotos?\b|\bgallery\b|\bimages?\b|\bphotography\b/i.test(t);
+  return google && photos;
+}
+
+/**
+ * Does an Apartments.com listing have a virtual tour, judged from RAW HTML? The
+ * model's media-summary read flip-flops (reported "6 virtual tours" one run, "none"
+ * the next). A Matterport / 3D / virtual-tour marker in the raw HTML is a reliable
+ * PRESENCE signal — e.g. Main & Stone's listing has a "Matterport 3D Tours" tab and
+ * embed. Returns true when present, null when undeterminable (never asserts absence,
+ * so a thin fetch can't wrongly flip the cell to a red "no tour").
+ */
+export function aptHasVirtualTourFromRawHtml(html: string): boolean | null {
+  if (!html || html.length < 500) return null;
+  return /matterport|\b3d\s*tours?\b|virtual\s*tours?\b/i.test(html) ? true : null;
+}
+
+/**
  * Extract the "View Property Website" outbound link from an Apartments.com listing's
  * RAW HTML, so we can confirm the listing actually links to the property's real site
  * (not a dead/wrong URL). On apartments.com this is a direct anchor to the property

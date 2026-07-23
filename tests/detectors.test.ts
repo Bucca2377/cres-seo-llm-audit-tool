@@ -6,6 +6,8 @@ import {
   aptAdvertisingFromRawHtml,
   aptConcessionFromRawHtml,
   aptWebsiteLinkFromRawHtml,
+  aptHasVirtualTourFromRawHtml,
+  recommendsGooglePhotos,
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
 } from "../lib/detectors";
@@ -100,6 +102,21 @@ test("apts: reads the listing's OWN concession from raw HTML (not 'July 3', not 
   );
   // No specials section at all -> null.
   assert.equal(aptConcessionFromRawHtml("<html><body>no specials</body></html>"), null);
+});
+
+test("apts: detects a Matterport/3D virtual tour from raw HTML (fixes the flaky media-count read)", () => {
+  const withTour = "<html>" + "x".repeat(600) + '<div class="tab">Matterport 3D Tours</div> ...</html>';
+  assert.equal(aptHasVirtualTourFromRawHtml(withTour), true);
+  assert.equal(aptHasVirtualTourFromRawHtml("<html>" + "x".repeat(600) + " no tour markers here </html>"), null);
+  assert.equal(aptHasVirtualTourFromRawHtml("short"), null);
+});
+
+test("recs: DROPS any Google Business Profile photo recommendation (hard rule)", () => {
+  assert.equal(recommendsGooglePhotos("Verify and refresh Google Business Profile photo gallery. Review the current photo set."), true);
+  assert.equal(recommendsGooglePhotos("Upload professional photos to the Google Business Profile."), true);
+  // Not about Google photos -> kept.
+  assert.equal(recommendsGooglePhotos("Complete the Google Business Profile description and hours."), false);
+  assert.equal(recommendsGooglePhotos("Upgrade the website photo gallery."), false);
 });
 
 test("apts: extracts the 'View Property Website' outbound link from raw HTML", () => {

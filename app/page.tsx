@@ -32,7 +32,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle, recommendsCreatingConcession } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsNonGoogleFeatureOnGoogle, recommendsCreatingConcession, recommendsGooglePhotos } from "@/lib/detectors";
 import { missingFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -3166,14 +3166,16 @@ Recommendation rules (STRICT):
         // so we never dump raw JSON to the UI.
         const rawText = rResp.content?.[0]?.text || "";
         recommendations = parseRecCards(rawText);
-        // Deterministic backstop: if the site already has an FAQ page, drop any rec
-        // that tells them to CREATE/PUBLISH a new one (the model does this when the
-        // prompt doesn't surface the existing page). "Add schema to the existing FAQ"
-        // (verb "add") is NOT dropped — only create/publish/build/launch/new + FAQ.
-        if (faqPagePath && Array.isArray(recommendations)) {
+        if (Array.isArray(recommendations)) {
           recommendations = recommendations.filter((c) => {
             const t = `${c.title || ""}. ${c.what || ""}`;
-            return !(/\b(creat\w*|publish\w*|build\w*|launch\w*|develop\w*|new)\b[\s\S]{0,50}(faq|frequently[-\s]?asked)/i.test(t));
+            // HARD RULE: never recommend anything about the Google Business Profile
+            // photo gallery (applies to every audit, not just marketing).
+            if (recommendsGooglePhotos(t)) return false;
+            // If the site already has an FAQ page, drop any rec to CREATE/PUBLISH a new
+            // one. "Add schema to the existing FAQ" (verb "add") is NOT dropped.
+            if (faqPagePath && /\b(creat\w*|publish\w*|build\w*|launch\w*|develop\w*|new)\b[\s\S]{0,50}(faq|frequently[-\s]?asked)/i.test(t)) return false;
+            return true;
           });
         }
       } catch {
@@ -4132,6 +4134,7 @@ function MarketingAuditTab({
       // the raw HTML we must NOT trust its apts hours for the consistency check.
       let aptHoursVerified = false;
       let aptWebsiteUrl: string | null = null;
+      let aptHasVirtualTour = false;
       if (current.apartmentsUrl && aptRead) {
         try {
           const sr = await fetch("/api/apts-status", {
@@ -4144,6 +4147,7 @@ function MarketingAuditTab({
             officeHours?: Record<string, string> | null;
             concession?: string | null;
             websiteUrl?: string | null;
+            virtualTour?: boolean | null;
           };
           const rawFetchOk = typeof sj.advertising === "boolean";
           if (rawFetchOk) {
@@ -4165,6 +4169,9 @@ function MarketingAuditTab({
           // The listing's "View Property Website" outbound link (direct anchor to the
           // property domain) — used below to verify it reaches the real site.
           if (sj.websiteUrl) aptWebsiteUrl = sj.websiteUrl;
+          // Matterport / 3D / virtual-tour PRESENCE from raw HTML — reliable, unlike
+          // the model's flip-flopping media-summary count.
+          if (sj.virtualTour === true) aptHasVirtualTour = true;
         } catch {
           /* keep the web_fetch-based read */
         }
@@ -4235,6 +4242,10 @@ function MarketingAuditTab({
       // sub-pages/widgets, so the model marks present features "missing" — but the
       // signals survive in the crawled nav/buttons/footer text.
       const websiteFeatures = detectWebsiteFeatures(siteText || "");
+      // How many DISTINCT phone numbers the crawl actually found on the website — used
+      // to guard a "standardize the phone number across pages" rec: with <2 there is
+      // no website inconsistency to fix (the model has cited numbers that aren't there).
+      const websitePhoneCount = new Set(extractPhones(siteText || "")).size;
 
       // --- Website-link check: does the "Website" link on the Google listing
       // actually reach the property's live site? A missing, broken, or wrong-domain
@@ -4483,6 +4494,26 @@ RECOMMENDATION RULES (match the rest of the app exactly):
           if ((websiteFeatures.tourScheduling || leasingPlatform) && /schedule\s+(a\s+|your\s+)?tour|self[-\s]?schedul|tour\s+scheduling|booking\s+widget/i.test(t)) return false;
           if ((websiteFeatures.onlineApplication || leasingPlatform) && /online\s+application|apply\s+(now|online)|application\s+portal|lease\s+now/i.test(t)) return false;
         }
+        // HARD RULE (was prompt-only, model kept violating it): never recommend
+        // anything about the Google Business Profile photo gallery.
+        if (recommendsGooglePhotos(t)) return false;
+        // The Apartments.com listing already HAS a virtual tour (Matterport/3D
+        // confirmed in raw HTML) — drop any "add a virtual tour to Apartments.com" rec.
+        if (aptHasVirtualTour && /apartments\.?com/i.test(t) && /virtual\s*tour|matterport|3d\s*tour/i.test(t)) return false;
+        // Drop recs built on a crawl ARTIFACT: Google Street View's "Sorry, we have no
+        // imagery here" fallback on a neighborhood map isn't a content gap — the model
+        // read it as "the page has no imagery" and recommended adding photos.
+        if (/no imagery here|we have no imagery|sorry,?\s*we have no imagery/i.test(t)) return false;
+        // Drop a "standardize the phone number across the website" rec unless the crawl
+        // actually found 2+ distinct numbers on the site — otherwise the model has
+        // cited a number that isn't displayed (often a widget/tracking number it
+        // hallucinated as a page inconsistency).
+        if (
+          websitePhoneCount < 2 &&
+          /\b(phone|tracking)\s*(number|line)|\bphone\s+number\b/i.test(t) &&
+          /\b(standardiz\w*|consisten\w*|unif\w*|single|one\s+number|multiple|across\s+(all\s+)?(the\s+)?(website\s+)?pages|differ\w*|conflict\w*|fragment\w*|inconsisten\w*)\b/i.test(t)
+        )
+          return false;
         return true;
       });
       // When the Apartments.com listing is DARK, inject a fixed recommendation to
@@ -4691,17 +4722,22 @@ RECOMMENDATION RULES (match the rest of the app exactly):
               : { status: "amber", note: "Gallery page exists but images weren’t captured this run — verify live." };
         }
       }
-      // Virtual tour on Apartments.com is deterministic from the listing's media
-      // summary (read reliably by readApartmentsListing) — media counts don't
-      // lie. >=1 virtual tour -> green; photos-but-zero-tours -> a real red that
-      // stands (the read succeeded). Unknown counts -> leave the model + clamp.
-      if (aptRead && aptRead.ok && aptRead.mediaCounts.virtualTours !== null) {
+      // Virtual tour on Apartments.com. A Matterport/3D/virtual-tour marker in the
+      // RAW HTML is the authoritative PRESENCE signal (the model's media-summary
+      // count flip-flops — it reported "6 tours" one run and "none" the next, and
+      // missed the Matterport tab entirely). Trust raw HTML first; only fall back to
+      // the media count when the raw fetch was inconclusive.
+      if (aptRead && aptRead.ok && aptRead.advertising !== false) {
         const vtRow = consistency.find((r) => /virtual tour/i.test(r?.label || ""));
         if (vtRow) {
-          const vts = aptRead.mediaCounts.virtualTours;
-          vtRow.apartments = vts > 0
-            ? { status: "green", note: `Media summary lists ${vts} virtual tour${vts > 1 ? "s" : ""}.` }
-            : { status: "red", note: "Media summary shows no virtual tour on the listing." };
+          if (aptHasVirtualTour) {
+            vtRow.apartments = { status: "green", note: "Matterport / 3D tour present on the listing." };
+          } else if (aptRead.mediaCounts.virtualTours !== null) {
+            const vts = aptRead.mediaCounts.virtualTours;
+            vtRow.apartments = vts > 0
+              ? { status: "green", note: `Media summary lists ${vts} virtual tour${vts > 1 ? "s" : ""}.` }
+              : { status: "amber", note: "No virtual tour found in the media summary — verify on the listing." };
+          }
         }
       }
       // Photo grades captured to drive the Google-vs-controlled comparison below:
