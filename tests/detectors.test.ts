@@ -51,6 +51,20 @@ test("concession: does NOT false-fire on ordinary fee/deposit language", () => {
   assert.equal(detectWebsiteSpecial(""), null);
 });
 
+test("concession: strips a leaked crawl-transcript header from the special (the Forest Cove bug)", () => {
+  // The crawl transcript joins pages with "=== <url> (status 200) ===" separators.
+  // A greedy match used to reach back across one and prepend "com/ (status 200) ==="
+  // to the special AND push the real wording past the length cap ("…OF YOU" truncated).
+  const transcript =
+    "=== https://forestcovedenver.com/ (status 200) === LOOK & LEASE: GET 1 MONTH FREE WHEN YOU APPLY WITHIN 48 HOURS OF YOUR TOUR! === https://forestcovedenver.com/floorplans/ (status 200) === Floor Plans";
+  const special = detectWebsiteSpecial(transcript);
+  assert.ok(special, "should still detect the special");
+  assert.doesNotMatch(special!, /status|===|com\//i, "no transcript header/URL/status noise");
+  assert.match(special!, /look\s*&\s*lease/i);
+  assert.match(special!, /1 month free/i);
+  assert.match(special!, /48 hours of your tour/i, "not truncated mid-phrase");
+});
+
 test("concession: specialFromHtml pulls a clean string out of escaped raw HTML", () => {
   // Mimics the embedded-JSON form the special arrives in from Bright Data raw HTML.
   const raw =

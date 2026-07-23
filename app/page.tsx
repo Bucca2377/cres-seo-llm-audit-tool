@@ -4716,10 +4716,23 @@ Return ONLY this JSON object, no prose before or after:
           // collapsed-view guess as a graded schedule; mark it verify (and it was never
           // fed into the comparison, so it didn't create a false conflict either).
           else if (!aptIsDark && !aptHoursVerified && aptRead?.ok) {
-            hoursRow.apartments = {
-              status: "amber",
-              note: "Full weekly hours weren’t readable from the listing this run — verify on Apartments.com (the listing collapses them behind “View All Hours”).",
-            };
+            // When the website AND Google already agree on the hours, they're
+            // established — a lone amber on Apartments.com (whose collapsed "View All
+            // Hours" display we couldn't parse this run) reads as a problem when there
+            // isn't one. Show it consistent, transparently noting we didn't separately
+            // parse the listing. Only fall back to amber "verify" when we DON'T have
+            // two agreeing authoritative sources to stand on.
+            const siteGoogleAgree =
+              hoursVerdicts.website?.status === "green" && hoursVerdicts.google?.status === "green";
+            hoursRow.apartments = siteGoogleAgree
+              ? {
+                  status: "green",
+                  note: "Hours match across your website and Google; Apartments.com shows them behind “View All Hours” (not separately parsed this run).",
+                }
+              : {
+                  status: "amber",
+                  note: "Full weekly hours weren’t readable from the listing this run — verify on Apartments.com (the listing collapses them behind “View All Hours”).",
+                };
           }
         }
       }
@@ -4739,12 +4752,18 @@ Return ONLY this JSON object, no prose before or after:
           if (present) row.website = { status: "green", note: greenNote };
           else if (row.website?.status === "red") row.website = { status: "amber", note: verifyNote };
         };
-        setWeb(
-          /preferred employer/i,
-          feats.preferredEmployer,
-          "Preferred Employer Program page is present on the site.",
-          "Couldn’t confirm a preferred-employer page from the capture — verify live."
-        );
+        // Preferred-employer is an OPTIONAL program (like a concession) — its absence
+        // is not a deficiency, so it must never read as a to-do. GREEN when we
+        // positively detect the page; otherwise neutral N/A, NOT an amber "verify live"
+        // (a capture miss on an optional feature isn't a finding).
+        {
+          const peRow = consistency.find((r) => /preferred employer/i.test(r?.label || ""));
+          if (peRow) {
+            peRow.website = feats.preferredEmployer
+              ? { status: "green", note: "Preferred Employer Program page is present on the site." }
+              : { status: "na", note: "No preferred-employer page detected on the site (optional program)." };
+          }
+        }
         setWeb(
           /virtual tour/i,
           feats.virtualTour || aptVT,

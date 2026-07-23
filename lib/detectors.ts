@@ -29,10 +29,21 @@ export const CONCESSION_RE =
  */
 export function detectWebsiteSpecial(siteText: string): string | null {
   const flat = (siteText || "").replace(/\s+/g, " ");
-  const sentence = flat.match(new RegExp("[^.!?\\n]*(?:" + CONCESSION_RE.source + ")[^.!?\\n]*", "i"));
+  // Exclude "=" from the sentence window: the crawl transcript joins pages with a
+  // "=== <url> (status 200) ===" header, and a greedy match otherwise reaches back
+  // across that separator and prepends the header's URL/status noise to the special
+  // (e.g. "com/ (status 200) === LOOK & LEASE…"), which also pushed the real wording
+  // past the 90-char cap and truncated it. Stopping at "=" keeps the match on one page.
+  const sentence = flat.match(new RegExp("[^.!?\\n=]*(?:" + CONCESSION_RE.source + ")[^.!?\\n=]*", "i"));
   if (!sentence) return null;
+  let raw = sentence[0];
+  // Belt-and-suspenders: if a transcript header still leaked in on some other
+  // separator, drop everything up to its closing "===" or "(status NNN)" marker.
+  const sep = raw.lastIndexOf("===");
+  if (sep >= 0) raw = raw.slice(sep + 3);
+  raw = raw.replace(/.*\(status\s+\d+\)\s*/i, ""); // raw is already single-line (whitespace collapsed)
   return (
-    sentence[0]
+    raw
       .replace(/\\+/g, " ") // drop JSON-escape residue (\/, \", \\) that leaks in from raw HTML
       .replace(/\s+/g, " ")
       .replace(/^[^A-Za-z0-9$]+/, "")
