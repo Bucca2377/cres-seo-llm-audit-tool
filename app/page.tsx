@@ -2797,7 +2797,7 @@ function SEOAudit({
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        `Clear the SEO audit history for "${property.name}"?\n\nThis wipes the SEO results and the rank-trend snapshots (the before/after baseline), so the next SEO run starts as a clean first run. Marketing, Review, and AI-rank history are NOT affected. This cannot be undone.`
+        `Clear the SEO audit history for "${property.name}"?\n\nThis wipes the SEO results, the rank-trend snapshots (the before/after baseline), AND the saved set of tracked search phrases — so the next SEO run GENERATES A FRESH phrase set and starts a clean first-run baseline. Marketing, Review, and AI-rank history are NOT affected. This cannot be undone.`
       )
     ) {
       return;
@@ -2805,6 +2805,11 @@ function SEOAudit({
     const cleaned: Property = { ...property };
     delete (cleaned as unknown as Record<string, unknown>).seoAudit;
     delete (cleaned as unknown as Record<string, unknown>).seoRankSnapshots;
+    // Also clear the sticky query set (both the current and legacy fields) — the run
+    // reuses trackedQueries verbatim when present, so without this the "clean first
+    // run" would silently reload the OLD phrases and never regenerate.
+    delete (cleaned as unknown as Record<string, unknown>).trackedQueries;
+    delete (cleaned as unknown as Record<string, unknown>).pinnedQueries;
     onUpdateProperty(cleaned);
     setResults(null);
     setStage("idle");
