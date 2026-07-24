@@ -34,6 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
+import { extractAutocompleteSuggestions, finalizeQuerySet } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -2864,55 +2865,116 @@ function SEOAudit({
           queries.push(q);
         }
       } else {
-        // First run for this property: auto-generate the starting set.
-        setProgress("Generating relevant search queries...");
+        // First run for this property: build a starting set GROUNDED IN REAL SEARCH
+        // DEMAND rather than the model's guess. Three stages:
+        //  (A) the model identifies the property's real submarket (neighborhood/suburb,
+        //      county, nearby major employers) and drafts localized seed phrases — NOT
+        //      the broad metro name, NOT invented amenity+micro-street combos;
+        //  (B) we expand those seeds through Google Autocomplete, whose suggestions come
+        //      straight from actual search volume (what people really type);
+        //  (C) the model picks the final phrases from those real suggestions, targeted
+        //      to the submarket. Each stage falls back gracefully. First run only — the
+        //      set is then sticky (saved as trackedQueries below).
         const amenitiesStr = currentProperty.amenities.slice(0, 8).join(", ") || "(none specified)";
-      const unitType = (currentProperty.propertyType || "apartments").trim();
-      const unitWord = unitType.toLowerCase();
-      const bedroomTypes = (currentProperty.bedroomTypes || "").trim();
-      const queriesPrompt = `Generate exactly 6 highly relevant Google search queries that prospective renters would use to find a home like ${currentProperty.name}.
+        const unitType = (currentProperty.propertyType || "apartments").trim();
+        const unitWord = unitType.toLowerCase();
+        const bedroomTypes = (currentProperty.bedroomTypes || "").trim();
+
+        // (A) Submarket anchors + seed phrases.
+        setProgress("Mapping the property's local submarket…");
+        const seedPrompt = `You are choosing Google search phrases to TRACK for a rental property. First identify the LOCAL SUBMARKET a real renter would search, then draft seed phrases.
 
 Property: ${currentProperty.name}
 Address: ${currentProperty.address}
-Property type: ${unitType}${bedroomTypes ? `\nBedroom types offered: ${bedroomTypes}` : ""}
+Type: ${unitType}${bedroomTypes ? `\nBedroom types: ${bedroomTypes}` : ""}
 Amenities: ${amenitiesStr}
 
-CRITICAL: This is a "${unitType}" community. Use that product word ("${unitWord}") in the queries — do NOT default to the generic word "apartments" unless the type genuinely is apartments. Search the way a renter looking for THIS kind of home would.
+Rules:
+- Anchor to the property's SPECIFIC submarket: its neighborhood or suburb, its county, and 1-2 MAJOR nearby employers/institutions (hospital, university, military base, corporate campus, downtown district) that exist for THIS address.
+- Do NOT use the broad metro name alone. For a Denver-area property, prefer the neighborhood or suburb (e.g. "Stapleton", "Aurora") over just "Denver".
+- Do NOT invent hyper-specific amenity + micro-street combinations no one types.
+- Phrases must be how renters ACTUALLY search (type + place, bedroom + place, "near <employer>"), with real demand.
+- Use the product word "${unitWord}" (not "apartments" unless it genuinely is apartments).
 
-Favor WINNABLE, specific/local searches over broad metro-level head terms. Anchor queries to the property's TOWN, suburb, neighborhood, county, or a nearby landmark/employer/university/district — NOT the big metro name. Broad head terms like "${unitWord} for rent in <big city>" are the most expensive and slowest to rank and are NOT the near-term opportunity, so include at most ONE of them.
+Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["8 short seed phrases"]}`;
 
-Mix the 6 queries as follows:
-- 1 brand query (just the property name or a slight variant)
-- 1 type + specific-locale query using the exact town/suburb/neighborhood, not the metro (e.g. "${unitWord} in <town or neighborhood>")
-- ${bedroomTypes
-        ? `1 bedroom-specific query using a real bedroom count from "${bedroomTypes}" tied to the town/neighborhood (e.g. "3 bedroom ${unitWord} in <town>")`
-        : `1 bedroom-count query tied to the town/neighborhood (e.g. "2 bedroom ${unitWord} in <town>")`}
-- 2 long-tail queries combining a key amenity with the specific town/neighborhood
-- 1 "near <local landmark / employer / university / district>" query
-
-Return ONLY a JSON array of 6 strings, no prose:
-["query 1", "query 2", "query 3", "query 4", "query 5", "query 6"]`;
-
-      const qResp = await callAI({ prompt: queriesPrompt, maxTokens: 400 });
-      const qText = qResp.content?.[0]?.text || "";
-      const qMatch = qText.match(/\[[\s\S]*\]/);
-      if (!qMatch) throw new Error("Could not generate query candidates.");
-      const autoQueries = JSON.parse(qMatch[0]) as string[];
-      if (!Array.isArray(autoQueries) || autoQueries.length === 0) {
-        throw new Error("No queries returned.");
-      }
-
-        // Merge any legacy pins with the generated set (first run only),
-        // de-duped case-insensitively.
-        const pinnedSeed = (currentProperty.pinnedQueries || []).map((q) => q.trim()).filter(Boolean);
-        const seenQ = new Set<string>();
-        queries = [];
-        for (const q of [...pinnedSeed, ...autoQueries]) {
-          const key = q.trim().toLowerCase();
-          if (!key || seenQ.has(key)) continue;
-          seenQ.add(key);
-          queries.push(q.trim());
+        let anchors: { neighborhood: string; county: string; employers: string[]; seeds: string[] } = {
+          neighborhood: "",
+          county: "",
+          employers: [],
+          seeds: [],
+        };
+        try {
+          const sResp = await callAI({ prompt: seedPrompt, maxTokens: 500 });
+          const sText = sResp.content?.[0]?.text || "";
+          const sMatch = sText.match(/\{[\s\S]*\}/);
+          if (sMatch) {
+            const parsed = JSON.parse(sMatch[0]) as Partial<typeof anchors>;
+            anchors = {
+              neighborhood: typeof parsed.neighborhood === "string" ? parsed.neighborhood : "",
+              county: typeof parsed.county === "string" ? parsed.county : "",
+              employers: Array.isArray(parsed.employers) ? parsed.employers.filter((e): e is string => typeof e === "string") : [],
+              seeds: Array.isArray(parsed.seeds) ? parsed.seeds.filter((e): e is string => typeof e === "string") : [],
+            };
+          }
+        } catch {
+          /* fall back to the seed-free path below */
         }
+
+        // (B) Expand seeds via Google Autocomplete (real demand). Best-effort, parallel.
+        setProgress("Checking what renters actually search (Google Autocomplete)…");
+        const suggestionPool: string[] = [];
+        await Promise.all(
+          anchors.seeds.slice(0, 6).map(async (seed) => {
+            try {
+              const ac = await callSerp({ query: seed, engine: "google_autocomplete" });
+              suggestionPool.push(...extractAutocompleteSuggestions(ac));
+            } catch {
+              /* skip this seed's expansion */
+            }
+          })
+        );
+        const dedupPool = Array.from(new Set(suggestionPool.map((s) => s.trim()).filter(Boolean)));
+
+        // (C) Pick the final phrases from the REAL suggestions, targeted to the submarket.
+        setProgress("Selecting the phrases to track…");
+        let picked: string[] = [];
+        if (dedupPool.length) {
+          const pickPrompt = `These are REAL Google Autocomplete suggestions (actual search demand) gathered for ${currentProperty.name} (${currentProperty.address}):
+
+${dedupPool.slice(0, 60).map((s) => `- ${s}`).join("\n")}
+
+Submarket: neighborhood="${anchors.neighborhood}", county="${anchors.county}", employers=${JSON.stringify(anchors.employers)}.
+
+Pick the 5 BEST phrases to track. Do NOT include the property's own name (tracked separately). Requirements:
+- Geographically TARGETED to the submarket above (neighborhood/suburb/county/employer), NOT the broad metro name alone.
+- Real demand: choose phrases from the list above verbatim wherever possible.
+- Diverse: a couple location variants, one bedroom-count phrase if available, one "near <employer/institution>" phrase.
+- Use "${unitWord}" as the product word.
+Return ONLY a JSON array of 5 strings.`;
+          try {
+            const pResp = await callAI({ prompt: pickPrompt, maxTokens: 400 });
+            const pText = pResp.content?.[0]?.text || "";
+            const pMatch = pText.match(/\[[\s\S]*\]/);
+            if (pMatch) {
+              const arr = JSON.parse(pMatch[0]) as unknown[];
+              if (Array.isArray(arr)) picked = arr.filter((x): x is string => typeof x === "string");
+            }
+          } catch {
+            /* fall through to the drafted seeds */
+          }
+        }
+
+        // Fallbacks: model pick -> drafted seeds -> a minimal type+location default,
+        // so the audit always has something to check even if AI/autocomplete failed.
+        if (picked.length === 0) picked = anchors.seeds.slice(0, 5);
+        if (picked.length === 0) {
+          const loc = extractLocation(currentProperty.address) || currentProperty.address;
+          picked = [`${unitWord} in ${loc}`, `${unitWord} for rent ${loc}`, `${unitWord} near ${loc}`];
+        }
+
+        queries = finalizeQuerySet(currentProperty.name, picked, 6);
+        if (queries.length === 0) throw new Error("Could not generate query candidates.");
       }
 
       // Stage 2: parallel rank checks

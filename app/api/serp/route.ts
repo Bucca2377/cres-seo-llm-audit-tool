@@ -6,7 +6,7 @@ export const maxDuration = 30;
 interface SerpRequest {
   query?: string;
   location?: string;
-  engine?: "google" | "google_maps" | "google_maps_reviews" | "google_maps_photos";
+  engine?: "google" | "google_maps" | "google_maps_reviews" | "google_maps_photos" | "google_autocomplete";
   data_id?: string;
   /** google_maps_reviews: "newestFirst" | "mostRelevant" | "highestRating" | "lowestRating". */
   sort_by?: string;

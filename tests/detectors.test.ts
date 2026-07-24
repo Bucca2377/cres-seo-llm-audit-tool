@@ -16,6 +16,7 @@ import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from 
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
+import { extractAutocompleteSuggestions, finalizeQuerySet } from "../lib/seo-queries";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -477,6 +478,47 @@ test("review-rank: no ratings anywhere -> empty (nothing to render)", () => {
   );
   assert.equal(ranked.length, 0);
   assert.equal(selfReviewPosition(ranked), null);
+});
+
+// ----- SEO query generation (autocomplete grounding + finalize) --------------
+
+test("seo-queries: extractAutocompleteSuggestions reads the SerpAPI payload shape", () => {
+  const payload = {
+    suggestions: [
+      { value: "apartments in aurora co" },
+      { value: "apartments in aurora co under 1500" },
+      "cheap apartments aurora", // tolerate a bare-string variant
+      { value: "  " }, // dropped (blank)
+      { notValue: "x" }, // dropped (no value)
+    ],
+  };
+  assert.deepEqual(extractAutocompleteSuggestions(payload), [
+    "apartments in aurora co",
+    "apartments in aurora co under 1500",
+    "cheap apartments aurora",
+  ]);
+  assert.deepEqual(extractAutocompleteSuggestions({}), []);
+  assert.deepEqual(extractAutocompleteSuggestions(null), []);
+});
+
+test("seo-queries: finalizeQuerySet leads with brand, dedupes, caps", () => {
+  const q = finalizeQuerySet(
+    "Forest Cove",
+    [
+      "apartments near Anschutz Medical Campus",
+      "APARTMENTS NEAR ANSCHUTZ MEDICAL CAMPUS", // case-dupe -> dropped
+      "2 bedroom apartments Stapleton",
+      "apartments in Arapahoe County",
+      "apartments in Stapleton Denver",
+      "cheap apartments Aurora",
+      "one more that exceeds the cap",
+    ],
+    6
+  );
+  assert.equal(q[0], "Forest Cove"); // brand always first
+  assert.equal(q.length, 6); // capped
+  assert.equal(new Set(q.map((s) => s.toLowerCase())).size, 6); // no dupes
+  assert.ok(!q.includes("one more that exceeds the cap")); // trimmed by the cap
 });
 
 // ----- Bright Data fetch: retry past the intermittent empty body -------------

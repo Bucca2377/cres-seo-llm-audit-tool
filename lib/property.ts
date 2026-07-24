@@ -813,7 +813,7 @@ function emitSpend(detail: {
 export async function callSerp(opts: {
   query?: string;
   location?: string;
-  engine?: "google" | "google_maps" | "google_maps_reviews" | "google_maps_photos";
+  engine?: "google" | "google_maps" | "google_maps_reviews" | "google_maps_photos" | "google_autocomplete";
   data_id?: string;
   sort_by?: string;
   next_page_token?: string;
