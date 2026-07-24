@@ -16,7 +16,7 @@ import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from 
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries } from "../lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord } from "../lib/seo-queries";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -539,6 +539,35 @@ test("seo-queries: amenityCountyQueries emits searches only for amenities presen
   // No county / no tracked amenities -> none (never fabricates an amenity).
   assert.deepEqual(amenityCountyQueries("Pool", ""), []);
   assert.deepEqual(amenityCountyQueries("Clubhouse, Business Center, Package Lockers", "Denver County"), []);
+});
+
+test("seo-queries: searchUnitWord maps industry types to what renters actually type", () => {
+  assert.equal(searchUnitWord("Multifamily"), "apartments");
+  assert.equal(searchUnitWord("multi-family"), "apartments");
+  assert.equal(searchUnitWord("Apartment Homes"), "apartments");
+  assert.equal(searchUnitWord(""), "apartments");
+  assert.equal(searchUnitWord("Townhome Community"), "townhomes");
+  assert.equal(searchUnitWord("Condominiums"), "condos");
+  assert.equal(searchUnitWord("Senior Living 55+"), "senior apartments");
+  assert.equal(searchUnitWord("Student Housing"), "student apartments");
+  assert.equal(searchUnitWord("Single-Family Rentals"), "houses for rent");
+});
+
+test("seo-queries: finalizeQuerySet drops sale-intent phrases and collapses base near-dupes", () => {
+  // Sale/purchase intent is wrong for a rental audit -> dropped (brand always kept).
+  assert.deepEqual(
+    finalizeQuerySet("Forrest Cove", [
+      "apartments for rent aurora",
+      "multifamily for sale aurora",
+      "apartments to buy denver",
+      "cheap apartments aurora",
+    ], 10),
+    ["Forrest Cove", "apartments for rent aurora", "cheap apartments aurora"]
+  );
+  // "buckley afb" and "buckley space force base" are the same place -> one slot.
+  const nd = finalizeQuerySet("X", ["apartments near buckley afb", "apartments near buckley space force base"], 10);
+  assert.equal(nd.length, 2);
+  assert.equal(nd.filter((q) => /buckley/i.test(q)).length, 1);
 });
 
 test("seo-queries: finalizeQuerySet leads with brand, dedupes, caps", () => {

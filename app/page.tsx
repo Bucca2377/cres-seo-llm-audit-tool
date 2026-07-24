@@ -34,7 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries } from "@/lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord, isSalesIntent } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -2882,7 +2882,9 @@ function SEOAudit({
         //      set is then sticky (saved as trackedQueries below).
         const amenitiesStr = currentProperty.amenities.slice(0, 8).join(", ") || "(none specified)";
         const unitType = (currentProperty.propertyType || "apartments").trim();
-        const unitWord = unitType.toLowerCase();
+        // The word a RENTER actually types — never the industry term "multifamily"
+        // (which also makes autocomplete return for-sale/investor results).
+        const unitWord = searchUnitWord(currentProperty.propertyType || "");
         const bedroomTypes = (currentProperty.bedroomTypes || "").trim();
 
         // (A) Submarket anchors + seed phrases.
@@ -2899,7 +2901,9 @@ Rules:
 - Do NOT use the broad metro name alone. For a Denver-area property, prefer the neighborhood or suburb (e.g. "Stapleton", "Aurora") over just "Denver".
 - Do NOT invent hyper-specific amenity + micro-street combinations no one types.
 - Phrases must be how renters ACTUALLY search (type + place, bedroom + place, "near <employer>"), with real demand.
-- Use the product word "${unitWord}" (not "apartments" unless it genuinely is apartments).
+- These are RENTAL searches. NEVER use sale/purchase wording ("for sale", "to buy", "for sale by owner").
+- Use the word a renter types: "${unitWord}". Do NOT use industry jargon like "multifamily" or "multi-family".
+- Do NOT use a specific apartment community / competitor property name as a query; only generic phrases a stranger would type.
 
 Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. For "county", give the FULL county name the property sits in (e.g. "Arapahoe County").`;
 
@@ -2953,7 +2957,11 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
             }
           })
         );
-        const dedupPool = Array.from(new Set(suggestionPool.map((s) => s.trim()).filter(Boolean)));
+        // Drop for-sale / purchase suggestions here so the model never even sees them
+        // (autocomplete on investor-flavored seeds returns "… for sale" phrases).
+        const dedupPool = Array.from(
+          new Set(suggestionPool.map((s) => s.trim()).filter(Boolean))
+        ).filter((s) => !isSalesIntent(s));
 
         // (C) Pick the final phrases from the REAL suggestions, targeted to the submarket.
         setProgress("Selecting the phrases to track…");
@@ -2970,8 +2978,11 @@ Already tracked (do NOT repeat any of these): "${currentProperty.name}"${stockQu
 Pick 9 ADDITIONAL phrases to track. Requirements:
 - Geographically TARGETED to the submarket above (neighborhood/suburb/county/employer), NOT the broad metro name alone.
 - Real demand: choose phrases from the list above verbatim wherever possible.
+- RENTAL intent only. Reject anything about buying/selling ("for sale", "to buy", "for sale by owner", "multi family for sale").
+- Use the renter's word "${unitWord}"; NEVER industry jargon like "multifamily"/"multi-family".
+- Do NOT pick a specific apartment community / competitor property name (e.g. "Fitzsimons Flats") — only generic phrases a stranger types.
+- No near-duplicates (e.g. don't include both "buckley afb" and "buckley space force base").
 - Diverse and COMPLEMENTARY to what's already tracked: neighborhood/suburb variants, "near <employer/institution>", and the real price/quality modifiers renters add ("cheap", "affordable", "luxury", "new"). An amenity tied to a neighborhood or employer is fine, but do NOT restate the plain bedroom+county or amenity+county phrases already tracked.
-- Use "${unitWord}" as the product word.
 Return ONLY a JSON array of 9 strings.`;
           try {
             const pResp = await callAI({ prompt: pickPrompt, maxTokens: 400 });

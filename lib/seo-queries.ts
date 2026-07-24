@@ -75,6 +75,38 @@ export function amenityCountyQueries(amenities: string, geo: string, cap = 3): s
   return out;
 }
 
+/**
+ * The word a RENTER actually types for this property type. Industry
+ * classifications ("multifamily", "multi-family", "apartment community") are NOT
+ * consumer search terms — a renter types "apartments". Only genuine consumer
+ * categories map to their own word. Prevents the "multifamily aurora" class of
+ * unnatural query (and the sale-intent results autocomplete returns for the
+ * investor term "multifamily").
+ */
+export function searchUnitWord(propertyType: string): string {
+  const t = (propertyType || "").toLowerCase();
+  if (/town\s?home|town\s?house/.test(t)) return "townhomes";
+  if (/\bcondos?\b|condominium/.test(t)) return "condos";
+  if (/\bsenior\b|55\s*\+|active adult/.test(t)) return "senior apartments";
+  if (/\bstudent\b/.test(t)) return "student apartments";
+  if ((/single[-\s]?family/.test(t) || /\bhouses?\b/.test(t)) && !/apart/.test(t)) return "houses for rent";
+  // multifamily / multi-family / apartment community / apartment homes / empty / other
+  return "apartments";
+}
+
+/**
+ * Phrases that betray SALE/purchase intent — wrong for a RENTAL audit. Autocomplete
+ * for investor terms like "multifamily" surfaces these ("multifamily for sale …"),
+ * so they must be filtered out of the tracked set.
+ */
+export const SALES_INTENT_RE =
+  /\bfor[-\s]?sale\b|homes?\s+for\s+sale|\bto\s+buy\b|\bbuy\b|\bpurchase\b|investment\s+propert|\bfor\s+sale\s+by\s+owner\b|\bmls\b/i;
+
+/** True when a query reads as a for-sale / purchase search rather than a rental. */
+export function isSalesIntent(q: string): boolean {
+  return SALES_INTENT_RE.test(q || "");
+}
+
 /** Pull the suggestion strings out of a SerpAPI google_autocomplete response. */
 export function extractAutocompleteSuggestions(serpData: unknown): string[] {
   const s = (serpData as { suggestions?: unknown })?.suggestions;
@@ -88,21 +120,37 @@ export function extractAutocompleteSuggestions(serpData: unknown): string[] {
 }
 
 /**
+ * Normalized dedupe key: lowercased, punctuation-flattened, and with the
+ * air/space-force-base variants collapsed so "buckley afb" and "buckley space force
+ * base" (the same place) don't both take a slot.
+ */
+function dedupeKey(t: string): string {
+  return t
+    .toLowerCase()
+    .replace(/\b(?:air|space)\s+force\s+base\b|\bafb\b|\bsfb\b/g, "base")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
  * Finalize the tracked-query set: the brand query (the property name) always leads
- * so a property is always checked for its own name, then the model's picks, deduped
+ * so a property is always checked for its own name, then the picks — with SALE-intent
+ * phrases dropped (rental audit) and near-duplicates collapsed — deduped
  * case-insensitively with empties dropped, capped at `cap`.
  */
 export function finalizeQuerySet(brand: string, picked: string[], cap = 6): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  const push = (q: string | undefined) => {
+  const push = (q: string | undefined, isBrand = false) => {
     const t = (q || "").trim();
-    const k = t.toLowerCase();
-    if (!t || seen.has(k)) return;
+    if (!t) return;
+    if (!isBrand && isSalesIntent(t)) return; // rental audit: no for-sale/buy phrases
+    const k = dedupeKey(t);
+    if (seen.has(k)) return;
     seen.add(k);
     out.push(t);
   };
-  push(brand);
+  push(brand, true);
   for (const q of picked || []) push(q);
   return out.slice(0, cap);
 }
