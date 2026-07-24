@@ -34,7 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries } from "@/lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -2929,6 +2929,11 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
         if (countyGeo && !/county/i.test(countyGeo)) countyGeo = `${countyGeo} County`;
         if (!countyGeo) countyGeo = (extractLocation(currentProperty.address) || "").trim();
         const stockBedroomQueries = bedroomCountyQueries(bedroomTypes, countyGeo);
+        // ALWAYS-tracked amenity-by-county searches, one per high-demand amenity the
+        // property actually has (pool, pet friendly, gym, …). Deterministic + gated on
+        // the property's amenities so it never claims one it lacks.
+        const stockAmenityQueries = amenityCountyQueries(currentProperty.amenities.join(" "), countyGeo, 3);
+        const stockQueries = [...stockBedroomQueries, ...stockAmenityQueries];
 
         // (B) Expand seeds via Google Autocomplete (real demand). Best-effort, parallel.
         setProgress("Checking what renters actually search (Google Autocomplete)…");
@@ -2955,12 +2960,12 @@ ${dedupPool.slice(0, 80).map((s) => `- ${s}`).join("\n")}
 
 Submarket: neighborhood="${anchors.neighborhood}", county="${anchors.county}", employers=${JSON.stringify(anchors.employers)}.
 
-Already tracked (do NOT repeat any of these): "${currentProperty.name}"${stockBedroomQueries.length ? `, ${stockBedroomQueries.map((q) => `"${q}"`).join(", ")}` : ""}.
+Already tracked (do NOT repeat any of these): "${currentProperty.name}"${stockQueries.length ? `, ${stockQueries.map((q) => `"${q}"`).join(", ")}` : ""}.
 
 Pick 9 ADDITIONAL phrases to track. Requirements:
 - Geographically TARGETED to the submarket above (neighborhood/suburb/county/employer), NOT the broad metro name alone.
 - Real demand: choose phrases from the list above verbatim wherever possible.
-- Diverse and COMPLEMENTARY to what's already tracked: neighborhood/suburb variants, "near <employer/institution>", and the real modifiers renters add (price, "cheap", "luxury", "pet friendly", "utilities included"). Do NOT just restate the bedroom+county phrases already tracked.
+- Diverse and COMPLEMENTARY to what's already tracked: neighborhood/suburb variants, "near <employer/institution>", and the real price/quality modifiers renters add ("cheap", "affordable", "luxury", "new"). An amenity tied to a neighborhood or employer is fine, but do NOT restate the plain bedroom+county or amenity+county phrases already tracked.
 - Use "${unitWord}" as the product word.
 Return ONLY a JSON array of 9 strings.`;
           try {
@@ -2991,8 +2996,9 @@ Return ONLY a JSON array of 9 strings.`;
         }
 
         // Final set (target 10): brand leads, then the always-tracked bedroom+county
-        // stock searches, then the demand-grounded picks fill the rest. Deduped + capped.
-        queries = finalizeQuerySet(currentProperty.name, [...stockBedroomQueries, ...picked], 10);
+        // and amenity+county stock searches, then the demand-grounded picks fill the
+        // rest. Deduped + capped.
+        queries = finalizeQuerySet(currentProperty.name, [...stockQueries, ...picked], 10);
         if (queries.length === 0) throw new Error("Could not generate query candidates.");
       }
 

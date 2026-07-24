@@ -16,7 +16,7 @@ import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from 
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries } from "../lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries } from "../lib/seo-queries";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -523,6 +523,22 @@ test("seo-queries: bedroomCountyQueries emits one stock search per floorplan pre
   assert.deepEqual(bedroomCountyQueries("Studio, 1 Bed", ""), []);
   assert.deepEqual(bedroomCountyQueries("", "Denver County"), []);
   assert.deepEqual(bedroomCountyQueries("call for details", "Denver County"), []);
+});
+
+test("seo-queries: amenityCountyQueries emits searches only for amenities present, in priority order, capped", () => {
+  assert.deepEqual(
+    amenityCountyQueries("Swimming Pool, Pet Friendly, Fitness Center, Garage Parking, In-Unit Washer/Dryer", "Denver County", 3),
+    [
+      "apartments with a pool in Denver County",
+      "pet friendly apartments in Denver County",
+      "apartments with a gym in Denver County",
+    ]
+  );
+  // Only amenities actually present.
+  assert.deepEqual(amenityCountyQueries("Pool, Clubhouse", "Adams County"), ["apartments with a pool in Adams County"]);
+  // No county / no tracked amenities -> none (never fabricates an amenity).
+  assert.deepEqual(amenityCountyQueries("Pool", ""), []);
+  assert.deepEqual(amenityCountyQueries("Clubhouse, Business Center, Package Lockers", "Denver County"), []);
 });
 
 test("seo-queries: finalizeQuerySet leads with brand, dedupes, caps", () => {

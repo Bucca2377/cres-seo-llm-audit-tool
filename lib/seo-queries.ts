@@ -52,6 +52,29 @@ export function bedroomCountyQueries(bedroomTypes: string, geo: string): string[
   return out;
 }
 
+/**
+ * Standard amenity-by-county searches to track, one per high-demand amenity the
+ * property actually offers (only what renters really search on). Gated on the
+ * property's amenities so it never claims an amenity the property lacks, in priority
+ * order (pool, pet friendly, gym, garage, in-unit laundry) and capped. Returns []
+ * when we don't know the geo or none of the tracked amenities are present.
+ */
+export function amenityCountyQueries(amenities: string, geo: string, cap = 3): string[] {
+  const g = (geo || "").trim();
+  if (!g) return [];
+  const a = (amenities || "").toLowerCase();
+  const out: string[] = [];
+  const add = (q: string) => {
+    if (out.length < cap) out.push(q);
+  };
+  if (/\bswimming pool\b|\bpool\b(?!\s*table)/.test(a)) add(`apartments with a pool in ${g}`);
+  if (/\bpets?\b|pet[-\s]?friendly|dog[-\s]?friendly|dog park/.test(a)) add(`pet friendly apartments in ${g}`);
+  if (/\bgym\b|fitness/.test(a)) add(`apartments with a gym in ${g}`);
+  if (/\bgarage\b|covered parking/.test(a)) add(`apartments with a garage in ${g}`);
+  if (/washer|dryer|in[-\s]?unit laundry/.test(a)) add(`apartments with in-unit laundry in ${g}`);
+  return out;
+}
+
 /** Pull the suggestion strings out of a SerpAPI google_autocomplete response. */
 export function extractAutocompleteSuggestions(serpData: unknown): string[] {
   const s = (serpData as { suggestions?: unknown })?.suggestions;
