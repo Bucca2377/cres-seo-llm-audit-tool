@@ -34,7 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet } from "@/lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -2896,7 +2896,7 @@ Rules:
 - Phrases must be how renters ACTUALLY search (type + place, bedroom + place, "near <employer>"), with real demand.
 - Use the product word "${unitWord}" (not "apartments" unless it genuinely is apartments).
 
-Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["8 short seed phrases"]}`;
+Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. For "county", give the FULL county name the property sits in (e.g. "Arapahoe County").`;
 
         let anchors: { neighborhood: string; county: string; employers: string[]; seeds: string[] } = {
           neighborhood: "",
@@ -2921,11 +2921,20 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["8
           /* fall back to the seed-free path below */
         }
 
+        // ALWAYS-tracked bedroom-by-county stock searches, one per floorplan the
+        // property actually offers (studio / 1 / 2 / 3). Deterministic, in the user's
+        // exact phrasing; guaranteed into the final set (only skipped when we can't
+        // determine the county or the property lists no matching floorplans).
+        let countyGeo = (anchors.county || "").trim();
+        if (countyGeo && !/county/i.test(countyGeo)) countyGeo = `${countyGeo} County`;
+        if (!countyGeo) countyGeo = (extractLocation(currentProperty.address) || "").trim();
+        const stockBedroomQueries = bedroomCountyQueries(bedroomTypes, countyGeo);
+
         // (B) Expand seeds via Google Autocomplete (real demand). Best-effort, parallel.
         setProgress("Checking what renters actually search (Google Autocomplete)…");
         const suggestionPool: string[] = [];
         await Promise.all(
-          anchors.seeds.slice(0, 6).map(async (seed) => {
+          anchors.seeds.slice(0, 8).map(async (seed) => {
             try {
               const ac = await callSerp({ query: seed, engine: "google_autocomplete" });
               suggestionPool.push(...extractAutocompleteSuggestions(ac));
@@ -2942,16 +2951,18 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["8
         if (dedupPool.length) {
           const pickPrompt = `These are REAL Google Autocomplete suggestions (actual search demand) gathered for ${currentProperty.name} (${currentProperty.address}):
 
-${dedupPool.slice(0, 60).map((s) => `- ${s}`).join("\n")}
+${dedupPool.slice(0, 80).map((s) => `- ${s}`).join("\n")}
 
 Submarket: neighborhood="${anchors.neighborhood}", county="${anchors.county}", employers=${JSON.stringify(anchors.employers)}.
 
-Pick the 5 BEST phrases to track. Do NOT include the property's own name (tracked separately). Requirements:
+Already tracked (do NOT repeat any of these): "${currentProperty.name}"${stockBedroomQueries.length ? `, ${stockBedroomQueries.map((q) => `"${q}"`).join(", ")}` : ""}.
+
+Pick 9 ADDITIONAL phrases to track. Requirements:
 - Geographically TARGETED to the submarket above (neighborhood/suburb/county/employer), NOT the broad metro name alone.
 - Real demand: choose phrases from the list above verbatim wherever possible.
-- Diverse: a couple location variants, one bedroom-count phrase if available, one "near <employer/institution>" phrase.
+- Diverse and COMPLEMENTARY to what's already tracked: neighborhood/suburb variants, "near <employer/institution>", and the real modifiers renters add (price, "cheap", "luxury", "pet friendly", "utilities included"). Do NOT just restate the bedroom+county phrases already tracked.
 - Use "${unitWord}" as the product word.
-Return ONLY a JSON array of 5 strings.`;
+Return ONLY a JSON array of 9 strings.`;
           try {
             const pResp = await callAI({ prompt: pickPrompt, maxTokens: 400 });
             const pText = pResp.content?.[0]?.text || "";
@@ -2967,13 +2978,21 @@ Return ONLY a JSON array of 5 strings.`;
 
         // Fallbacks: model pick -> drafted seeds -> a minimal type+location default,
         // so the audit always has something to check even if AI/autocomplete failed.
-        if (picked.length === 0) picked = anchors.seeds.slice(0, 5);
+        if (picked.length === 0) picked = anchors.seeds.slice(0, 9);
         if (picked.length === 0) {
           const loc = extractLocation(currentProperty.address) || currentProperty.address;
-          picked = [`${unitWord} in ${loc}`, `${unitWord} for rent ${loc}`, `${unitWord} near ${loc}`];
+          picked = [
+            `${unitWord} in ${loc}`,
+            `${unitWord} for rent ${loc}`,
+            `${unitWord} near ${loc}`,
+            `cheap ${unitWord} ${loc}`,
+            `luxury ${unitWord} ${loc}`,
+          ];
         }
 
-        queries = finalizeQuerySet(currentProperty.name, picked, 6);
+        // Final set (target 10): brand leads, then the always-tracked bedroom+county
+        // stock searches, then the demand-grounded picks fill the rest. Deduped + capped.
+        queries = finalizeQuerySet(currentProperty.name, [...stockBedroomQueries, ...picked], 10);
         if (queries.length === 0) throw new Error("Could not generate query candidates.");
       }
 

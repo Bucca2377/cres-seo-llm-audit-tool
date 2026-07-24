@@ -16,7 +16,7 @@ import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from 
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet } from "../lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries } from "../lib/seo-queries";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -499,6 +499,30 @@ test("seo-queries: extractAutocompleteSuggestions reads the SerpAPI payload shap
   ]);
   assert.deepEqual(extractAutocompleteSuggestions({}), []);
   assert.deepEqual(extractAutocompleteSuggestions(null), []);
+});
+
+test("seo-queries: bedroomCountyQueries emits one stock search per floorplan present", () => {
+  assert.deepEqual(bedroomCountyQueries("Studio, 1 Bed, 2 Bed, 3 Bed", "Arapahoe County"), [
+    "studio apartments to rent in Arapahoe County",
+    "one bedroom apartments to rent in Arapahoe County",
+    "2 bedroom apartments to rent in Arapahoe County",
+    "3 bedroom apartments to rent in Arapahoe County",
+  ]);
+  // Only the floorplans present, shared "bedroom" word ("1 & 2 bedroom").
+  assert.deepEqual(bedroomCountyQueries("1 & 2 Bedroom", "Denver County"), [
+    "one bedroom apartments to rent in Denver County",
+    "2 bedroom apartments to rent in Denver County",
+  ]);
+  // Ranges expand ("1-3 Bedrooms" -> 1, 2, 3).
+  assert.deepEqual(bedroomCountyQueries("1-3 Bedrooms", "Adams County"), [
+    "one bedroom apartments to rent in Adams County",
+    "2 bedroom apartments to rent in Adams County",
+    "3 bedroom apartments to rent in Adams County",
+  ]);
+  // No county -> none; no recognizable bedroom info -> none (never fabricates).
+  assert.deepEqual(bedroomCountyQueries("Studio, 1 Bed", ""), []);
+  assert.deepEqual(bedroomCountyQueries("", "Denver County"), []);
+  assert.deepEqual(bedroomCountyQueries("call for details", "Denver County"), []);
 });
 
 test("seo-queries: finalizeQuerySet leads with brand, dedupes, caps", () => {
