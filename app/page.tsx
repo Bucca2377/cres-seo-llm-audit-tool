@@ -34,7 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord, isSalesIntent } from "@/lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -2944,6 +2944,21 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
         const stockAmenityQueries = amenityCountyQueries(currentProperty.amenities.join(" "), countyGeo, 3);
         const stockQueries = [...stockBedroomQueries, ...stockAmenityQueries];
 
+        // Audience / price profile — used to drop searches aimed at the wrong renter
+        // pool: income-restricted / senior phrases (unless the property IS that) and
+        // "under $X" caps at or below the rent floor (which exclude the property).
+        const ptLower = (currentProperty.propertyType || "").toLowerCase();
+        const profileOpts = {
+          rentMin: currentProperty.priceMin,
+          rentMax: currentProperty.priceMax,
+          affordable: /affordable|income[-\s]?(?:based|restricted)|section\s*8|tax credit|lihtc|subsidized/.test(ptLower),
+          senior: /senior|55\s*\+|active adult/.test(ptLower),
+        };
+        const rentRange =
+          currentProperty.priceMin && currentProperty.priceMax
+            ? `$${currentProperty.priceMin.toLocaleString()}-$${currentProperty.priceMax.toLocaleString()}/mo`
+            : "";
+
         // (B) Expand seeds via Google Autocomplete (real demand). Best-effort, parallel.
         setProgress("Checking what renters actually search (Google Autocomplete)…");
         const suggestionPool: string[] = [];
@@ -2957,11 +2972,12 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
             }
           })
         );
-        // Drop for-sale / purchase suggestions here so the model never even sees them
-        // (autocomplete on investor-flavored seeds returns "… for sale" phrases).
+        // Drop for-sale/purchase AND off-profile (income-restricted/senior/sub-floor
+        // price) suggestions here so the model never even sees them — autocomplete on
+        // location seeds surfaces "low income …" and "… under $1000" a lot.
         const dedupPool = Array.from(
           new Set(suggestionPool.map((s) => s.trim()).filter(Boolean))
-        ).filter((s) => !isSalesIntent(s));
+        ).filter((s) => !isSalesIntent(s) && !isOffProfileQuery(s, profileOpts));
 
         // (C) Pick the final phrases from the REAL suggestions, targeted to the submarket.
         setProgress("Selecting the phrases to track…");
@@ -2979,6 +2995,7 @@ Pick 9 ADDITIONAL phrases to track. Requirements:
 - Geographically TARGETED to the submarket above (neighborhood/suburb/county/employer), NOT the broad metro name alone.
 - Real demand: choose phrases from the list above verbatim wherever possible.
 - RENTAL intent only. Reject anything about buying/selling ("for sale", "to buy", "for sale by owner", "multi family for sale").
+- This property rents ${rentRange || "at market rate"}${profileOpts.affordable ? "" : " (MARKET-RATE)"}.${profileOpts.affordable ? "" : ` Do NOT pick income-restricted/subsidized/senior searches ("low income", "income based", "section 8", "affordable housing", "62+", "senior").`}${currentProperty.priceMin ? ` Any price cap must fit that range — NEVER "under $${currentProperty.priceMin.toLocaleString()}" or lower.` : ""}
 - Use the renter's word "${unitWord}"; NEVER industry jargon like "multifamily"/"multi-family".
 - Do NOT pick a specific apartment community / competitor property name (e.g. "Fitzsimons Flats") — only generic phrases a stranger types.
 - No near-duplicates (e.g. don't include both "buckley afb" and "buckley space force base").
@@ -2997,9 +3014,13 @@ Return ONLY a JSON array of 9 strings.`;
           }
         }
 
+        // Deterministic backstop: drop any wrong-audience / sub-floor-price phrase the
+        // model picked anyway (belt-and-suspenders over the pool filter + prompt rules).
+        picked = picked.filter((q) => !isOffProfileQuery(q, profileOpts));
+
         // Fallbacks: model pick -> drafted seeds -> a minimal type+location default,
         // so the audit always has something to check even if AI/autocomplete failed.
-        if (picked.length === 0) picked = anchors.seeds.slice(0, 9);
+        if (picked.length === 0) picked = anchors.seeds.slice(0, 9).filter((q) => !isOffProfileQuery(q, profileOpts));
         if (picked.length === 0) {
           const loc = extractLocation(currentProperty.address) || currentProperty.address;
           picked = [

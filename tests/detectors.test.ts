@@ -16,7 +16,7 @@ import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from 
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord } from "../lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -519,10 +519,31 @@ test("seo-queries: bedroomCountyQueries emits one stock search per floorplan pre
     "2 bedroom apartments to rent in Adams County",
     "3 bedroom apartments to rent in Adams County",
   ]);
+  // Bare word/number counts with NO "bedroom" word — the real Forest Cove entry.
+  assert.deepEqual(bedroomCountyQueries("one, two, three", "Arapahoe County"), [
+    "one bedroom apartments to rent in Arapahoe County",
+    "2 bedroom apartments to rent in Arapahoe County",
+    "3 bedroom apartments to rent in Arapahoe County",
+  ]);
   // No county -> none; no recognizable bedroom info -> none (never fabricates).
   assert.deepEqual(bedroomCountyQueries("Studio, 1 Bed", ""), []);
   assert.deepEqual(bedroomCountyQueries("", "Denver County"), []);
   assert.deepEqual(bedroomCountyQueries("call for details", "Denver County"), []);
+});
+
+test("seo-queries: isOffProfileQuery drops wrong-audience + sub-floor-price searches", () => {
+  const mkt = { rentMin: 1000, rentMax: 4000, affordable: false, senior: false };
+  assert.equal(isOffProfileQuery("low income apartments arapahoe county", mkt), true);
+  assert.equal(isOffProfileQuery("income based apartments arapahoe county", mkt), true);
+  assert.equal(isOffProfileQuery("section 8 apartments denver", mkt), true);
+  assert.equal(isOffProfileQuery("62+ apartments denver", mkt), true);
+  assert.equal(isOffProfileQuery("1 bedroom apartments denver under $1,000", mkt), true); // below the $1000 floor
+  assert.equal(isOffProfileQuery("apartments under $2000 denver", mkt), false); // within range
+  assert.equal(isOffProfileQuery("cheap apartments denver", mkt), false);
+  assert.equal(isOffProfileQuery("2 bedroom apartments denver", mkt), false);
+  // An affordable / senior property KEEPS those searches.
+  assert.equal(isOffProfileQuery("low income apartments denver", { affordable: true }), false);
+  assert.equal(isOffProfileQuery("62+ apartments denver", { senior: true }), false);
 });
 
 test("seo-queries: amenityCountyQueries emits searches only for amenities present, in priority order, capped", () => {

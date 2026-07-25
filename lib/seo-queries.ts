@@ -26,8 +26,10 @@ export function bedroomCountyQueries(bedroomTypes: string, geo: string): string[
   const g = (geo || "").trim();
   if (!g) return [];
   const t = (bedroomTypes || "").toLowerCase();
-  const hasBedContext = /bed\b|beds\b|\bbr\b|bedroom|studio|efficienc/.test(t);
-  if (!hasBedContext) return [];
+  // bedroomTypes is a DEDICATED field, so bare counts ("one, two, three", "1/2/3",
+  // "Studio-3") are bedroom info even without the word "bedroom". We rely on the
+  // studio/number extraction below returning nothing for non-bedroom junk rather than
+  // gating on a bed-word (which dropped the common "one, two, three" entry).
   const beds = new Set<number>(); // 0 = studio
   if (/\bstudio\b|\befficienc/.test(t)) beds.add(0);
   const norm = t
@@ -105,6 +107,37 @@ export const SALES_INTENT_RE =
 /** True when a query reads as a for-sale / purchase search rather than a rental. */
 export function isSalesIntent(q: string): boolean {
   return SALES_INTENT_RE.test(q || "");
+}
+
+/**
+ * True when a query targets the wrong AUDIENCE or price band for THIS property, so it
+ * shouldn't be tracked:
+ *  - income-restricted / subsidized / senior searches for a market-rate (non-senior)
+ *    property — different renter pool entirely;
+ *  - an "under $X" price cap at or below the property's rent floor, which excludes the
+ *    property from that search altogether (e.g. "under $1000" when rents start at $1000).
+ * `affordable`/`senior` flags keep those searches when the property actually is that.
+ */
+export function isOffProfileQuery(
+  q: string,
+  opts: { rentMin?: number; rentMax?: number; affordable?: boolean; senior?: boolean }
+): boolean {
+  const s = (q || "").toLowerCase();
+  if (
+    !opts.affordable &&
+    /\blow[-\s]?income\b|\bincome[-\s]?based\b|\bincome[-\s]?restricted\b|\bsection\s*8\b|\bsubsidized\b|\baffordable housing\b|\bhousing authority\b|\btax credit\b|\blihtc\b/.test(s)
+  )
+    return true;
+  if (!opts.senior && /\b62\s*\+|\b55\s*\+|\bsenior (?:living|apartments)\b/.test(s)) return true;
+  const min = opts.rentMin;
+  if (min && min > 0) {
+    const m = s.match(/under\s*\$?\s*([\d,]{3,})/);
+    if (m) {
+      const cap = parseInt(m[1].replace(/,/g, ""), 10);
+      if (cap && cap <= min) return true;
+    }
+  }
+  return false;
 }
 
 /** Pull the suggestion strings out of a SerpAPI google_autocomplete response. */
