@@ -34,7 +34,7 @@ import {
 } from "@/lib/property";
 import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
@@ -2905,9 +2905,10 @@ Rules:
 - Use the word a renter types: "${unitWord}". Do NOT use industry jargon like "multifamily" or "multi-family".
 - Do NOT use a specific apartment community / competitor property name as a query; only generic phrases a stranger would type.
 
-Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. For "county", give the FULL county name the property sits in (e.g. "Arapahoe County").`;
+Return ONLY JSON: {"town":"","neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. "town" = the town/city a renter would actually type for this address (the municipality or a well-known suburb, e.g. "Aurora", "Denver") — NOT the county.`;
 
-        let anchors: { neighborhood: string; county: string; employers: string[]; seeds: string[] } = {
+        let anchors: { town: string; neighborhood: string; county: string; employers: string[]; seeds: string[] } = {
+          town: "",
           neighborhood: "",
           county: "",
           employers: [],
@@ -2920,6 +2921,7 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
           if (sMatch) {
             const parsed = JSON.parse(sMatch[0]) as Partial<typeof anchors>;
             anchors = {
+              town: typeof parsed.town === "string" ? parsed.town : "",
               neighborhood: typeof parsed.neighborhood === "string" ? parsed.neighborhood : "",
               county: typeof parsed.county === "string" ? parsed.county : "",
               employers: Array.isArray(parsed.employers) ? parsed.employers.filter((e): e is string => typeof e === "string") : [],
@@ -2930,18 +2932,17 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
           /* fall back to the seed-free path below */
         }
 
-        // ALWAYS-tracked bedroom-by-county stock searches, one per floorplan the
-        // property actually offers (studio / 1 / 2 / 3). Deterministic, in the user's
-        // exact phrasing; guaranteed into the final set (only skipped when we can't
-        // determine the county or the property lists no matching floorplans).
-        let countyGeo = (anchors.county || "").trim();
-        if (countyGeo && !/county/i.test(countyGeo)) countyGeo = `${countyGeo} County`;
-        if (!countyGeo) countyGeo = (extractLocation(currentProperty.address) || "").trim();
-        const stockBedroomQueries = bedroomCountyQueries(bedroomTypes, countyGeo);
-        // ALWAYS-tracked amenity-by-county searches, one per high-demand amenity the
-        // property actually has (pool, pet friendly, gym, …). Deterministic + gated on
-        // the property's amenities so it never claims one it lacks.
-        const stockAmenityQueries = amenityCountyQueries(currentProperty.amenities.join(" "), countyGeo, 3);
+        // ALWAYS-tracked stock searches use the property's TOWN / CITY — how renters
+        // actually search ("2 bedroom apartments to rent in Aurora"), NOT the county
+        // (county-level rental search volume is negligible). Prefer the model's town
+        // anchor, fall back to the city parsed from the address, then the county.
+        const addressCity = (extractLocation(currentProperty.address) || "").split(",")[0].trim();
+        const stockGeo = (anchors.town || "").trim() || addressCity || (anchors.county || "").trim();
+        // One per floorplan the property actually offers (studio / 1 / 2 / 3).
+        const stockBedroomQueries = bedroomGeoQueries(bedroomTypes, stockGeo);
+        // One per high-demand amenity the property actually has (pool, pet friendly,
+        // gym, …). Gated on the property's amenities so it never claims one it lacks.
+        const stockAmenityQueries = amenityGeoQueries(currentProperty.amenities.join(" "), stockGeo, 3);
         const stockQueries = [...stockBedroomQueries, ...stockAmenityQueries];
 
         // Audience / price profile — used to drop searches aimed at the wrong renter

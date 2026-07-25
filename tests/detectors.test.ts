@@ -16,7 +16,7 @@ import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from 
 import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
-import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomCountyQueries, amenityCountyQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
+import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -501,34 +501,34 @@ test("seo-queries: extractAutocompleteSuggestions reads the SerpAPI payload shap
   assert.deepEqual(extractAutocompleteSuggestions(null), []);
 });
 
-test("seo-queries: bedroomCountyQueries emits one stock search per floorplan present", () => {
-  assert.deepEqual(bedroomCountyQueries("Studio, 1 Bed, 2 Bed, 3 Bed", "Arapahoe County"), [
+test("seo-queries: bedroomGeoQueries emits one stock search per floorplan present", () => {
+  assert.deepEqual(bedroomGeoQueries("Studio, 1 Bed, 2 Bed, 3 Bed", "Arapahoe County"), [
     "studio apartments to rent in Arapahoe County",
     "one bedroom apartments to rent in Arapahoe County",
     "2 bedroom apartments to rent in Arapahoe County",
     "3 bedroom apartments to rent in Arapahoe County",
   ]);
   // Only the floorplans present, shared "bedroom" word ("1 & 2 bedroom").
-  assert.deepEqual(bedroomCountyQueries("1 & 2 Bedroom", "Denver County"), [
+  assert.deepEqual(bedroomGeoQueries("1 & 2 Bedroom", "Denver County"), [
     "one bedroom apartments to rent in Denver County",
     "2 bedroom apartments to rent in Denver County",
   ]);
   // Ranges expand ("1-3 Bedrooms" -> 1, 2, 3).
-  assert.deepEqual(bedroomCountyQueries("1-3 Bedrooms", "Adams County"), [
+  assert.deepEqual(bedroomGeoQueries("1-3 Bedrooms", "Adams County"), [
     "one bedroom apartments to rent in Adams County",
     "2 bedroom apartments to rent in Adams County",
     "3 bedroom apartments to rent in Adams County",
   ]);
   // Bare word/number counts with NO "bedroom" word — the real Forest Cove entry.
-  assert.deepEqual(bedroomCountyQueries("one, two, three", "Arapahoe County"), [
+  assert.deepEqual(bedroomGeoQueries("one, two, three", "Arapahoe County"), [
     "one bedroom apartments to rent in Arapahoe County",
     "2 bedroom apartments to rent in Arapahoe County",
     "3 bedroom apartments to rent in Arapahoe County",
   ]);
   // No county -> none; no recognizable bedroom info -> none (never fabricates).
-  assert.deepEqual(bedroomCountyQueries("Studio, 1 Bed", ""), []);
-  assert.deepEqual(bedroomCountyQueries("", "Denver County"), []);
-  assert.deepEqual(bedroomCountyQueries("call for details", "Denver County"), []);
+  assert.deepEqual(bedroomGeoQueries("Studio, 1 Bed", ""), []);
+  assert.deepEqual(bedroomGeoQueries("", "Denver County"), []);
+  assert.deepEqual(bedroomGeoQueries("call for details", "Denver County"), []);
 });
 
 test("seo-queries: isOffProfileQuery drops wrong-audience + sub-floor-price searches", () => {
@@ -546,9 +546,9 @@ test("seo-queries: isOffProfileQuery drops wrong-audience + sub-floor-price sear
   assert.equal(isOffProfileQuery("62+ apartments denver", { senior: true }), false);
 });
 
-test("seo-queries: amenityCountyQueries emits searches only for amenities present, in priority order, capped", () => {
+test("seo-queries: amenityGeoQueries emits searches only for amenities present, in priority order, capped", () => {
   assert.deepEqual(
-    amenityCountyQueries("Swimming Pool, Pet Friendly, Fitness Center, Garage Parking, In-Unit Washer/Dryer", "Denver County", 3),
+    amenityGeoQueries("Swimming Pool, Pet Friendly, Fitness Center, Garage Parking, In-Unit Washer/Dryer", "Denver County", 3),
     [
       "apartments with a pool in Denver County",
       "pet friendly apartments in Denver County",
@@ -556,10 +556,10 @@ test("seo-queries: amenityCountyQueries emits searches only for amenities presen
     ]
   );
   // Only amenities actually present.
-  assert.deepEqual(amenityCountyQueries("Pool, Clubhouse", "Adams County"), ["apartments with a pool in Adams County"]);
+  assert.deepEqual(amenityGeoQueries("Pool, Clubhouse", "Adams County"), ["apartments with a pool in Adams County"]);
   // No county / no tracked amenities -> none (never fabricates an amenity).
-  assert.deepEqual(amenityCountyQueries("Pool", ""), []);
-  assert.deepEqual(amenityCountyQueries("Clubhouse, Business Center, Package Lockers", "Denver County"), []);
+  assert.deepEqual(amenityGeoQueries("Pool", ""), []);
+  assert.deepEqual(amenityGeoQueries("Clubhouse, Business Center, Package Lockers", "Denver County"), []);
 });
 
 test("seo-queries: searchUnitWord maps industry types to what renters actually type", () => {

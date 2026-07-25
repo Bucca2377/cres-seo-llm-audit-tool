@@ -11,18 +11,18 @@
  */
 
 /**
- * Standard bedroom-by-county searches that should ALWAYS be tracked, one per bedroom
- * type the property actually offers (studio / 1 / 2 / 3). Uses the exact phrasing the
- * user asked for: "studio apartments to rent in <geo>", "one bedroom apartments to
- * rent in <geo>", "2 bedroom apartments to rent in <geo>", "3 bedroom apartments to
- * rent in <geo>". `geo` is normally the county name (e.g. "Arapahoe County").
+ * Standard bedroom searches that should ALWAYS be tracked, one per bedroom type the
+ * property actually offers (studio / 1 / 2 / 3). Phrasing: "studio apartments to rent
+ * in <geo>", "one bedroom apartments to rent in <geo>", "2 bedroom …", "3 bedroom …".
+ * `geo` is the property's TOWN / CITY (e.g. "Aurora", "Denver") — how renters actually
+ * search, NOT the county (county-level rental search volume is negligible).
  *
  * Reads which floorplans exist from the property's free-text bedroomTypes field,
  * tolerating the common shapes ("Studio, 1 Bed, 2 Bed, 3 Bed", "1-3 Bedrooms",
- * "1 & 2 Bedroom", "Studio/1/2/3", word forms). Returns [] when we don't know the
- * geo or the field lists no recognizable bedroom info (never fabricates a floorplan).
+ * "1 & 2 Bedroom", "one, two, three", "Studio/1/2/3"). Returns [] when we don't know
+ * the geo or the field lists no recognizable bedroom info (never fabricates a floorplan).
  */
-export function bedroomCountyQueries(bedroomTypes: string, geo: string): string[] {
+export function bedroomGeoQueries(bedroomTypes: string, geo: string): string[] {
   const g = (geo || "").trim();
   if (!g) return [];
   const t = (bedroomTypes || "").toLowerCase();
@@ -55,13 +55,14 @@ export function bedroomCountyQueries(bedroomTypes: string, geo: string): string[
 }
 
 /**
- * Standard amenity-by-county searches to track, one per high-demand amenity the
- * property actually offers (only what renters really search on). Gated on the
- * property's amenities so it never claims an amenity the property lacks, in priority
- * order (pool, pet friendly, gym, garage, in-unit laundry) and capped. Returns []
- * when we don't know the geo or none of the tracked amenities are present.
+ * Standard amenity searches to track, one per high-demand amenity the property
+ * actually offers (only what renters really search on). Gated on the property's
+ * amenities so it never claims an amenity it lacks, in priority order (pool, pet
+ * friendly, gym, garage, in-unit laundry) and capped. `geo` is the property's
+ * TOWN / CITY (how renters search), NOT the county. Returns [] when we don't know
+ * the geo or none of the tracked amenities are present.
  */
-export function amenityCountyQueries(amenities: string, geo: string, cap = 3): string[] {
+export function amenityGeoQueries(amenities: string, geo: string, cap = 3): string[] {
   const g = (geo || "").trim();
   if (!g) return [];
   const a = (amenities || "").toLowerCase();
