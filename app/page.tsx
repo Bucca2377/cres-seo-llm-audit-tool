@@ -2911,11 +2911,10 @@ Rules:
 - Use the word a renter types: "${unitWord}". Do NOT use industry jargon like "multifamily" or "multi-family".
 - Do NOT use a specific apartment community / competitor property name as a query; only generic phrases a stranger would type.
 
-Return ONLY JSON: {"neighborhood":"","centralCity":true,"county":"","employers":["",""],"seeds":["10 short seed phrases"]}. "neighborhood" = the neighborhood/district WITHIN the city above where this exact address sits (e.g. a Denver address on S Akron St -> "Virginia Village"). "centralCity" = true if the city above is a large central city where renters search by neighborhood (Denver, Chicago, Dallas, Austin, …), false for a suburb/town (Aurora, Centennial, Frisco, …).`;
+Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. "neighborhood" = the neighborhood/district WITHIN the city above where this exact address sits (e.g. a Denver address on S Akron St -> "Virginia Village") — used only to target the demand-grounded picks.`;
 
-        let anchors: { neighborhood: string; centralCity: boolean; county: string; employers: string[]; seeds: string[] } = {
+        let anchors: { neighborhood: string; county: string; employers: string[]; seeds: string[] } = {
           neighborhood: "",
-          centralCity: false,
           county: "",
           employers: [],
           seeds: [],
@@ -2928,7 +2927,6 @@ Return ONLY JSON: {"neighborhood":"","centralCity":true,"county":"","employers":
             const parsed = JSON.parse(sMatch[0]) as Partial<typeof anchors>;
             anchors = {
               neighborhood: typeof parsed.neighborhood === "string" ? parsed.neighborhood : "",
-              centralCity: parsed.centralCity === true,
               county: typeof parsed.county === "string" ? parsed.county : "",
               employers: Array.isArray(parsed.employers) ? parsed.employers.filter((e): e is string => typeof e === "string") : [],
               seeds: Array.isArray(parsed.seeds) ? parsed.seeds.filter((e): e is string => typeof e === "string") : [],
@@ -2938,14 +2936,17 @@ Return ONLY JSON: {"neighborhood":"","centralCity":true,"county":"","employers":
           /* fall back to the seed-free path below */
         }
 
-        // ALWAYS-tracked stock searches key off the property's real place — how renters
-        // actually search, NOT the county. For a big CENTRAL CITY the searchable place is
-        // the NEIGHBORHOOD ("2 bedroom apartments in Virginia Village"), since "in Denver"
-        // is too broad; for a suburb/town it's the town itself ("… in Aurora"). The city
-        // is fixed from the address, so this can't drift to a neighboring town.
-        const hood = (anchors.neighborhood || "").trim();
-        const stockGeo =
-          anchors.centralCity && hood ? hood : addressCity || hood || (anchors.county || "").trim();
+        // ALWAYS-tracked stock searches key off the property's CITY (fixed from the
+        // address) — how renters actually phrase "2 bedroom apartments in <city>" /
+        // "apartments with a pool in <city>", and the level where Google renders a local
+        // pack. Neighborhood was tried and is too niche: for a residential neighborhood
+        // like Virginia Village several bedroom/amenity queries returned NO map pack at all
+        // (too little volume to be a local query, nothing to rank in). Neighborhood
+        // targeting instead rides on the autocomplete PICKS, which only surface a
+        // neighborhood phrase when it genuinely has search demand. For a suburb the
+        // address city IS the specific town (e.g. "Aurora"); for a central city it's the
+        // city ("Denver"), competitive but real.
+        const stockGeo = addressCity || (anchors.county || "").trim();
         // One per floorplan the property actually offers (studio / 1 / 2 / 3).
         const stockBedroomQueries = bedroomGeoQueries(bedroomTypes, stockGeo);
         // One per high-demand amenity the property actually has (pool, pet friendly,
