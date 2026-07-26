@@ -819,10 +819,12 @@ function aggregatorsDominateOrganic(topOrganic: { name: string; domain: string }
   }).length;
   return agg >= Math.ceil(top.length / 2); // a majority of the visible organic results are aggregators
 }
-/** Organic-column label when the property's own site isn't in the top 30. */
+/** Organic-column label when the property's own site isn't in the top 30. When the
+ *  listing sites own the head term (the norm, so NOT a failure), say so plainly for a
+ *  client instead of a scary "not in top 30". */
 function organicAbsentLabel(topOrganic: { name: string; domain: string }[] | undefined): string {
   return aggregatorsDominateOrganic(topOrganic)
-    ? "Not in organic top 30 — aggregators dominate"
+    ? "Listing sites own this (normal)"
     : "Not in organic top 30";
 }
 
@@ -3858,6 +3860,25 @@ Recommendation rules (STRICT):
             </div>
           )}
 
+          {summary.competitiveTotal > 0 && (
+            <div
+              style={{
+                padding: "10px 14px",
+                background: "#f4f7f9",
+                border: "1px solid #e2e8ec",
+                borderRadius: 8,
+                marginBottom: 12,
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 12,
+                color: "#44505c",
+                lineHeight: 1.6,
+              }}
+            >
+              <strong style={{ color: B.oxford }}>Map Pack vs. organic:</strong> the{" "}
+              <strong>Map Pack</strong> (the local 3-pack on the map) is what a single property can realistically win, and Google shows it to people searching <em>near you</em>, so that&rsquo;s the column to watch. For broad category searches, the <strong>organic</strong> results are owned by listing sites like Apartments.com and Zillow for <em>every</em> property, not just yours — so &ldquo;listing sites own this&rdquo; there reflects the market, not a problem with your website. Your growth levers are Map Pack visibility, reviews, and a complete, consistent Google listing.
+            </div>
+          )}
+
 
           {/* Per-query results table */}
           <div style={{ border: "1px solid #e8e8e8", borderRadius: 8, overflow: "hidden", marginBottom: 18 }}>
@@ -3948,9 +3969,26 @@ Recommendation rules (STRICT):
                       <td style={{ padding: "10px 12px" }}>
                         <span
                           style={{
-                            color: r.organic_rank && r.organic_rank <= 10 ? "#15803d" : r.organic_rank && r.organic_rank <= 30 ? "#9a7200" : B.tangelo,
+                            // Listing-site-owned organic (a category head term) is the
+                            // expected market reality for EVERY property, so it reads
+                            // neutral gray, not alarm-orange. Orange is reserved for a
+                            // genuine gap (individual competitors rank organically, you don't).
+                            color: r.organic_rank
+                              ? r.organic_rank <= 10
+                                ? "#15803d"
+                                : r.organic_rank <= 30
+                                ? "#9a7200"
+                                : B.tangelo
+                              : aggregatorsDominateOrganic(r.top_organic)
+                              ? "#9aa3ad"
+                              : B.tangelo,
                             fontWeight: 600,
                           }}
+                          title={
+                            !r.organic_rank && aggregatorsDominateOrganic(r.top_organic)
+                              ? "For a broad category search, listing sites (Apartments.com, Zillow) own the organic results for every property — expected, not a gap. The Map Pack is the local target."
+                              : ""
+                          }
                         >
                           {r.organic_rank ? `#${r.organic_rank} (P${r.organic_page})` : organicAbsentLabel(r.top_organic)}
                         </span>
@@ -7677,6 +7715,20 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               </p>
             )}
 
+            {seoCompTotal > 0 && (
+              <p
+                className="pb-avoid"
+                style={{ ...bodyP, fontSize: 9.5, color: "#44505c", background: "#f4f7f9", border: "1px solid #e2e8ec", borderRadius: 6, padding: "7px 12px", marginBottom: 14, lineHeight: 1.5 }}
+              >
+                <strong style={{ color: PRINT_NAVY }}>Map Pack vs. organic:</strong> the <strong>Map Pack</strong> (the local
+                3-pack on the map) is what a single property can realistically win, and Google shows it to people searching
+                <em> near you</em> &mdash; that is the column to watch. For broad category searches the <strong>organic</strong>{" "}
+                results are owned by listing sites like Apartments.com and Zillow for <em>every</em> property, so &ldquo;listing
+                sites own this&rdquo; reflects the market, not a problem with your website. Growth levers are Map Pack
+                visibility, reviews, and a complete, consistent Google listing.
+              </p>
+            )}
+
             <table>
               <thead>
                 <tr>
@@ -7721,12 +7773,17 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                   const orgText = r.organic_rank
                     ? `#${r.organic_rank} · P${r.organic_page}`
                     : organicAbsentLabel(r.top_organic);
-                  const orgColor =
-                    r.organic_rank && r.organic_rank <= 10
+                  // Listing-site-owned organic (category head term) is the expected
+                  // market reality for every property -> neutral gray, not alarm red.
+                  const orgColor = r.organic_rank
+                    ? r.organic_rank <= 10
                       ? "#15803d"
-                      : r.organic_rank && r.organic_rank <= 30
+                      : r.organic_rank <= 30
                       ? "#9a7200"
-                      : "#b14a2a";
+                      : "#b14a2a"
+                    : aggregatorsDominateOrganic(r.top_organic)
+                    ? "#888"
+                    : "#b14a2a";
                   return (
                     <tr key={i} className="pb-avoid">
                       <td style={{ ...findingsTd, fontWeight: 500 }}>{q}</td>
