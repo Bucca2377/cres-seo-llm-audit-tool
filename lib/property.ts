@@ -332,7 +332,7 @@ export interface ReviewStarBreakdown {
   s5: number;
 }
 
-/** A sentiment/theme row (used for both the all-time keyword tags and the period themes). */
+/** A sentiment/theme row (used for the period themes). */
 export interface ReviewSentimentRow {
   theme: string;
   count: number;
@@ -376,7 +376,6 @@ export interface ReviewAuditResult {
   periodLabel: string; // e.g. "Last 30 days" / "Last 6 months"
   kpis: ReviewKpis;
   starBreakdown: ReviewStarBreakdown;
-  sentimentHistorical: ReviewSentimentRow[];
   sentimentPeriod: ReviewSentimentRow[];
   reviews: ReviewItem[];
   responseGaps: ReviewResponseGap[];
