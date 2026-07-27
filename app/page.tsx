@@ -1198,10 +1198,18 @@ function matchPropertyToResult(
   return null;
 }
 
-async function fetchGoogleRank(property: Property, query: string): Promise<GoogleRankResult> {
+async function fetchGoogleRank(
+  property: Property,
+  query: string,
+  origin?: { lat: number; lng: number }
+): Promise<GoogleRankResult> {
   try {
     const location = extractLocation(property.address);
-    const data = await callSerp({ query, location, engine: "google" });
+    // Precise search origin (the property's own coordinates) localizes the Map Pack to
+    // its exact spot instead of the city centroid, so ranks/competitors reflect the
+    // immediate area. Falls back to the city `location` when we have no coordinates.
+    const ll = origin ? `@${origin.lat},${origin.lng},14z` : undefined;
+    const data = await callSerp({ query, location, engine: "google", ll });
 
     const localResults: any[] = Array.isArray(data?.local_results)
       ? data.local_results
@@ -1288,7 +1296,7 @@ async function fetchGoogleRank(property: Property, query: string): Promise<Googl
     let expandedMapPackRank: number | null = null;
     if (mapPackRank === null) {
       try {
-        const mapsData = await callSerp({ query, location, engine: "google_maps" });
+        const mapsData = await callSerp({ query, location, engine: "google_maps", ll });
         const mapsResults: any[] = Array.isArray(mapsData?.local_results)
           ? mapsData.local_results
           : [];
@@ -3056,24 +3064,14 @@ Return ONLY a JSON array of 9 strings.`;
         if (queries.length === 0) throw new Error("Could not generate query candidates.");
       }
 
-      // Stage 2: parallel rank checks
-      setStage("checking");
-      let completed = 0;
-      setProgress(`Checking rankings: 0 of ${queries.length} complete`);
-      const rankPromises = queries.map((q) =>
-        fetchGoogleRank(currentProperty, q).then((r) => {
-          completed += 1;
-          setProgress(`Checking rankings: ${completed} of ${queries.length} complete`);
-          return r;
-        })
-      );
-      const ranks = await Promise.all(rankPromises);
-
-      // Google review rank: the property's own rating + how it ranks vs the local
-      // Map Pack competitors. Best-effort — a failed lookup just omits the card.
+      // The property's Google listing, fetched ONCE up front: its coordinates localize
+      // the Map Pack checks to the property's exact spot (not the city centroid), so
+      // ranks and competitors reflect the immediate area; its rating/review count feed
+      // the review-rank card. Best-effort — no coords just falls back to city-level.
+      setProgress("Locating the property on Google…");
+      let origin: { lat: number; lng: number } | undefined;
       let googleRating: number | null = null;
       let googleReviewCount: number | null = null;
-      let localReviewComparison: ReviewEntry[] = [];
       try {
         const gbpSerp = await callSerp({
           query: buildGbpSearchQuery(currentProperty),
@@ -3081,15 +3079,39 @@ Return ONLY a JSON array of 9 strings.`;
           location: extractLocation(currentProperty.address),
         });
         const gbpInfo = extractGBP(gbpSerp, currentProperty);
-        const gbpPlace = gbpSerp?.place_results;
+        const gbpPlace = gbpSerp?.place_results as { gps_coordinates?: { latitude?: number; longitude?: number }; rating?: number; reviews?: number } | undefined;
+        const gps = gbpPlace?.gps_coordinates;
+        if (gps && typeof gps.latitude === "number" && typeof gps.longitude === "number") {
+          origin = { lat: gps.latitude, lng: gps.longitude };
+        }
         googleRating = gbpInfo?.rating ?? (typeof gbpPlace?.rating === "number" ? gbpPlace.rating : null);
         googleReviewCount = gbpInfo?.reviewCount ?? (typeof gbpPlace?.reviews === "number" ? gbpPlace.reviews : null);
+      } catch {
+        /* best-effort — fall back to city-level localization + no review card */
+      }
+
+      // Stage 2: parallel rank checks, localized to the property's coordinates.
+      setStage("checking");
+      let completed = 0;
+      setProgress(`Checking rankings: 0 of ${queries.length} complete`);
+      const rankPromises = queries.map((q) =>
+        fetchGoogleRank(currentProperty, q, origin).then((r) => {
+          completed += 1;
+          setProgress(`Checking rankings: ${completed} of ${queries.length} complete`);
+          return r;
+        })
+      );
+      const ranks = await Promise.all(rankPromises);
+
+      // Review rank: property rating vs the local Map Pack competitors gathered above.
+      let localReviewComparison: ReviewEntry[] = [];
+      try {
         localReviewComparison = buildLocalReviewComparison(
           { name: currentProperty.name, rating: googleRating, reviews: googleReviewCount },
           ranks.flatMap((r) => r.map_pack_competitors || [])
         );
       } catch {
-        /* review rank is best-effort; leave the fields empty */
+        /* best-effort */
       }
 
       // Stage 3: synthesize recommendations

@@ -817,6 +817,9 @@ export async function callSerp(opts: {
   data_id?: string;
   sort_by?: string;
   next_page_token?: string;
+  /** Precise search origin "@lat,lng,zoom" (e.g. "@39.68,-104.9,14z") — localizes the
+   *  Map Pack to the property's exact spot instead of the whole city. */
+  ll?: string;
 }) {
   const r = await fetch("/api/serp", {
     method: "POST",

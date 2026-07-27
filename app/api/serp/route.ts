@@ -12,6 +12,8 @@ interface SerpRequest {
   sort_by?: string;
   /** google_maps_reviews: pagination cursor from serpapi_pagination.next_page_token. */
   next_page_token?: string;
+  /** Precise search origin "@lat,lng,zoom" — localizes results to an exact point. */
+  ll?: string;
 }
 
 /** Engines that identify a place by data_id instead of a text query. */
@@ -69,6 +71,9 @@ export async function POST(req: NextRequest) {
     baseParams.hl = "en";
     baseParams.gl = "us";
     if (engine === "google") baseParams.num = "30";
+    // Precise search origin (lat/lng) localizes the Map Pack to the property's exact
+    // spot instead of the city centroid. Supported by the google + google_maps engines.
+    if (body.ll) baseParams.ll = body.ll;
   }
 
   // First try with location (better Map Pack accuracy). If SerpAPI rejects the
