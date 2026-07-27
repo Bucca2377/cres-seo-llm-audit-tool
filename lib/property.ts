@@ -249,6 +249,8 @@ export interface Property {
     recommendations: AuditRecommendations;
     timestamp: string;
     location?: string;
+    /** True when ranks were checked from the property's exact coordinates, not the city. */
+    localizedToProperty?: boolean;
     /** Technical / on-page SEO health from the site crawl (optional). */
     technicalSeo?: TechnicalSeoResult;
     /** Local-citation / directory presence check (optional). */

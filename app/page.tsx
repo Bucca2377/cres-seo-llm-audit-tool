@@ -1922,6 +1922,9 @@ interface SEOAuditResults {
   timestamp: string;
   /** The search origin used for ranks (Map Pack is hyper-local). */
   location?: string;
+  /** True when ranks were checked from the property's exact coordinates (its Google
+   *  listing), not just the city — drives the "search from" methodology copy. */
+  localizedToProperty?: boolean;
   /** Technical / on-page SEO health from the site crawl (optional). */
   technicalSeo?: TechnicalSeoResult;
   /** Local-citation / directory presence check (optional). */
@@ -3394,6 +3397,7 @@ Recommendation rules (STRICT):
         recommendations,
         timestamp: new Date().toISOString(),
         location: extractLocation(currentProperty.address) || extractCity(currentProperty.address),
+        localizedToProperty: !!origin,
         technicalSeo,
         citations,
         pageSpeed,
@@ -3760,7 +3764,7 @@ Recommendation rules (STRICT):
             />
           </div>
 
-          {/* Map Pack location caveat — ranks are hyper-local */}
+          {/* Methodology + "search from" point + hyper-local caveat */}
           <div
             style={{
               padding: "8px 14px",
@@ -3774,10 +3778,22 @@ Recommendation rules (STRICT):
               lineHeight: 1.55,
             }}
           >
-            <strong>Checked from {results.location || "the property's city"}.</strong> Google&rsquo;s Map Pack is
-            hyper-local: it changes with the searcher&rsquo;s exact location and personalization, so a Map Pack
-            rank here may not match what you see from your own device. Treat Map Pack positions as
-            &ldquo;visible to a searcher near the property,&rdquo; not an absolute rank. Organic ranks are far more stable.
+            <strong>How this is measured:</strong> for each tracked search we query Google live{" "}
+            {results.localizedToProperty ? (
+              <>
+                from the property&rsquo;s <strong>exact location</strong> (its coordinates on its Google listing)
+              </>
+            ) : (
+              <>from {results.location || "the property&rsquo;s city"}</>
+            )}
+            , then record its Map Pack (local 3-pack) position and its organic position. Google&rsquo;s local results
+            are <strong>proximity-based</strong>, so checking{" "}
+            {results.localizedToProperty
+              ? "from the property's own spot shows what a renter searching near it actually sees"
+              : "from the property's area approximates what a nearby renter sees"}{" "}
+            &mdash; not a city-wide average. Map Pack positions still shift with each searcher&rsquo;s precise location
+            and personalization, so read them as &ldquo;visible to someone searching near the property,&rdquo; not an
+            absolute rank. Organic ranks are more stable.
           </div>
 
           {/* Strongest / weakest */}
@@ -7639,15 +7655,23 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
               ))}
             </div>
 
-            {/* Map Pack location caveat — ranks are hyper-local */}
+            {/* Methodology + "search from" point + hyper-local caveat */}
             <p
               className="pb-avoid"
               style={{ ...bodyP, fontSize: 10, color: "#7a5b1e", background: "#fff8ec", border: "1px solid #f5e2bd", borderRadius: 6, padding: "7px 12px", marginBottom: 12, lineHeight: 1.5 }}
             >
-              <strong>Checked from {seo.location || "the property’s city"}.</strong> Google&rsquo;s Map Pack is hyper-local
-              &mdash; it changes with the searcher&rsquo;s exact location and personalization, so a Map Pack rank here may not
-              match what you see from your own device. Treat Map Pack positions as &ldquo;visible to a searcher near the
-              property,&rdquo; not an absolute rank. Organic ranks are far more stable.
+              <strong>How this is measured:</strong> for each tracked search we query Google live{" "}
+              {seo.localizedToProperty
+                ? "from the property’s exact location (its coordinates on its Google listing)"
+                : `from ${seo.location || "the property’s city"}`}
+              , then record its Map Pack (local 3-pack) position and its organic position. Google&rsquo;s local results
+              are proximity-based, so checking{" "}
+              {seo.localizedToProperty
+                ? "from the property’s own spot shows what a renter searching near it actually sees"
+                : "from the property’s area approximates what a nearby renter sees"}{" "}
+              &mdash; not a city-wide average. Map Pack positions still shift with each searcher&rsquo;s precise location and
+              personalization, so read them as &ldquo;visible to someone searching near the property,&rdquo; not an absolute
+              rank. Organic ranks are more stable.
             </p>
 
             {/* Google review rank vs the local Map Pack */}
