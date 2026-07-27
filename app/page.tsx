@@ -1742,9 +1742,11 @@ Return ONLY a JSON object:
 
 /* ================= SEO TAB ======================================== */
 /**
- * For a single query's rank data, return the competitor communities ranking
- * ahead of the property — combining Map Pack and page-1 organic, dropping the
- * property itself and listing-site aggregators, deduped by normalized name.
+ * For a single query's rank data, return the competitor communities ranking ahead of
+ * the property IN THE LOCAL MAP PACK — the winnable local arena — dropping the property
+ * itself, deduped by normalized name. Organic results are intentionally EXCLUDED: for a
+ * broad category term the organic winners are listing sites and locator services, not
+ * comps a single property can out-rank, so mixing them in just adds city-wide noise.
  */
 function competitorsBeating(
   property: Property,
@@ -1752,14 +1754,17 @@ function competitorsBeating(
 ): string[] {
   const norm = (s: string) => (s || "").toLowerCase().replace(/\b(apartments?|apartment homes?|the|lofts?|residences?|townhomes?|community|communities|at)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
   const isSelf = (n: string) => nameMatches(n || "", property.name);
-  const isAgg = (dom: string) => AGGREGATOR_DOMAINS.some((d) => (dom || "").includes(d));
   const inPack = !!(r.map_pack_rank && r.map_pack_rank <= 3);
   const packAll = (r.top_map_pack || []).filter((n) => !isSelf(n));
   const packBeating = inPack ? packAll.slice(0, (r.map_pack_rank as number) - 1) : packAll.slice(0, 3);
-  const orgAll = (r.top_organic || []).filter((o) => !isAgg(o.domain) && !isSelf(o.name)).map((o) => o.name);
-  const orgBeating = r.organic_rank && r.organic_rank <= 3 ? [] : orgAll;
-  const seen = new Set<string>(); const out: string[] = [];
-  for (const n of [...packBeating, ...orgBeating]) { const k = norm(n); if (!k || seen.has(k)) continue; seen.add(k); out.push(n); }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of packBeating) {
+    const k = norm(n);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(n);
+  }
   return out;
 }
 
