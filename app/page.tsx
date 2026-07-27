@@ -2976,11 +2976,16 @@ Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["1
         // pool: income-restricted / senior phrases (unless the property IS that) and
         // "under $X" caps at or below the rent floor (which exclude the property).
         const ptLower = (currentProperty.propertyType || "").toLowerCase();
+        // "Luxury" only fits a property positioned that way — check the type AND name
+        // (e.g. "Luxury", "Luxe", "Upscale"). A value/workforce community like Asbury
+        // Plaza has none, so "luxury apartments …" searches are dropped as off-profile.
+        const nameTypeLower = `${currentProperty.propertyType || ""} ${currentProperty.name || ""}`.toLowerCase();
         const profileOpts = {
           rentMin: currentProperty.priceMin,
           rentMax: currentProperty.priceMax,
           affordable: /affordable|income[-\s]?(?:based|restricted)|section\s*8|tax credit|lihtc|subsidized/.test(ptLower),
           senior: /senior|55\s*\+|active adult/.test(ptLower),
+          luxury: /\bluxury\b|\bluxe\b|\bupscale\b|high[-\s]?end/.test(nameTypeLower),
         };
         const rentRange =
           currentProperty.priceMin && currentProperty.priceMax
@@ -3027,7 +3032,7 @@ Pick 9 ADDITIONAL phrases to track. Requirements:
 - Use the renter's word "${unitWord}"; NEVER industry jargon like "multifamily"/"multi-family".
 - Do NOT pick a specific apartment community / competitor property name (e.g. "Fitzsimons Flats") — only generic phrases a stranger types.
 - No near-duplicates (e.g. don't include both "buckley afb" and "buckley space force base").
-- Diverse and COMPLEMENTARY to what's already tracked: neighborhood/suburb variants, "near <employer/institution>", and the real price/quality modifiers renters add ("cheap", "affordable", "luxury", "new"). An amenity tied to a neighborhood or employer is fine, but do NOT restate the plain bedroom+county or amenity+county phrases already tracked.
+- Diverse and COMPLEMENTARY to what's already tracked: neighborhood/suburb variants, "near <employer/institution>", and real price/quality modifiers renters add${profileOpts.luxury ? ` ("luxury", "upscale", "new")` : ` ("cheap", "affordable", "value", "pet friendly")`}. ${profileOpts.luxury ? "" : `This is a value/workforce community, NOT luxury — do NOT use "luxury", "upscale", or "high-end". `}An amenity tied to a neighborhood or employer is fine, but do NOT restate the plain bedroom or amenity stock phrases already tracked.
 Return ONLY a JSON array of 9 strings.`;
           try {
             const pResp = await callAI({ prompt: pickPrompt, maxTokens: 400 });
@@ -3056,8 +3061,8 @@ Return ONLY a JSON array of 9 strings.`;
             `${unitWord} for rent ${loc}`,
             `${unitWord} near ${loc}`,
             `cheap ${unitWord} ${loc}`,
-            `luxury ${unitWord} ${loc}`,
-          ];
+            `pet friendly ${unitWord} ${loc}`,
+          ].filter((q) => !isOffProfileQuery(q, profileOpts));
         }
 
         // Final set (target 10): brand leads, then the always-tracked bedroom+county

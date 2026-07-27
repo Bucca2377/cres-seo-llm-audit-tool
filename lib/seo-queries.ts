@@ -13,7 +13,7 @@
 /**
  * Standard bedroom searches that should ALWAYS be tracked, one per bedroom type the
  * property actually offers (studio / 1 / 2 / 3). Phrasing: "studio apartments to rent
- * in <geo>", "one bedroom apartments to rent in <geo>", "2 bedroom …", "3 bedroom …".
+ * in <geo>", "1 bedroom apartments to rent in <geo>", "2 bedroom …", "3 bedroom …".
  * `geo` is the property's TOWN / CITY (e.g. "Aurora", "Denver") — how renters actually
  * search, NOT the county (county-level rental search volume is negligible).
  *
@@ -48,7 +48,7 @@ export function bedroomGeoQueries(bedroomTypes: string, geo: string): string[] {
   for (const m of norm.matchAll(/\b([0-4])\b/g)) beds.add(+m[1]);
   const out: string[] = [];
   if (beds.has(0)) out.push(`studio apartments to rent in ${g}`);
-  if (beds.has(1)) out.push(`one bedroom apartments to rent in ${g}`);
+  if (beds.has(1)) out.push(`1 bedroom apartments to rent in ${g}`);
   if (beds.has(2)) out.push(`2 bedroom apartments to rent in ${g}`);
   if (beds.has(3)) out.push(`3 bedroom apartments to rent in ${g}`);
   return out;
@@ -115,13 +115,15 @@ export function isSalesIntent(q: string): boolean {
  * shouldn't be tracked:
  *  - income-restricted / subsidized / senior searches for a market-rate (non-senior)
  *    property — different renter pool entirely;
+ *  - a "luxury/upscale/high-end" descriptor on a property that isn't positioned that
+ *    way — wrong audience for a value/workforce community;
  *  - an "under $X" price cap at or below the property's rent floor, which excludes the
  *    property from that search altogether (e.g. "under $1000" when rents start at $1000).
- * `affordable`/`senior` flags keep those searches when the property actually is that.
+ * `affordable`/`senior`/`luxury` flags keep those searches when the property actually is that.
  */
 export function isOffProfileQuery(
   q: string,
-  opts: { rentMin?: number; rentMax?: number; affordable?: boolean; senior?: boolean }
+  opts: { rentMin?: number; rentMax?: number; affordable?: boolean; senior?: boolean; luxury?: boolean }
 ): boolean {
   const s = (q || "").toLowerCase();
   if (
@@ -130,6 +132,7 @@ export function isOffProfileQuery(
   )
     return true;
   if (!opts.senior && /\b62\s*\+|\b55\s*\+|\bsenior (?:living|apartments)\b/.test(s)) return true;
+  if (!opts.luxury && /\bluxury\b|\bluxe\b|\bupscale\b|high[-\s]?end|\bclass a\b|luxurious/.test(s)) return true;
   const min = opts.rentMin;
   if (min && min > 0) {
     const m = s.match(/under\s*\$?\s*([\d,]{3,})/);

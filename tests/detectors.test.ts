@@ -505,24 +505,24 @@ test("seo-queries: extractAutocompleteSuggestions reads the SerpAPI payload shap
 test("seo-queries: bedroomGeoQueries emits one stock search per floorplan present", () => {
   assert.deepEqual(bedroomGeoQueries("Studio, 1 Bed, 2 Bed, 3 Bed", "Arapahoe County"), [
     "studio apartments to rent in Arapahoe County",
-    "one bedroom apartments to rent in Arapahoe County",
+    "1 bedroom apartments to rent in Arapahoe County",
     "2 bedroom apartments to rent in Arapahoe County",
     "3 bedroom apartments to rent in Arapahoe County",
   ]);
   // Only the floorplans present, shared "bedroom" word ("1 & 2 bedroom").
   assert.deepEqual(bedroomGeoQueries("1 & 2 Bedroom", "Denver County"), [
-    "one bedroom apartments to rent in Denver County",
+    "1 bedroom apartments to rent in Denver County",
     "2 bedroom apartments to rent in Denver County",
   ]);
   // Ranges expand ("1-3 Bedrooms" -> 1, 2, 3).
   assert.deepEqual(bedroomGeoQueries("1-3 Bedrooms", "Adams County"), [
-    "one bedroom apartments to rent in Adams County",
+    "1 bedroom apartments to rent in Adams County",
     "2 bedroom apartments to rent in Adams County",
     "3 bedroom apartments to rent in Adams County",
   ]);
   // Bare word/number counts with NO "bedroom" word — the real Forest Cove entry.
   assert.deepEqual(bedroomGeoQueries("one, two, three", "Arapahoe County"), [
-    "one bedroom apartments to rent in Arapahoe County",
+    "1 bedroom apartments to rent in Arapahoe County",
     "2 bedroom apartments to rent in Arapahoe County",
     "3 bedroom apartments to rent in Arapahoe County",
   ]);
@@ -538,6 +538,8 @@ test("seo-queries: isOffProfileQuery drops wrong-audience + sub-floor-price sear
   assert.equal(isOffProfileQuery("income based apartments arapahoe county", mkt), true);
   assert.equal(isOffProfileQuery("section 8 apartments denver", mkt), true);
   assert.equal(isOffProfileQuery("62+ apartments denver", mkt), true);
+  assert.equal(isOffProfileQuery("luxury apartments near university of denver", mkt), true); // value property, not luxury
+  assert.equal(isOffProfileQuery("upscale apartments denver", mkt), true);
   assert.equal(isOffProfileQuery("1 bedroom apartments denver under $1,000", mkt), true); // below the $1000 floor
   assert.equal(isOffProfileQuery("apartments under $2000 denver", mkt), false); // within range
   assert.equal(isOffProfileQuery("cheap apartments denver", mkt), false);
@@ -545,6 +547,7 @@ test("seo-queries: isOffProfileQuery drops wrong-audience + sub-floor-price sear
   // An affordable / senior property KEEPS those searches.
   assert.equal(isOffProfileQuery("low income apartments denver", { affordable: true }), false);
   assert.equal(isOffProfileQuery("62+ apartments denver", { senior: true }), false);
+  assert.equal(isOffProfileQuery("luxury apartments denver", { luxury: true }), false);
 });
 
 test("seo-queries: amenityGeoQueries emits searches only for amenities present, in priority order, capped", () => {
