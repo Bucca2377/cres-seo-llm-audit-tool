@@ -5937,6 +5937,25 @@ function ReviewAuditTab({
       // so mark the report as a partial sample.
       if (sortMode === "") truncated = true;
 
+      // Google's review keyword tags (the all-time cumulative themes that drive the
+      // "Sentiment Analysis 2 of 2: All Time" section) are only returned on the DEFAULT
+      // (relevance) sort. Our paging above uses newestFirst, so `topics` came back empty
+      // and that section never rendered. Fetch the tags once from a default-sort request.
+      // Best-effort — the section just stays hidden if Google has no tags for the listing.
+      if (!topics.length) {
+        setProgress("Reading Google's review topics…");
+        try {
+          const tResp = await callSerp({ engine: "google_maps_reviews", data_id: dataId });
+          if (Array.isArray(tResp?.topics)) {
+            topics = tResp.topics
+              .filter((t: any) => t?.keyword)
+              .map((t: any) => ({ keyword: t.keyword, mentions: t.mentions || 0 }));
+          }
+        } catch {
+          /* topics are best-effort */
+        }
+      }
+
       // Guard: a listing that HAS reviews but yields none here means Google
       // returned nothing this call — don't render a misleading "0 new reviews"
       // audit; ask for a retry instead.
