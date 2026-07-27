@@ -6089,14 +6089,26 @@ RULES:
 - responseQuality: include ONLY the [qN] reviews whose reply is genuinely generic/templated, using the exact id. Omit good replies. Empty array if none.
 - recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$200/$500 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names.`;
 
-      const data = await callAI({ prompt, maxTokens: 4000 });
+      // maxTokens must cover narratives + up to 12 suggested replies + up to 12
+      // rewrites + 5 rec cards; at 4000 the JSON was being TRUNCATED mid-array on
+      // review-heavy periods (hence "Expected ',' or ']'"). 8000 gives real headroom.
+      const data = await callAI({ prompt, maxTokens: 8000 });
       const text = (data.content || [])
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
         .join("\n");
       const match = text.match(/\{[\s\S]*\}/);
       if (!match) throw new Error("The audit did not return a structured result. Try again.");
-      const parsed = JSON.parse(match[0]) as any;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {
+        // Almost always a truncated response (too many reviews for one pass). Fail with
+        // an actionable message instead of a raw JSON position error.
+        throw new Error(
+          "The review analysis came back incomplete — likely too many reviews for a single pass. Try a shorter period (Last month or Past 6 months) and re-run."
+        );
+      }
 
       const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
         ? (parsed.recommendations as RecommendationCard[])
