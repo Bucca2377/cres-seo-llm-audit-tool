@@ -337,7 +337,9 @@ export interface ReviewSentimentRow {
   theme: string;
   count: number;
   sentiment: "Positive" | "Negative" | "Mixed" | "Neutral";
-  recommendation: string;
+  /** Omitted for the all-time/historical view, which is context only — recommendations
+   *  are made only for the recent reporting period, never for old reviews. */
+  recommendation?: string;
 }
 
 export interface ReviewItem {
@@ -356,6 +358,7 @@ export interface ReviewResponseGap {
   text: string; // the review as written ("" if none)
   escalate: boolean; // true for 1-2 star — needs internal escalation
   suggestedResponse: string; // a reply to post
+  date?: string; // relative review date (e.g. "2 weeks ago"), shown like the new-reviews list
 }
 
 /** A flagged owner response that reads generic/templated — shows the original, commentary, and a rewrite. */

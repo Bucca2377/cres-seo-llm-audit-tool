@@ -6004,6 +6004,7 @@ function ReviewAuditTab({
           rating: Math.round(r?.rating || 0),
           text: (r?.snippet || r?.extracted_snippet || "").trim(),
           escalate: Math.round(r?.rating || 0) <= 2,
+          date: r?.date || "",
         }));
       const qualityCandidates = windowed
         .filter((r) => reviewHasResponse(r))
@@ -6069,7 +6070,7 @@ Return ONLY this JSON object, no prose:
     {"theme": "<theme from THIS period's review texts, name the staff member if a review names one>", "count": <# of period reviews on this theme>, "sentiment": "Positive|Negative|Mixed|Neutral", "recommendation": "1 sentence; if a 4/5-star review names a staff member call out the $25 incentive; if a 1/2-star, advise response review + internal escalation"}
   ],
   "sentimentHistorical": [
-    {"theme": "<one of the Google keyword tags>", "count": <its mention count>, "sentiment": "Positive|Negative|Mixed|Neutral", "recommendation": "1 sentence tying it to a CRES P&P solicitation tactic"}
+    {"theme": "<one of the Google keyword tags>", "count": <its mention count>, "sentiment": "Positive|Negative|Mixed|Neutral"}
   ],
   "responseGaps": [
     {"id": "g0", "suggestedResponse": "a warm, specific reply to post for that review; for a no-text review keep it a brief friendly thank-you; for a 1-2 star acknowledge the concern and offer a direct contact"}
@@ -6084,10 +6085,10 @@ Return ONLY this JSON object, no prose:
 
 RULES:
 - sentimentPeriod: derive themes ONLY from the period review texts above; if a review names a staff member in a 4/5-star, note the $25 incentive per CRES P&P.
-- sentimentHistorical: one row per Google keyword tag above (skip if none).
+- sentimentHistorical: one row per Google keyword tag above (skip if none). CONTEXT ONLY — do NOT include a "recommendation" field. This is the all-time cumulative profile; NEVER propose acting on a theme that appears only here and not in this period's reviews (e.g. a lone complaint from years ago that no recent review repeats).
 - responseGaps: one entry per [gN] review above, using its exact id. Empty array if there are none.
 - responseQuality: include ONLY the [qN] reviews whose reply is genuinely generic/templated, using the exact id. Omit good replies. Empty array if none.
-- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$200/$500 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names.`;
+- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$200/$500 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.`;
 
       // maxTokens must cover narratives + up to 12 suggested replies + up to 12
       // rewrites + 5 rec cards; at 4000 the JSON was being TRUNCATED mid-array on
@@ -6124,6 +6125,7 @@ RULES:
         text: c.text,
         escalate: c.escalate,
         suggestedResponse: gapSuggById.get(c.id) || "",
+        date: c.date,
       }));
       const qById = new Map(qualityCandidates.map((c) => [c.id, c]));
       const responseQuality: ReviewResponseQualityFlag[] = ((parsed.responseQuality || []) as any[])
@@ -6333,14 +6335,14 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
   const maxStar = Math.max(1, ...starRows.map((r) => r[1]));
   const periodTotal = starRows.reduce((sum, r) => sum + r[1], 0);
 
-  const renderSentiment = (rows: ReviewSentimentRow[]) => (
+  const renderSentiment = (rows: ReviewSentimentRow[], withRecommendation = true) => (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
       <thead>
         <tr>
           <th style={th}>Theme</th>
           <th style={{ ...th, width: 70, textAlign: "center" }}>Mentions</th>
           <th style={{ ...th, width: 90 }}>Sentiment</th>
-          <th style={th}>CRES Recommendation</th>
+          {withRecommendation && <th style={th}>CRES Recommendation</th>}
         </tr>
       </thead>
       <tbody>
@@ -6349,7 +6351,7 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
             <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", fontWeight: 600 }}>{row.theme}</td>
             <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", textAlign: "center", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, color: "#666" }}>{row.count}</td>
             <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, fontWeight: 600, color: sentimentColor(row.sentiment) }}>{row.sentiment}</td>
-            <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", lineHeight: 1.45 }}>{row.recommendation}</td>
+            {withRecommendation && <td style={{ padding: "8px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", lineHeight: 1.45 }}>{row.recommendation}</td>}
           </tr>
         ))}
       </tbody>
@@ -6427,12 +6429,13 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
         </>
       )}
 
-      {/* Sentiment 2: Historical Profile */}
+      {/* Sentiment 2: All-time profile — CONTEXT ONLY (no recommendations; we don't act
+          on themes older than the recent period, e.g. a lone years-old complaint). */}
       {results.sentimentHistorical.length > 0 && (
         <>
-          <div style={sectionTitle}>Sentiment Analysis 2 of 2: Historical Profile</div>
-          <p style={{ ...para, fontSize: 11.5, color: "#888" }}>Google keyword tags across all {k.totalReviews ?? ""} reviews — the cumulative reputation prospects see.</p>
-          {renderSentiment(results.sentimentHistorical)}
+          <div style={sectionTitle}>Sentiment Analysis 2 of 2: All Time</div>
+          <p style={{ ...para, fontSize: 11.5, color: "#888" }}>Themes across all {k.totalReviews ?? ""} reviews (Google keyword tags) — the cumulative reputation prospects see. Context only: recommendations are made from the recent period above, not from years-old feedback.</p>
+          {renderSentiment(results.sentimentHistorical, false)}
         </>
       )}
 
@@ -6445,6 +6448,7 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                 <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, fontWeight: 600, color: "#333" }}>{g.reviewer}</span>
                 <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, color: g.rating >= 4 ? "#15803d" : g.rating <= 2 ? B.tangelo : "#9a7200" }}>{g.rating}★</span>
+                {g.date && <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#aaa" }}>{g.date}</span>}
                 {g.escalate && <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "white", background: B.tangelo, borderRadius: 4, padding: "1px 6px" }}>Escalate</span>}
               </div>
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: g.text ? "#444" : "#bbb", fontStyle: g.text ? "italic" : "italic", lineHeight: 1.5, marginBottom: 6 }}>
@@ -7025,14 +7029,14 @@ function ReviewAuditReport({ property }: { property: Property }) {
   const th: React.CSSProperties = { padding: "5px 8px", background: PRINT_NAVY, color: "white", textAlign: "left", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" };
   const subHead: React.CSSProperties = { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: PRINT_TEAL, margin: "0 0 6px 0" };
 
-  const sentTable = (rows: ReviewSentimentRow[]) => (
+  const sentTable = (rows: ReviewSentimentRow[], withRecommendation = true) => (
     <table style={{ marginBottom: 14 }}>
       <thead>
         <tr>
           <th style={th}>Theme</th>
           <th style={{ ...th, width: 60, textAlign: "center" }}>Mentions</th>
           <th style={{ ...th, width: 70 }}>Sentiment</th>
-          <th style={th}>CRES Recommendation</th>
+          {withRecommendation && <th style={th}>CRES Recommendation</th>}
         </tr>
       </thead>
       <tbody>
@@ -7041,7 +7045,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
             <td style={{ ...td, fontWeight: 600, color: PRINT_NAVY }}>{r.theme}</td>
             <td style={{ ...td, textAlign: "center" }}>{r.count}</td>
             <td style={{ ...td, fontWeight: 700, color: r.sentiment === "Positive" ? "#15803d" : r.sentiment === "Negative" ? "#b14a2a" : "#9a7200" }}>{r.sentiment}</td>
-            <td style={td}>{r.recommendation}</td>
+            {withRecommendation && <td style={td}>{r.recommendation}</td>}
           </tr>
         ))}
       </tbody>
@@ -7158,12 +7162,12 @@ function ReviewAuditReport({ property }: { property: Property }) {
               </>
             )}
 
-            {/* Sentiment 2: Historical */}
+            {/* Sentiment 2: All time — context only, no recommendations */}
             {ra.sentimentHistorical.length > 0 && (
               <>
-                <PrintSectionHeader>Sentiment Analysis 2 of 2: Historical Profile</PrintSectionHeader>
-                <p style={{ ...bodyP, fontSize: 9.5, color: "#777" }}>Google keyword tags across all {ra.kpis.totalReviews ?? ""} reviews — the cumulative reputation prospects see.</p>
-                {sentTable(ra.sentimentHistorical)}
+                <PrintSectionHeader>Sentiment Analysis 2 of 2: All Time</PrintSectionHeader>
+                <p style={{ ...bodyP, fontSize: 9.5, color: "#777" }}>Themes across all {ra.kpis.totalReviews ?? ""} reviews (Google keyword tags) &mdash; the cumulative reputation prospects see. Context only: recommendations come from the recent period above, not from years-old feedback.</p>
+                {sentTable(ra.sentimentHistorical, false)}
               </>
             )}
 
@@ -7174,7 +7178,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
                 {ra.responseGaps.map((g, i) => (
                   <div key={i} className="pb-avoid" style={{ marginBottom: 8 }}>
                     <p style={{ ...bodyP, margin: "0 0 2px 0" }}>
-                      <strong style={{ color: g.rating <= 2 ? "#b14a2a" : PRINT_NAVY }}>{g.reviewer} ({g.rating}★){g.escalate ? " — ESCALATE" : ""}:</strong>{" "}
+                      <strong style={{ color: g.rating <= 2 ? "#b14a2a" : PRINT_NAVY }}>{g.reviewer} ({g.rating}★){g.date ? ` · ${g.date}` : ""}{g.escalate ? " — ESCALATE" : ""}:</strong>{" "}
                       <em style={{ color: "#555" }}>&ldquo;{g.text || "No written review text submitted"}&rdquo;</em>
                     </p>
                     {g.suggestedResponse && (
