@@ -10,6 +10,7 @@ import {
   recommendsGooglePhotos,
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
+  dropDeadDialedNumbers,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
@@ -609,6 +610,27 @@ test("seo-queries: finalizeQuerySet leads with brand, dedupes, caps", () => {
   assert.equal(q.length, 6); // capped
   assert.equal(new Set(q.map((s) => s.toLowerCase())).size, 6); // no dupes
   assert.ok(!q.includes("one more that exceeds the cap")); // trimmed by the cap
+});
+
+// ----- Phantom phone pruning (dial-confirmed dead numbers) -------------------
+
+test("phones: dropDeadDialedNumbers removes a dial-confirmed dead number, keeps live ones", () => {
+  // The real Asbury Plaza case: a Funnel/RentCafe widget-injected tracking number
+  // (569 = bogus area code) that the dial test confirmed dead, alongside live lines.
+  const nums = [
+    { number: "(833) 452-1183", dialStatus: "connected" },
+    { number: "(569) 979-5276", dialStatus: "failed" },
+    { number: "(303) 756-0651", dialStatus: "connected" },
+  ];
+  const kept = dropDeadDialedNumbers(nums);
+  assert.equal(kept.length, 2);
+  assert.ok(!kept.some((n) => n.number.includes("569")), "the dead phantom is dropped");
+  // Dial-wide failure (nothing connected) -> keep everything, don't nuke the list.
+  const allFailed = [{ number: "a", dialStatus: "failed" }, { number: "b", dialStatus: "failed" }];
+  assert.equal(dropDeadDialedNumbers(allFailed).length, 2);
+  // Untested / inconclusive numbers are left alone.
+  assert.equal(dropDeadDialedNumbers([{ number: "x", dialStatus: null }]).length, 1);
+  assert.equal(dropDeadDialedNumbers([{ number: "y", dialStatus: "unknown" }, { number: "z", dialStatus: "connected" }]).length, 2);
 });
 
 // ----- Bright Data fetch: retry past the intermittent empty body -------------

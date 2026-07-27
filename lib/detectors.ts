@@ -231,3 +231,23 @@ export function recommendsCreatingConcession(text: string): boolean {
   if (CONCESSION_PLATFORM.test(t)) return false; // distributing an existing special, not inventing one
   return true;
 }
+
+/**
+ * Drop dial-confirmed PHANTOM phone numbers from a dialed inventory. A `dialStatus`
+ * of "failed" means the carrier couldn't even place the call (invalid / unreachable),
+ * i.e. a number the property doesn't actually use — a misparse (bogus area code) or a
+ * leasing-widget (Funnel / RentCafe) call-tracking number injected into the DOM that
+ * isn't a live line and never appears on the visible site. The tool's own principle
+ * is "what matters is that each number DIALS the property," so a number that provably
+ * doesn't dial is noise, not a finding.
+ *
+ * Guards: only prunes when at least one number actually CONNECTED (so a Twilio-wide
+ * outage where everything "failed" never wipes the whole list), and never returns an
+ * empty list. Generic over the entry shape — only `dialStatus` is read.
+ */
+export function dropDeadDialedNumbers<T extends { dialStatus?: string | null }>(numbers: T[]): T[] {
+  const list = numbers || [];
+  if (!list.some((n) => n?.dialStatus === "connected")) return list;
+  const kept = list.filter((n) => n?.dialStatus !== "failed");
+  return kept.length ? kept : list;
+}

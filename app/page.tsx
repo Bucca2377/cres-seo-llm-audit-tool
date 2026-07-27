@@ -32,7 +32,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -5237,6 +5237,10 @@ Return ONLY this JSON object, no prose before or after:
         } catch {
           /* best-effort — leave numbers untested if the dial check fails */
         }
+        // Drop dial-confirmed phantom numbers (a "failed" dial = invalid/unreachable,
+        // e.g. a leasing-widget tracking number that isn't a live line). Only when at
+        // least one other number connected, so a dial-wide outage can't wipe the list.
+        if (phones?.dialTested) phones = { ...phones, numbers: dropDeadDialedNumbers(phones.numbers) };
       }
 
       // DETERMINISTIC RECOMMENDATIONS. The marketing recs are generated ENTIRELY
@@ -5507,12 +5511,14 @@ function PhoneInventoryPanel({
       const byNum = new Map<string, DialResult>(
         (d.results || []).map((res: DialResult) => [normalizePhone(res.number), res])
       );
-      const updatedNumbers = phones.numbers.map((n) => {
-        const res = byNum.get(normalizePhone(n.number));
-        return res
-          ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds }
-          : n;
-      });
+      const updatedNumbers = dropDeadDialedNumbers(
+        phones.numbers.map((n) => {
+          const res = byNum.get(normalizePhone(n.number));
+          return res
+            ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds }
+            : n;
+        })
+      );
       if (property.marketingAudit) {
         onUpdateProperty({
           ...property,
