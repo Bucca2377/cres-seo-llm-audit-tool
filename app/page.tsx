@@ -67,7 +67,7 @@ RESIDENT REVIEWS (CRES Resident Reviews P&P):
 - Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
 - "Hug a Building" (≈twice/year per building): power-wash + touch-up + resident gift baskets; use the face-to-face moment to gather feedback and solicit reviews with the QR code in hand.
 - Respond to EVERY review. Never ask specifically for 5 stars — ask for honest feedback. Follow up only once.
-- Employee incentives: $25 per 4-/5-star review that names a team member; $200/month (split among the team) for a month with ZERO 1–2 star reviews; $500/month (split) for 10+ four-/five-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle).
+- Employee incentives — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle).
 
 LEAD NURTURING (CRES Leasing Lead Nurturing): Speed to lead is key. Days 1–7: call + text + email DAILY until a tour is booked or they opt out (call first, then text with a booking link, then a follow-up email). Days 8–30: all three channels every Monday. Post-tour: thank-you text + email within 1 hour; days 1–3 daily; days 4–14 every 3 days; days 15–30 weekly. Always learn where a lost lead leased and why, and log it in the CRM.
 
@@ -6082,7 +6082,7 @@ RULES:
 - sentimentPeriod: derive themes ONLY from the period review texts above; if a review names a staff member in a 4/5-star, note the $25 incentive per CRES P&P.
 - responseGaps: one entry per [gN] review above, using its exact id. Empty array if there are none.
 - responseQuality: include ONLY the [qN] reviews whose reply is genuinely generic/templated, using the exact id. Omit good replies. Empty array if none.
-- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$200/$500 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.`;
+- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$150/$250 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.`;
 
       // maxTokens must cover narratives + up to 12 suggested replies + up to 12
       // rewrites + 5 rec cards; at 4000 the JSON was being TRUNCATED mid-array on
