@@ -381,7 +381,7 @@ export interface ReviewAuditResult {
   responseGaps: ReviewResponseGap[];
   responseQuality: ReviewResponseQualityFlag[];
   recommendations: AuditRecommendations;
-  narratives: { breakdown: string; ratingOverview: string; summary: string };
+  narratives: { breakdown: string; ratingOverview: string };
   /** True when more reviews exist in the window than we paged in. */
   truncated: boolean;
   reviewsAnalyzed: number;

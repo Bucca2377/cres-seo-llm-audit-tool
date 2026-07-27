@@ -6051,8 +6051,7 @@ Return ONLY this JSON object, no prose:
 {
   "narratives": {
     "breakdown": "1-2 sentences summarizing the period's new-review star mix and owner-response coverage.",
-    "ratingOverview": "1-2 sentences on the current vs prior rating move and the lever to improve it.",
-    "summary": "2 short sentences: the headline reputation takeaway + the single most important action."
+    "ratingOverview": "1-2 sentences on the current vs prior rating move and the lever to improve it."
   },
   "sentimentPeriod": [
     {"theme": "<theme from THIS period's review texts, name the staff member if a review names one>", "count": <# of period reviews on this theme>, "sentiment": "Positive|Negative|Mixed|Neutral", "recommendation": "1 sentence; if a 4/5-star review names a staff member call out the $25 incentive; if a 1/2-star, advise response review + internal escalation"}
@@ -6152,7 +6151,6 @@ RULES:
         narratives: {
           breakdown: parsed.narratives?.breakdown || "",
           ratingOverview: parsed.narratives?.ratingOverview || "",
-          summary: parsed.narratives?.summary || "",
         },
         truncated,
         reviewsAnalyzed: allReviews.length,
@@ -7201,13 +7199,6 @@ function ReviewAuditReport({ property }: { property: Property }) {
               </section>
             )}
 
-            {/* Summary */}
-            {ra.narratives.summary && (
-              <>
-                <div style={{ ...subHead, marginTop: 14 }}>Summary</div>
-                <p style={bodyP}>{ra.narratives.summary}</p>
-              </>
-            )}
           </>
         )}
       </div>
