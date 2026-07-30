@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     // falls the audit back to a false "couldn't read the hours this run." A real
     // Apartments.com listing (active or dark shell) is hundreds of KB, so require a
     // substantial body before trusting it.
-    const html = await brightDataRaw(url, { minLength: 5000, attempts: 4 });
+    const html = await brightDataRaw(url, { minLength: 5000, attempts: 3 });
     if (!html) return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null });
     // Office hours + concession from the RAW HTML are AUTHORITATIVE. The visible
     // listing collapses hours behind "View All Hours" (model misreads closed days as

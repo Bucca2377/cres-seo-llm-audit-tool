@@ -17,20 +17,23 @@
  */
 export async function brightDataRaw(
   url: string,
-  opts: { minLength?: number; attempts?: number } = {}
+  opts: { minLength?: number; attempts?: number; timeoutMs?: number } = {}
 ): Promise<string | null> {
   const token = process.env.BRIGHTDATA_API_TOKEN;
   const zone = process.env.BRIGHTDATA_ZONE;
   if (!token || !zone || !url) return null;
   const minLength = opts.minLength ?? 1000;
   const attempts = opts.attempts ?? 3;
+  // A real Unlocker fetch returns in ~9s and an empty body comes back near-instantly,
+  // so 90s/attempt just let a slow hang stall the whole audit. Cap it tight.
+  const timeoutMs = opts.timeoutMs ?? 35000;
   for (let i = 0; i < attempts; i++) {
     try {
       const r = await fetch("https://api.brightdata.com/request", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ zone, url, format: "raw" }),
-        signal: AbortSignal.timeout(90000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (r.ok) {
         const html = await r.text();

@@ -3147,6 +3147,12 @@ Return ONLY a JSON array of 9 strings.`;
         })
         .join("\n\n");
 
+      // AI-assistant visibility, technical/on-page crawl, citations, and page
+      // speed are four INDEPENDENT stages — run them concurrently so wall-clock
+      // is the slowest stage, not the sum of all four.
+      setProgress("Running AI visibility, on-page crawl, citations, and speed checks…");
+      const [llmRankResult, techResult, citations, pageSpeed] = await Promise.all([
+        (async (): Promise<Property["llmRank"] | undefined> => {
       // AI-assistant visibility — folded into this single run so one button
       // covers Google rank + AI rank, and the recommendations address both.
       setProgress("Checking AI assistant visibility (a few asks for a stable read)…");
@@ -3213,10 +3219,9 @@ Return ONLY a JSON array of 9 strings.`;
       } catch {
         /* best-effort — AI visibility is non-fatal */
       }
-      const aiSummary = llmRankResult
-        ? `AI ASSISTANT VISIBILITY — asked Claude "${llmRankResult.query}" ${llmRankResult.models[0].asks ?? 1}x (AI answers vary per ask, so this is a frequency): ${currentProperty.name} was named in ${llmRankResult.models[0].mentions ?? (llmRankResult.models[0].mentionsTarget ? 1 : 0)} of ${llmRankResult.models[0].asks ?? 1} answers. Communities Claude recommended (most-consistent first): ${llmRankResult.models[0].namedProperties.join(", ") || "(none returned)"}. ${llmRankResult.models[0].note}`
-        : "AI ASSISTANT VISIBILITY: could not be checked this run.";
-
+          return llmRankResult;
+        })(),
+        (async (): Promise<{ technicalSeo?: TechnicalSeoResult; faqPagePath: string | null }> => {
       // Technical / on-page crawl — read the real site (title, meta, H1s,
       // schema, internal links) so the audit can flag on-page SEO gaps. Adds
       // ~60-90s but is best-effort: if the site can't be rendered we simply
@@ -3266,7 +3271,9 @@ Return ONLY a JSON array of 9 strings.`;
           /* best-effort — technical section is skipped if the crawl fails */
         }
       }
-
+          return { technicalSeo, faqPagePath };
+        })(),
+        (async (): Promise<CitationResult | undefined> => {
       // Local-citation / directory presence — one SerpAPI brand search. This is
       // the LAST of ~a dozen SerpAPI calls in the run, so a rate/quota blip tends
       // to hit HERE first. If it fails, keep the previous run's result rather than
@@ -3288,7 +3295,9 @@ Return ONLY a JSON array of 9 strings.`;
           }),
         };
       }
-
+          return citations;
+        })(),
+        (async (): Promise<PageSpeedResult | undefined> => {
       // PageSpeed / Core Web Vitals. This is a periodic MEASUREMENT, not a per-run
       // thing — the site's real speed doesn't change between audit runs, only
       // Lighthouse's noisy synthetic lab number does. So REUSE the last measurement
@@ -3307,6 +3316,14 @@ Return ONLY a JSON array of 9 strings.`;
           pageSpeed = await callPageSpeed(currentProperty.website);
         }
       }
+          return pageSpeed;
+        })(),
+      ]);
+      const technicalSeo = techResult.technicalSeo;
+      const faqPagePath = techResult.faqPagePath;
+      const aiSummary = llmRankResult
+        ? `AI ASSISTANT VISIBILITY — asked Claude "${llmRankResult.query}" ${llmRankResult.models[0].asks ?? 1}x (AI answers vary per ask, so this is a frequency): ${currentProperty.name} was named in ${llmRankResult.models[0].mentions ?? (llmRankResult.models[0].mentionsTarget ? 1 : 0)} of ${llmRankResult.models[0].asks ?? 1} answers. Communities Claude recommended (most-consistent first): ${llmRankResult.models[0].namedProperties.join(", ") || "(none returned)"}. ${llmRankResult.models[0].note}`
+        : "AI ASSISTANT VISIBILITY: could not be checked this run.";
 
       const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
 
