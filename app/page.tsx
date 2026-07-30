@@ -32,7 +32,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -4821,9 +4821,17 @@ Return ONLY this JSON object, no prose before or after:
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
         .join("\n");
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("The audit did not return a structured result. Try again.");
-      const parsed = JSON.parse(match[0]) as Partial<MarketingAuditResult>;
+      // Extract the FIRST complete JSON object (not greedy-to-last-brace): the model
+      // sometimes adds a trailing note or a second object, which broke JSON.parse with
+      // "Unexpected non-whitespace character after JSON".
+      const jsonStr = extractFirstJsonObject(text);
+      if (!jsonStr) throw new Error("The audit response was incomplete or malformed. Please re-run.");
+      let parsed: Partial<MarketingAuditResult>;
+      try {
+        parsed = JSON.parse(jsonStr) as Partial<MarketingAuditResult>;
+      } catch {
+        throw new Error("The audit response was incomplete or malformed. Please re-run.");
+      }
 
       // When the Apartments.com listing is DARK, inject a fixed recommendation to
       // turn it back on — with an explicit escape hatch in case the property intends
@@ -4937,15 +4945,22 @@ Return ONLY this JSON object, no prose before or after:
         if (hoursRow) {
           if (hoursVerdicts.website) hoursRow.website = hoursVerdicts.website;
           else {
-            // We couldn't parse hours from the site capture. That's a CAPTURE miss —
-            // hours usually live on the Contact page, which our crawl doesn't always
-            // reach — NOT a confirmed absence. Don't show a lenient GOOD (the model
-            // did that with a contradictory "not displayed" note) and don't red it.
-            // Amber "verify"; the model's own Contact-page read is unreliable here.
-            hoursRow.website = {
-              status: "amber",
-              note: "Couldn’t read office hours in the site capture this run — verify live (usually on the Contact page). Consistent with Google/Apartments.com where checked.",
-            };
+            // Couldn't parse hours from the site capture — a CAPTURE miss (hours usually
+            // live on the Contact page our crawl doesn't always reach), NOT a confirmed
+            // absence. If Google AND Apartments.com already agree on the hours, they're
+            // established, so a lone amber on the website reads as a problem when there
+            // isn't one — show it consistent. Otherwise amber "verify".
+            const googleAptsAgree =
+              hoursVerdicts.google?.status === "green" && hoursVerdicts.apartments?.status === "green";
+            hoursRow.website = googleAptsAgree
+              ? {
+                  status: "green",
+                  note: "Hours match across Google and Apartments.com; couldn’t parse the site capture this run (they usually live on the Contact page).",
+                }
+              : {
+                  status: "amber",
+                  note: "Couldn’t read office hours in the site capture this run — verify live (usually on the Contact page). Consistent with Google/Apartments.com where checked.",
+                };
           }
           if (hoursVerdicts.google) hoursRow.google = hoursVerdicts.google;
           if (hoursVerdicts.apartments && !aptIsDark) hoursRow.apartments = hoursVerdicts.apartments;

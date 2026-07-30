@@ -11,6 +11,7 @@ import {
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
   dropDeadDialedNumbers,
+  extractFirstJsonObject,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
@@ -613,6 +614,22 @@ test("seo-queries: finalizeQuerySet leads with brand, dedupes, caps", () => {
   assert.equal(q.length, 6); // capped
   assert.equal(new Set(q.map((s) => s.toLowerCase())).size, 6); // no dupes
   assert.ok(!q.includes("one more that exceeds the cap")); // trimmed by the cap
+});
+
+// ----- Model JSON extraction (first balanced object, ignore trailing junk) ---
+
+test("json: extractFirstJsonObject returns the first balanced object, ignoring trailing content", () => {
+  // The real failure: valid JSON followed by more text ("…after JSON at position N").
+  assert.equal(extractFirstJsonObject('{"a":1}\n\nSome trailing note.'), '{"a":1}');
+  // A second object after the first is ignored.
+  assert.equal(extractFirstJsonObject('prose {"a":{"b":2}} then {"c":3}'), '{"a":{"b":2}}');
+  // Braces inside strings don't break the balance.
+  assert.equal(extractFirstJsonObject('{"note":"a } inside {"}'), '{"note":"a } inside {"}');
+  // Escaped quote inside a string is handled.
+  assert.equal(extractFirstJsonObject('{"q":"say \\"hi\\""}'), '{"q":"say \\"hi\\""}');
+  // Truncated / unbalanced -> null (caller shows a retryable error).
+  assert.equal(extractFirstJsonObject('{"a":1'), null);
+  assert.equal(extractFirstJsonObject("no json here"), null);
 });
 
 // ----- Phantom phone pruning (dial-confirmed dead numbers) -------------------

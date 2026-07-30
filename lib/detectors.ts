@@ -251,3 +251,36 @@ export function dropDeadDialedNumbers<T extends { dialStatus?: string | null }>(
   const kept = list.filter((n) => n?.dialStatus !== "failed");
   return kept.length ? kept : list;
 }
+
+/**
+ * Extract the FIRST complete, balanced JSON object from a model response. The old
+ * `text.match(/\{[\s\S]*\}/)` grabbed from the first "{" to the LAST "}", so any
+ * trailing prose or a second object after the JSON produced "Unexpected non-whitespace
+ * character after JSON" on parse. This walks braces (respecting quoted strings and
+ * escapes) and returns just the first balanced object, or null if none is complete
+ * (e.g. a truncated response) so the caller can fail with a clear, retryable message.
+ */
+export function extractFirstJsonObject(text: string): string | null {
+  const s = text || "";
+  const start = s.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') {
+      inStr = true;
+    } else if (c === "{") {
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null; // never balanced -> truncated / malformed
+}
