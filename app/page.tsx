@@ -6127,7 +6127,7 @@ ${reviewLines || "(no new reviews in this period)"}
 REVIEWS WITH NO OWNER REPLY (write a suggested reply to post for each):
 ${gapLines}
 
-REVIEWS WITH AN OWNER REPLY (flag ONLY the ones whose reply reads generic/templated):
+REVIEWS WITH AN OWNER REPLY (flag ONLY a reply that is GENUINELY problematic — see the strict rule below; a warm, polite reply to a positive review is GOOD and must NOT be flagged):
 ${qualityLines}
 
 ${CRES_PLAYBOOK}
@@ -6145,7 +6145,7 @@ Return ONLY this JSON object, no prose:
     {"id": "g0", "suggestedResponse": "a warm, specific reply to post for that review; for a no-text review keep it a brief friendly thank-you; for a 1-2 star acknowledge the concern and offer a direct contact"}
   ],
   "responseQuality": [
-    {"id": "q0", "issue": "why this existing reply reads generic/templated", "suggestedRewrite": "a short, personalized rewrite referencing the review or a brand differentiator"}
+    {"id": "q0", "issue": "the SPECIFIC problem — a mishandled complaint (defensive/dismissive/ignores the concern on a 1-2 star review) or a verbatim copy-paste used across multiple reviews; NOT mere brevity, emojis, or friendly boilerplate", "suggestedRewrite": "a short, improved reply that fixes that specific problem"}
   ],
   "recommendations": [
     {"priority": "QUICK WIN"|"FOUNDATIONAL"|"CONTENT"|"STRATEGIC", "title": "imperative, <=12 words", "what": "concrete action, name staff/incentive when relevant", "why": "the observed review data + impact", "effort": "~<time> · <who>", "success": "measurable outcome", "source": "which review finding"}
@@ -6155,7 +6155,7 @@ Return ONLY this JSON object, no prose:
 RULES:
 - sentimentPeriod: derive themes ONLY from the period review texts above; if a review names a staff member in a 4/5-star, note the $25 incentive per CRES P&P.
 - responseGaps: one entry per [gN] review above, using its exact id. Empty array if there are none.
-- responseQuality: include ONLY the [qN] reviews whose reply is genuinely generic/templated, using the exact id. Omit good replies. Empty array if none.
+- responseQuality: HIGH BAR — include a [qN] reply ONLY if it is GENUINELY problematic: (a) on a 1-2 star review, the reply is defensive, dismissive, argumentative, or fails to acknowledge the concern / offer a contact; OR (b) the SAME reply text is copy-pasted verbatim across 3+ different reviews. A warm, polite, on-brand thank-you to a positive review is GOOD — do NOT flag it for being short, using emojis, or sounding boilerplate. Most replies should NOT be flagged; when in doubt, OMIT. Empty array is the expected, common result.
 - recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$150/$250 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.`;
 
       // maxTokens must cover narratives + up to 12 suggested replies + up to 12
