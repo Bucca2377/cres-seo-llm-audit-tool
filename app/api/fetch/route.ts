@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
       });
       const page = await ctx.newPage();
       try {
-        const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: 30000 });
+        const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: 22000 });
         if (pollLate) {
           // Wait for LATE-injected content — specials/concession popups that
           // Entrata/NurtureBoss inject SECONDS after the page looks done. Poll up

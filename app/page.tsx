@@ -4445,7 +4445,7 @@ function MarketingAuditTab({
       let siteBlocked = false;
       let leasingPlatform: string | null = null;
       try {
-        const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 8 });
+        const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 5 });
         const sitePages = siteRes.pages || [];
         siteText = sitePages
           .map((p) => `=== ${p.url} (status ${p.status ?? "?"}) ===\n${(p.text || "").trim() || "[no content rendered]"}`)
