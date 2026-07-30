@@ -4477,18 +4477,43 @@ function MarketingAuditTab({
           } catch {
             /* ignore */
           }
+          // Office hours are commonly in the site FOOTER (on every page) and/or on a
+          // Contact page. The headless render reads only VISIBLE text, so a footer that
+          // hydrates late or sits behind a reveal gets missed — but the raw HTML has it.
+          // Fetch candidate pages via /api/pagetext (a plain fetch that reads the raw
+          // HTML, Bright Data fallback), homepage INCLUDED, until one yields parseable
+          // hours. The homepage catches footer hours even when there's no Contact page.
           const crawledContact = (siteText.match(/===\s*(https?:\/\/[^\s(]*contact[^\s(]*)/i) || [])[1];
-          const contactUrl = crawledContact || (origin ? `${origin}/contact/` : "");
-          if (contactUrl) {
-            setProgress("Reading the Contact page for office hours…");
-            const pr = await fetch("/api/pagetext", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url: contactUrl }),
-            });
-            const pj = (await pr.json()) as { text?: string };
-            if (pj?.text && Object.keys(parseWeekHours(pj.text)).length > 0) {
-              siteText += `\n\n=== Contact page (fetched directly: ${contactUrl}) ===\n${pj.text}`;
+          const candidates = Array.from(
+            new Set(
+              [crawledContact, origin ? `${origin}/contact/` : "", origin ? `${origin}/contact-us/` : "", origin].filter(Boolean)
+            )
+          );
+          if (candidates.length) {
+            setProgress("Reading the site for office hours…");
+            for (const url of candidates) {
+              try {
+                const pr = await fetch("/api/pagetext", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ url }),
+                });
+                const pj = (await pr.json()) as { text?: string };
+                const parsed = pj?.text ? parseWeekHours(pj.text) : {};
+                if (Object.keys(parsed).length > 0) {
+                  // Append a COMPACT, re-parseable hours line (not the whole page) so the
+                  // downstream reconciliation + the model pick it up without bloating the
+                  // prompt (which would risk truncating the model's JSON).
+                  const compact = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+                    .filter((d) => parsed[d])
+                    .map((d) => `${d.charAt(0).toUpperCase()}${d.slice(1)}: ${parsed[d]}`)
+                    .join(", ");
+                  siteText += `\n\n=== Office hours (from ${url}) ===\nOffice Hours ${compact}`;
+                  break;
+                }
+              } catch {
+                /* try the next candidate */
+              }
             }
           }
         } catch {
