@@ -1945,6 +1945,17 @@ interface SEOAuditResults {
  */
 async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> {
   if (!url) return undefined;
+  // Measure the CANONICAL page, not the stored tracking URL. Property website links
+  // often carry ?rccustomid=…&utm_source=gmb params (auto-captured from the Google
+  // listing); PageSpeed following those can land on a redirect/variant and return a
+  // wildly wrong lab reading (e.g. a 22s LCP when real users see 2s). Strip query+hash.
+  let cleanUrl = url;
+  try {
+    const u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+    cleanUrl = u.origin + u.pathname;
+  } catch {
+    /* keep the original if it won't parse */
+  }
   try {
     const strategies = await Promise.all(
       (["mobile", "desktop"] as const).map(async (strategy) => {
@@ -1952,7 +1963,7 @@ async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> 
           const r = await fetch("/api/pagespeed", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, strategy, samples: 3 }),
+            body: JSON.stringify({ url: cleanUrl, strategy, samples: 3 }),
           });
           const d = await r.json();
           if (!r.ok || d.error) {
@@ -1967,7 +1978,7 @@ async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> 
     // Return the result even when both strategies failed (e.g. the free
     // keyless PSI quota is exhausted) so the panel can show a helpful hint
     // instead of silently rendering nothing.
-    return { url, checkedAt: new Date().toISOString(), strategies };
+    return { url: cleanUrl, checkedAt: new Date().toISOString(), strategies };
   } catch {
     return undefined;
   }
@@ -2619,7 +2630,7 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
                     {verdict.label}
                   </span>
                   <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#9aa3ad", marginTop: 2 }}>
-                    real-user Core Web Vitals{s.score != null ? ` · lab score ${s.score}` : ""}
+                    real-user Core Web Vitals (28-day)
                   </span>
                 </span>
               ) : (
@@ -2652,22 +2663,28 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
                     </div>
                   </div>
                 )}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
-                  <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#9aa3ad", width: "100%" }}>
-                    Lab estimate{s.samples && s.samples > 1 ? ` · median of ${s.samples} runs` : ""}
-                    {s.scoreRange && s.scoreRange.max > s.scoreRange.min ? ` (ranged ${s.scoreRange.min}–${s.scoreRange.max})` : ""}:
-                  </span>
-                  {[
-                    ["LCP", s.lcp],
-                    ["CLS", s.cls],
-                    ["TBT", s.tbt],
-                    ["FCP", s.fcp],
-                  ].map(([k, v]) => (
-                    <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
-                      <strong style={{ color: "#333" }}>{k}</strong> {v}
+                {/* The synthetic LAB estimate swings wildly (a throttled run can report a
+                    22s LCP when real users see 2s). Only show it when there's NO real-user
+                    field data — otherwise the field data above IS the accurate answer and
+                    the lab numbers just look broken and contradict it. */}
+                {!s.field && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                    <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#9aa3ad", width: "100%" }}>
+                      Lab estimate (synthetic — no real-user data yet){s.samples && s.samples > 1 ? ` · median of ${s.samples} runs` : ""}
+                      {s.scoreRange && s.scoreRange.max > s.scoreRange.min ? ` (ranged ${s.scoreRange.min}–${s.scoreRange.max})` : ""}:
                     </span>
-                  ))}
-                </div>
+                    {[
+                      ["LCP", s.lcp],
+                      ["CLS", s.cls],
+                      ["TBT", s.tbt],
+                      ["FCP", s.fcp],
+                    ].map(([k, v]) => (
+                      <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
+                        <strong style={{ color: "#333" }}>{k}</strong> {v}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -7991,37 +8008,34 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
                   <thead>
                     <tr>
                       <th style={findingsTh}>Device</th>
-                      <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>Score</th>
+                      <th style={{ ...findingsTh, width: 80, textAlign: "center" }}>Result</th>
                       <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>LCP</th>
                       <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>CLS</th>
-                      <th style={{ ...findingsTh, width: 70, textAlign: "center" }}>TBT</th>
+                      <th style={{ ...findingsTh, width: 80, textAlign: "center" }}>INP / TBT</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {seo.pageSpeed.strategies.map((s, i) => (
-                      <tr key={i} className="pb-avoid">
-                        <td style={{ ...findingsTd, textTransform: "capitalize" }}>{s.strategy}</td>
-                        <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: s.score == null ? "#888" : s.score >= 90 ? "#15803d" : s.score >= 50 ? "#9a7200" : "#b14a2a" }}>
-                          {s.score == null ? "—" : `${s.score}/100`}
-                        </td>
-                        <td style={{ ...findingsTd, textAlign: "center" }}>{s.lcp}</td>
-                        <td style={{ ...findingsTd, textAlign: "center" }}>{s.cls}</td>
-                        <td style={{ ...findingsTd, textAlign: "center" }}>{s.tbt}</td>
-                      </tr>
-                    ))}
+                    {/* Field (real-user) data is the accurate benchmark, so show it when
+                        present; fall back to the synthetic lab only when there's none. This
+                        keeps a throttled 22s lab LCP off a client report when real users see 2s. */}
+                    {seo.pageSpeed.strategies.map((s, i) => {
+                      const v = s.field ? fieldVerdict(s.field.category) : null;
+                      return (
+                        <tr key={i} className="pb-avoid">
+                          <td style={{ ...findingsTd, textTransform: "capitalize" }}>{s.strategy}</td>
+                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: v ? v.color : s.score == null ? "#888" : s.score >= 90 ? "#15803d" : s.score >= 50 ? "#9a7200" : "#b14a2a" }}>
+                            {v ? v.label : s.score == null ? "—" : `${s.score}/100`}
+                          </td>
+                          <td style={{ ...findingsTd, textAlign: "center" }}>{s.field ? s.field.lcp : s.lcp}</td>
+                          <td style={{ ...findingsTd, textAlign: "center" }}>{s.field ? s.field.cls : s.cls}</td>
+                          <td style={{ ...findingsTd, textAlign: "center" }}>{s.field ? s.field.inp : s.tbt}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
-                {seo.pageSpeed.strategies.some((s) => s.field) && (
-                  <p style={{ ...bodyP, fontSize: 10, color: "#15803d", marginTop: 4 }}>
-                    Real users (Google 28-day field data — the stable benchmark):{" "}
-                    {seo.pageSpeed.strategies
-                      .filter((s) => s.field)
-                      .map((s) => `${s.strategy} LCP ${s.field!.lcp}, CLS ${s.field!.cls}, INP ${s.field!.inp}`)
-                      .join(" · ")}
-                  </p>
-                )}
                 <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 4 }}>
-                  Score and lab metrics above are a synthetic lab test (measured periodically, not live); the Real-users line is the accurate benchmark. 90+ good · 50–89 needs work · under 50 poor. Mobile is Google&apos;s ranking signal.
+                  Shows Google&apos;s 28-day real-user field data where available (the accurate benchmark); otherwise a synthetic lab test. &ldquo;Good&rdquo; / 90+ is strong, &ldquo;Needs work&rdquo; / 50–89 is middling, &ldquo;Poor&rdquo; / under 50 is weak. Mobile is Google&apos;s ranking signal.
                 </p>
               </div>
             )}
