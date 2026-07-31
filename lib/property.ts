@@ -857,6 +857,10 @@ export async function callFetch(opts: {
 }): Promise<{
   pages: { url: string; status: number | null; text: string; seo?: Omit<PageSeo, "url" | "status"> }[];
   images?: string[];
+  /** Office hours read deterministically from the rendered DOM (footer/widget/JSON-LD). */
+  officeHoursHtml?: Record<string, string> | null;
+  /** True when any rendered page shows a self-guided virtual tour (host embed or tour phrase). */
+  virtualTour?: boolean;
   error?: string;
 }> {
   const r = await fetch("/api/fetch", {

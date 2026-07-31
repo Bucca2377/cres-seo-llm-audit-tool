@@ -53,6 +53,34 @@ export function detectLeasingPlatform(html: string): string | null {
   return null;
 }
 
+/**
+ * Known self-guided VIRTUAL-TOUR hosts. A tour embed (script/iframe/link) or a
+ * provider domain listed in the page's JSON is the strongest present-signal — it
+ * survives even when the widget itself never renders as visible text. `realync`
+ * is a distinctive brand token; `peek` is constrained to a domain-ish shape
+ * (peek.us / peek.com / peekpro) so ordinary prose ("take a peek inside") can't
+ * false-fire it.
+ */
+const VIRTUAL_TOUR_HOSTS =
+  /my\.matterport\.com|matterport\.com|ricoh360\.com|kuula\.co|cloudpano\.com|zillow\.com[\\/]+view-3d-home|youriguide\.com|realync|peek(?:pro|\.[a-z])/i;
+
+/** Visible-ish tour phrases / link text. Kept tight so bare "360" or "tour"
+ *  tokens (common on any site) don't count — only the real tour phrases do. */
+const VIRTUAL_TOUR_PHRASES = /virtual\s+tour|3\s*-?\s*d\s*tour|360\s*°?\s*tour|matterport/i;
+
+/**
+ * Detect a self-guided VIRTUAL TOUR from a website's RAW rendered HTML (the DOM),
+ * not the crawler's visible text. Returns true when the HTML shows a known tour
+ * host anywhere (embed script/iframe/link/JSON domain) OR a real tour phrase as
+ * visible-ish text. Otherwise false — so a corporate site with a stray "tour" or
+ * "360" word does NOT trip it, while every real property site (whose tour lives in
+ * a host embed or a "Virtual Tour" link) does.
+ */
+export function virtualTourFromHtml(html: string): boolean {
+  const h = html || "";
+  return VIRTUAL_TOUR_HOSTS.test(h) || VIRTUAL_TOUR_PHRASES.test(h);
+}
+
 export function detectWebsiteFeatures(siteText: string): WebsiteFeatureSignals {
   const t = siteText || "";
   return {

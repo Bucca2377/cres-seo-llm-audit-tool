@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { specialFromHtml } from "@/lib/detectors";
-import { detectLeasingPlatform } from "@/lib/website-features";
+import { detectLeasingPlatform, virtualTourFromHtml } from "@/lib/website-features";
+import { officeHoursFromHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -255,14 +256,19 @@ export async function POST(req: NextRequest) {
         // (online application, tour scheduling, availability) even when those live in
         // a JS widget the crawl can't render as text. page.content() includes the
         // <script src>/<iframe src> tags that document.body.innerText strips.
-        let platform: string | null = null;
-        if (pollLate) {
-          try {
-            platform = detectLeasingPlatform(await page.content());
-          } catch {
-            /* ignore — platform is best-effort */
-          }
+        // Raw rendered HTML (the DOM). Used for platform detection AND the two
+        // deterministic detectors below — both read footers/widgets/JSON-LD that
+        // document.body.innerText (the visible-text crawl) drops. Captured for
+        // EVERY page so a followed /contact or /amenities page can supply the hours
+        // or the virtual-tour signal the homepage lacks.
+        let rawHtml = "";
+        try {
+          rawHtml = await page.content();
+        } catch {
+          /* ignore — content() can throw on a torn-down page */
         }
+        let platform: string | null = null;
+        if (pollLate && rawHtml) platform = detectLeasingPlatform(rawHtml);
         // If the browser got a Cloudflare/bot wall (common from Railway's
         // datacenter IP — a 403 "verify you're not a bot" page), we never saw
         // the real site or its JS-injected specials popup. Re-fetch through the
@@ -284,10 +290,17 @@ export async function POST(req: NextRequest) {
             const special = specialFromHtml(html);
             if (special) pageText += `\n[SPECIAL] ${special}`;
             // The bot wall hid our rendered content, so detect the platform from the
-            // rescued raw HTML instead.
+            // rescued raw HTML instead. Prefer the fuller rescued document for the
+            // hours / virtual-tour detectors too.
             if (!platform) platform = detectLeasingPlatform(html);
+            if (html.length > rawHtml.length) rawHtml = html;
           }
         }
+        // Deterministic reads off the rendered DOM (see note above). Built here so
+        // the crawler carries them alongside the visible text; the marketing audit
+        // is NOT wired to consume them yet.
+        const officeHoursHtml = officeHoursFromHtml(rawHtml);
+        const virtualTour = virtualTourFromHtml(rawHtml);
         let links: { href: string; text: string }[] = [];
         if (wantLinks) {
           links = await page.evaluate(() =>
@@ -353,7 +366,7 @@ export async function POST(req: NextRequest) {
             wordCount: words,
           };
         });
-        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo, platform };
+        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo, platform, officeHoursHtml, virtualTour };
       } finally {
         await ctx.close();
       }
@@ -376,6 +389,8 @@ export async function POST(req: NextRequest) {
       images: string[];
       seo?: PageSeoData;
       platform?: string | null;
+      officeHoursHtml?: Record<string, string> | null;
+      virtualTour?: boolean;
     } = {
       status: null,
       text: "",
@@ -393,6 +408,12 @@ export async function POST(req: NextRequest) {
     }
     pages.push({ url: start, status: home.status, text: home.text, seo: home.seo });
     collectImages(home.images);
+    // Deterministic rendered-DOM reads, aggregated across pages: office hours from
+    // the FIRST page that yields a map (homepage first), virtual tour true if ANY
+    // rendered page shows it. Returned alongside the pages; the marketing audit is
+    // NOT wired to consume these yet.
+    let officeHoursHtml: Record<string, string> | null = home.officeHoursHtml ?? null;
+    let virtualTour = !!home.virtualTour;
 
     if (body.follow && maxPages > 1) {
       let origin = "";
@@ -424,6 +445,8 @@ export async function POST(req: NextRequest) {
           const r = await render(c, false);
           pages.push({ url: c, status: r.status, text: r.text, seo: r.seo });
           collectImages(r.images);
+          if (!officeHoursHtml && r.officeHoursHtml) officeHoursHtml = r.officeHoursHtml;
+          if (r.virtualTour) virtualTour = true;
         } catch {
           pages.push({ url: c, status: null, text: "" });
         }
@@ -431,7 +454,7 @@ export async function POST(req: NextRequest) {
     }
 
     const images = Array.from(imageSet);
-    return NextResponse.json({ pages, images, platform: home.platform ?? null, _meta: { source: "playwright", pages: pages.length, images: images.length } });
+    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Render failed", pages },

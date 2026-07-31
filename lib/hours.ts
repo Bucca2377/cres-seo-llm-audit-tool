@@ -187,6 +187,98 @@ export function aptOfficeHoursFromRawHtml(html: string): Record<string, string> 
   return out;
 }
 
+/**
+ * JSON-LD `OpeningHoursSpecification` (schema.org) → day map. Split on the type
+ * token so each spec's own dayOfWeek/opens/closes are read from the slice that
+ * follows it (they always sit inside the same object). Handles the array form
+ * (`"dayOfWeek":["Monday","Tuesday"]`) and the string form (`"dayOfWeek":"Monday"`),
+ * pretty-printed or minified, and "HH:MM" or "HH:MM:SS" times. A spec whose opens
+ * equals its closes (the common `00:00`→`00:00` "closed" encoding) → "Closed".
+ * Days not listed = "Closed". Null when no spec yields a day.
+ */
+function officeHoursFromJsonLd(html: string): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  let found = false;
+  for (const seg of html.split(/"OpeningHoursSpecification"/i).slice(1)) {
+    const dayM = seg.match(/"dayOfWeek"\s*:\s*(\[[^\]]*\]|"[^"]*")/i);
+    if (!dayM) continue;
+    const days = [...dayM[1].matchAll(/"([A-Za-z]+)"/g)].map((m) => m[1]);
+    if (!days.length) continue;
+    const opens = seg.match(/"opens"\s*:\s*"(\d{1,2}):(\d{2})(?::\d{2})?"/i);
+    const closes = seg.match(/"closes"\s*:\s*"(\d{1,2}):(\d{2})(?::\d{2})?"/i);
+    let disp = "Closed";
+    if (opens && closes) {
+      const o = +opens[1] * 60 + +opens[2];
+      const c = +closes[1] * 60 + +closes[2];
+      disp = o === c ? "Closed" : `${to12h(+opens[1], +opens[2])} - ${to12h(+closes[1], +closes[2])}`;
+    }
+    for (const d of days) {
+      const i = fullDayIndex(d);
+      if (i >= 0) { out[FULL_DAYS[i]] = disp; found = true; }
+    }
+  }
+  if (!found) return null;
+  for (const d of FULL_DAYS) if (!out[d]) out[d] = "Closed"; // schema omits a day => closed
+  return out;
+}
+
+/**
+ * DoubleMap-style widget markup (Cambridge / liveatcf):
+ *   <dt day="0">Monday</dt> <dd> <time>9:00 am</time> - <time>6:00 pm</time> </dd>
+ * For each <dt>DayName</dt> immediately followed by its <dd>, pull the <time>
+ * values (two → "9:00 am - 6:00 pm", one → that single value) or read "Closed"
+ * when the <dd> text says so. Non-day <dt>s (other <dl> lists on the page) are
+ * skipped via fullDayIndex. Null when no day row is found.
+ */
+function officeHoursFromDoubleMap(html: string): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  let found = false;
+  const strip = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
+  for (const m of html.matchAll(/<dt\b[^>]*>([\s\S]*?)<\/dt>\s*<dd\b[^>]*>([\s\S]*?)<\/dd>/gi)) {
+    const i = fullDayIndex(strip(m[1]));
+    if (i < 0) continue;
+    if (/closed/i.test(strip(m[2]))) {
+      out[FULL_DAYS[i]] = "Closed";
+      found = true;
+      continue;
+    }
+    const times = [...m[2].matchAll(/<time\b[^>]*>([\s\S]*?)<\/time>/gi)].map((t) => strip(t[1])).filter(Boolean);
+    if (times.length >= 2) { out[FULL_DAYS[i]] = `${times[0]} - ${times[1]}`; found = true; }
+    else if (times.length === 1) { out[FULL_DAYS[i]] = times[0]; found = true; }
+  }
+  return found ? out : null;
+}
+
+/**
+ * Read office hours from a website's RAW rendered HTML (the DOM), not the
+ * crawler's visible text. The visible-text read misses hours that live only in a
+ * footer <dl> widget, a JSON-LD block, or late-hydrated markup. Tries three real
+ * sources IN ORDER — schema.org JSON-LD, a DoubleMap-style <dt>/<dd><time> widget,
+ * then a plain-text footer fallback via parseWeekHours — and the FIRST that yields
+ * at least one day wins. Returns a day→hours map (keys "monday".."sunday", values
+ * like "9 AM - 6 PM" or "Closed") or null when none yield a day.
+ */
+export function officeHoursFromHtml(html: string): Record<string, string> | null {
+  if (!html) return null;
+
+  const jsonLd = officeHoursFromJsonLd(html);
+  if (jsonLd) return jsonLd;
+
+  const doubleMap = officeHoursFromDoubleMap(html);
+  if (doubleMap) return doubleMap;
+
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parsed = parseWeekHours(text);
+  return Object.keys(parsed).length ? parsed : null;
+}
+
 export interface HoursCellVerdict {
   status: "green" | "amber" | "red";
   note: string;

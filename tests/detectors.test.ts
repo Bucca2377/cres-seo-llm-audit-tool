@@ -14,8 +14,8 @@ import {
   extractFirstJsonObject,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
-import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml } from "../lib/hours";
-import { detectWebsiteFeatures, detectLeasingPlatform } from "../lib/website-features";
+import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml } from "../lib/hours";
+import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
@@ -445,6 +445,86 @@ test("website-features: detects the leasing platform from raw HTML embed scripts
   assert.equal(detectLeasingPlatform('<script src="https://prospectportal.entrata.com/x.js">'), "Entrata");
   // A plain marketing site with no leasing widget -> null (we won't infer features).
   assert.equal(detectLeasingPlatform("<html><body>Welcome to our community</body></html>"), null);
+});
+
+// ----- Office hours & virtual tour from RAW HTML (rendered DOM) ----------------
+// These read the DOM (footers/widgets/JSON-LD) that the visible-text crawl misses.
+// Snippets mirror the real corpus (Pecan Creek JSON-LD, Cambridge DoubleMap widget,
+// Asbury/Forest Cove footer text, and the Sixcord corporate site for the VT negative).
+
+test("hours: officeHoursFromHtml reads JSON-LD OpeningHoursSpecification (Mon-Fri 9-6, Sat closed)", () => {
+  // The real Pecan Creek shape: one spec per day, opens/closes "HH:MM:SS", and the
+  // 00:00:00->00:00:00 "closed" encoding. Saturday is closed here; Sunday is omitted
+  // entirely and must fill to "Closed".
+  const mkDay = (d: string, o: string, c: string) =>
+    `{"@type":"OpeningHoursSpecification","dayOfWeek":["${d}"],"opens":"${o}","closes":"${c}"}`;
+  const raw =
+    '<script type="application/ld+json">{"@type":"ApartmentComplex","openingHoursSpecification":[' +
+    ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => mkDay(d, "09:00:00", "18:00:00")).join(",") +
+    "," +
+    mkDay("Saturday", "00:00:00", "00:00:00") +
+    "]}</script>";
+  const h = officeHoursFromHtml(raw)!;
+  assert.ok(h);
+  assert.equal(h.monday, "9 AM - 6 PM");
+  assert.equal(h.friday, "9 AM - 6 PM");
+  assert.equal(h.saturday, "Closed"); // opens === closes -> closed
+  assert.equal(h.sunday, "Closed"); // day omitted from the schema -> closed
+  // Also accepts the string (non-array) dayOfWeek form and "HH:MM" without seconds.
+  const strForm = officeHoursFromHtml(
+    '"OpeningHoursSpecification","dayOfWeek":"Monday","opens":"10:00","closes":"17:00"'
+  )!;
+  assert.equal(strForm.monday, "10 AM - 5 PM");
+});
+
+test("hours: officeHoursFromHtml reads a DoubleMap <dt>/<dd><time> widget", () => {
+  // The real Cambridge / liveatcf markup.
+  const raw =
+    '<dl class="open-hours-data">' +
+    '<div class="open-hours-item"><dt day="0">Monday</dt> <dd> <time>9:00 am</time> - <time>6:00 pm</time> </dd></div>' +
+    '<div class="open-hours-item"><dt day="5">Saturday</dt> <dd> <time>10:00 am</time> - <time>2:00 pm</time> </dd></div>' +
+    '<div class="open-hours-item"><dt day="6">Sunday</dt> <dd>Closed</dd></div>' +
+    "</dl>";
+  const h = officeHoursFromHtml(raw)!;
+  assert.ok(h);
+  assert.equal(h.monday, "9:00 am - 6:00 pm");
+  assert.equal(h.saturday, "10:00 am - 2:00 pm");
+  assert.equal(h.sunday, "Closed"); // <dd>Closed</dd>
+});
+
+test("hours: officeHoursFromHtml falls back to plain footer text", () => {
+  // The Asbury / Forest Cove / Vivian footer shape (no JSON-LD, no widget markup).
+  const raw =
+    "<footer><p>Office Hours</p> Monday - Friday: 10:00am - 6:00pm Saturday: 10:00am - 5:00pm Sunday: Closed</footer>";
+  const h = officeHoursFromHtml(raw)!;
+  assert.ok(h);
+  assert.match(h.monday, /10:00am - 6:00pm/i); // range expanded across Mon-Fri
+  assert.match(h.wednesday, /10:00am - 6:00pm/i);
+  assert.match(h.saturday, /10:00am - 5:00pm/i);
+  assert.match(h.sunday, /closed/i);
+});
+
+test("hours: officeHoursFromHtml returns null when the HTML has no hours anywhere", () => {
+  assert.equal(officeHoursFromHtml("<html><body>Welcome home! Contact us for availability.</body></html>"), null);
+  assert.equal(officeHoursFromHtml(""), null);
+});
+
+test("website-features: virtualTourFromHtml detects a tour host embed or a tour link", () => {
+  // A Matterport iframe (host embed) -> true.
+  assert.equal(virtualTourFromHtml('<iframe src="https://my.matterport.com/show/?m=abc123"></iframe>'), true);
+  // A "Virtual Tours" nav link (visible-ish phrase) -> true.
+  assert.equal(virtualTourFromHtml('<a href="/virtual-tours">Virtual Tours</a>'), true);
+  // Other real hosts from the corpus JSON provider list.
+  assert.equal(virtualTourFromHtml('{"providers":["kuula.co/share","ricoh360.com","cloudpano.com"]}'), true);
+});
+
+test("website-features: virtualTourFromHtml stays false on a bare corporate page (the Sixcord case)", () => {
+  // Sixcord's raw HTML carries the bare words "tour" and "360" but NONE of the real
+  // tour phrases/hosts -> must NOT false-fire.
+  const corporate =
+    "<html><body><h1>About Our Company</h1><p>Take a guided tour of our services and explore 360 degrees of innovation. Take a peek inside.</p></body></html>";
+  assert.equal(virtualTourFromHtml(corporate), false);
+  assert.equal(virtualTourFromHtml(""), false);
 });
 
 // ----- Google review rank (SEO audit: property vs local Map Pack ratings) ----

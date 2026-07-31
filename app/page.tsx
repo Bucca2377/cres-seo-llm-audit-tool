@@ -4461,6 +4461,12 @@ function MarketingAuditTab({
       let siteImages: string[] = [];
       let siteBlocked = false;
       let leasingPlatform: string | null = null;
+      // AUTHORITATIVE office-hours + virtual-tour signals read from the RENDERED DOM
+      // raw HTML by the fetch route (officeHoursFromHtml / virtualTourFromHtml — see
+      // lib/hours + lib/website-features, validated against a real platform corpus).
+      // The crawl's VISIBLE text misses footers/JSON-LD/widget markup; these don't.
+      let officeHoursHtml: Record<string, string> | null = null;
+      let websiteVtFromHtml = false;
       try {
         const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 5 });
         const sitePages = siteRes.pages || [];
@@ -4469,6 +4475,10 @@ function MarketingAuditTab({
           .join("\n\n");
         siteImages = siteRes.images || [];
         leasingPlatform = (siteRes as { platform?: string | null }).platform ?? null;
+        officeHoursHtml =
+          (siteRes as { officeHoursHtml?: Record<string, string> | null }).officeHoursHtml ?? null;
+        websiteVtFromHtml =
+          (siteRes as { virtualTour?: boolean | null }).virtualTour === true;
         // "Blocked" = nothing usable came back (empty, or every page 403/thin) —
         // e.g. an aggressive Cloudflare challenge our headless browser can't pass.
         // In that case we tell Claude to fetch the site with its OWN web_fetch,
@@ -4486,7 +4496,11 @@ function MarketingAuditTab({
       // crawl surfaced no hours, fetch the Contact page directly (plain fetch, Bright
       // Data fallback) and fold its text into siteText so the hours reconciliation,
       // the phone inventory, AND the model all see the real Contact-page content.
-      if (current.website && Object.keys(parseWeekHours(siteText || "")).length === 0) {
+      if (
+        current.website &&
+        !(officeHoursHtml && Object.keys(officeHoursHtml).length) &&
+        Object.keys(parseWeekHours(siteText || "")).length === 0
+      ) {
         try {
           let origin = "";
           try {
@@ -4650,7 +4664,13 @@ function MarketingAuditTab({
       // and flag the real minority. Website + Google are authoritative (a genuine
       // conflict between them is RED); a reader-derived ILS outlier is AMBER "verify".
       // Computed up-front and applied to the consistency hours row below.
-      const websiteHoursParsed = parseWeekHours(siteText || "");
+      // Prefer the rendered-DOM detector (officeHoursFromHtml) — it reads JSON-LD /
+      // DoubleMap / footer markup the visible-text crawl drops — and fall back to
+      // parsing the crawl text (which now also carries the compact Contact-page line).
+      const websiteHoursParsed =
+        officeHoursHtml && Object.keys(officeHoursHtml).length
+          ? officeHoursHtml
+          : parseWeekHours(siteText || "");
       const hoursVerdicts = reconcileOfficeHours([
         { key: "website", label: "the website", hours: websiteHoursParsed, authoritative: true },
         { key: "google", label: "Google", hours: officeHours, authoritative: true },
@@ -4783,10 +4803,10 @@ function MarketingAuditTab({
       // detected these in code (they'd otherwise contradict the corrected table).
       const featurePresent: string[] = [];
       if (websiteFeatures.preferredEmployer) featurePresent.push("a Preferred Employer Program page");
-      if (websiteFeatures.virtualTour || aptHasVirtualTour) featurePresent.push("a virtual tour / 3D tour");
+      if (websiteFeatures.virtualTour || websiteVtFromHtml || aptHasVirtualTour) featurePresent.push("a virtual tour / 3D tour");
       if (websiteFeatures.tourScheduling || leasingPlatform) featurePresent.push("self-serve tour scheduling");
       if (websiteFeatures.onlineApplication || leasingPlatform) featurePresent.push("an online application");
-      const vtPresent = websiteFeatures.virtualTour || aptHasVirtualTour;
+      const vtPresent = websiteFeatures.virtualTour || websiteVtFromHtml || aptHasVirtualTour;
       const websiteFeatureBlock =
         featurePresent.length || leasingPlatform
           ? `WEBSITE FEATURES — DETERMINISTIC GROUND TRUTH (verified in code):${leasingPlatform ? ` the website runs on ${leasingPlatform}, which provides self-serve tour scheduling, online applications, and live availability.` : ""}${featurePresent.length ? ` The website HAS ${featurePresent.join(", ")}.` : ""} These features are LIVE and ACCESSIBLE. Do NOT state anywhere — executive summary, findings, or recommendations — that any of them is missing, absent, "not found", "not displayed", "not embedded", "confirmed to exist but not shown", or that prospects "can't experience" them, and do NOT recommend adding/building/publishing/"verifying" them.${vtPresent ? " In particular: the property HAS a virtual/3D tour that IS viewable — never frame virtual tours as a gap or a missing/undisplayed asset." : ""}`
@@ -5060,8 +5080,10 @@ Return ONLY this JSON object, no prose before or after:
         }
         setWeb(
           /virtual tour/i,
-          feats.virtualTour || aptVT,
-          feats.virtualTour ? "Virtual tour available on the site." : "Virtual tours confirmed (present on the Apartments.com listing).",
+          feats.virtualTour || websiteVtFromHtml || aptVT,
+          feats.virtualTour || websiteVtFromHtml
+            ? "Virtual tour available on the site."
+            : "Virtual tours confirmed (present on the Apartments.com listing).",
           "Couldn’t confirm a virtual tour from the capture — verify live (often on the floor-plans page)."
         );
         // A recognized leasing platform (Funnel/RentCafe/Entrata/…) provides
