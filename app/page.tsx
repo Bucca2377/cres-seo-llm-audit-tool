@@ -2894,7 +2894,8 @@ function SEOAudit({
 
       let queries: string[];
       if (stickySet.length > 0) {
-        // Reuse the saved set exactly — no AI generation, no drift.
+        // Reuse the saved set — no AI generation, no drift — so keyword-rank movement
+        // stays comparable run to run.
         setProgress("Loading your tracked search queries…");
         const seen = new Set<string>();
         queries = [];
@@ -2903,6 +2904,25 @@ function SEOAudit({
           if (seen.has(key)) continue;
           seen.add(key);
           queries.push(q);
+        }
+        // NON-DESTRUCTIVE TOP-UP: a set generated before the 10-query, city-targeted
+        // logic can be stuck at 3-4 old phrases forever (the set is sticky and only
+        // regenerates on a full reset). When the saved set is short, ADD the
+        // always-track brand + bedroom-by-city + amenity-by-city stock searches that
+        // are missing — existing phrases keep their place (only the brand leads), so
+        // the rank-trend history on them stays intact while the set fills toward 10.
+        // It persists (saved as trackedQueries below), so it self-heals in one run.
+        if (queries.length < 8) {
+          const cityGeo = (extractLocation(currentProperty.address) || "").split(",")[0].trim();
+          const topUp = [
+            ...bedroomGeoQueries(currentProperty.bedroomTypes || "", cityGeo),
+            ...amenityGeoQueries((currentProperty.amenities || []).join(" "), cityGeo, 3),
+          ];
+          if (topUp.length) {
+            const before = queries.length;
+            queries = finalizeQuerySet(currentProperty.name, [...queries, ...topUp], 10);
+            if (queries.length > before) setProgress("Topping up an older tracked-query set…");
+          }
         }
       } else {
         // First run for this property: build a starting set GROUNDED IN REAL SEARCH
