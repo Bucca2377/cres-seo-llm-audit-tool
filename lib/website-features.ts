@@ -44,6 +44,11 @@ const LEASING_PLATFORMS: { name: string; re: RegExp }[] = [
   { name: "Knock", re: /knockrentals|knockcrm/i },
   { name: "ResMan", re: /myresman|resman\.com/i },
   { name: "RentDynamics", re: /rentdynamics/i },
+  // EliseAI (MeetElise) — an AI leasing assistant. It presents office hours, tour
+  // scheduling, and applications ONLY inside its chat, so its hours can't be crawled
+  // from the page; recognizing it lets the audit defer to Google instead of falsely
+  // flagging "couldn't read hours".
+  { name: "EliseAI", re: /eliseai\.com|meetelise/i },
 ];
 
 /** Identify the leasing platform a site runs on from its RAW HTML, or null. */

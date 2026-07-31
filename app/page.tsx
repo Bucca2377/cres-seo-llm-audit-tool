@@ -5014,10 +5014,23 @@ Return ONLY this JSON object, no prose before or after:
             // isn't one — show it consistent. Otherwise amber "verify".
             const googleAptsAgree =
               hoursVerdicts.google?.status === "green" && hoursVerdicts.apartments?.status === "green";
+            // Some platforms (EliseAI, Funnel, RentCafe chat) present office hours ONLY
+            // inside their live chat/leasing assistant — the hours aren't in the page,
+            // any iframe, or a load-time API, so NO crawl can read them (verified on
+            // real sites). That is NOT a missing-hours problem: a prospect gets them
+            // from the chat, and Google (authoritative) carries them. When we detect
+            // such a platform and Google has the hours, defer to Google instead of
+            // crying "couldn't read hours".
+            const chatWidgetHoursOk = !!leasingPlatform && hoursVerdicts.google?.status === "green";
             hoursRow.website = googleAptsAgree
               ? {
                   status: "green",
                   note: "Hours match across Google and Apartments.com; couldn’t parse the site capture this run (they usually live on the Contact page).",
+                }
+              : chatWidgetHoursOk
+              ? {
+                  status: "green",
+                  note: `Office hours are presented through the site's live chat/leasing assistant (${leasingPlatform}) rather than as static text, so they can't be read from the page directly. Using Google's hours (authoritative) — no conflict detected.`,
                 }
               : {
                   status: "amber",

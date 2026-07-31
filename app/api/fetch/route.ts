@@ -423,7 +423,7 @@ export async function POST(req: NextRequest) {
         /* ignore */
       }
       const seen = new Set<string>([start.replace(/\/+$/, "")]);
-      const candidates: string[] = [];
+      const matched: { href: string; text: string }[] = [];
       for (const l of home.links) {
         let href = l.href;
         try {
@@ -436,9 +436,20 @@ export async function POST(req: NextRequest) {
         if (seen.has(href)) continue;
         if (!NAV_RE.test(l.text) && !NAV_RE.test(href)) continue;
         seen.add(href);
-        candidates.push(href);
-        if (candidates.length >= maxPages - 1) break;
+        matched.push({ href, text: l.text });
       }
+      // Crawl the pages most likely to carry OFFICE HOURS (and the leasing phone) —
+      // Contact / Hours / Visit / About — FIRST. JS platforms (Funnel, etc.) often
+      // render hours only on their Contact sub-page; without this, a site with many
+      // floor-plan/gallery nav links can push Contact past the page budget and we
+      // miss the hours (the recurring "couldn't read hours" false flag).
+      const HOURS_PAGE_RE = /contact|hours|visit|connect|about/i;
+      matched.sort((a, b) => {
+        const ar = HOURS_PAGE_RE.test(a.href) || HOURS_PAGE_RE.test(a.text) ? 0 : 1;
+        const br = HOURS_PAGE_RE.test(b.href) || HOURS_PAGE_RE.test(b.text) ? 0 : 1;
+        return ar - br;
+      });
+      const candidates = matched.slice(0, maxPages - 1).map((m) => m.href);
       for (const c of candidates) {
         await sleep(1500); // space out navigations so the site doesn't 403 the session
         try {

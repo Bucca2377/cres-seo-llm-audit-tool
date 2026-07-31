@@ -443,6 +443,10 @@ test("website-features: detects the leasing platform from raw HTML embed scripts
   );
   assert.equal(detectLeasingPlatform('<iframe src="https://property.securecafe.com/..."></iframe>'), "RentCafe");
   assert.equal(detectLeasingPlatform('<script src="https://prospectportal.entrata.com/x.js">'), "Entrata");
+  // Solas Glendale's real chat embed (confirmed live): cdn.eliseai.com / @meetelise.
+  // Its office hours live only inside the chat, so recognizing it lets the audit
+  // defer to Google instead of a false "couldn't read hours".
+  assert.equal(detectLeasingPlatform('<script src="https://cdn.eliseai.com/@meetelise/chat"></script>'), "EliseAI");
   // A plain marketing site with no leasing widget -> null (we won't infer features).
   assert.equal(detectLeasingPlatform("<html><body>Welcome to our community</body></html>"), null);
 });
