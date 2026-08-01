@@ -72,13 +72,15 @@ const CRES_PLAYBOOK = `CRES COMPANY PLAYBOOK — when a recommendation concerns 
 
 CRITICAL — describe these as plain actions, NOT as branded programs. Do NOT fabricate official-sounding names like "CRES text-message review protocol", "the CRES review program", or "the CRES lead nurturing system" — those are not real. The ONLY proper-noun program below is "Hug a Building". Everything else is a practice you describe in plain words: write "text residents a direct Google review link after a positive interaction", NOT "deploy the CRES text-message review protocol".
 
+CLIENT APPROVAL — any recommendation that spends the owner's / client's money must be caveated as contingent on their approval. This includes paying employee review incentives or bonuses ($25 / $150 / $250), funding resident gift cards or raffles, and buying signage or printed QR materials. End such an action with "subject to owner/client approval" (or "if approved by the client"). Never present an owner-funded spend as already authorized.
+
 RESIDENT REVIEWS (CRES Resident Reviews P&P):
 - Ask ONLY at peak-satisfaction moments, texting the SPECIFIC resident segment at that moment — NEVER blast a review link to all residents. The three core triggers: (1) residents who MOVED IN within the past week, (2) residents who SUCCESSFULLY RENEWED their lease within the past 30 days, and (3) residents whose WORK ORDER was COMPLETED within 24 hours of submitting. Also acceptable: application/lease signing, after resident events, and during "Hug a Building" visits. Never ask during unresolved issues, delinquency, or move-out.
 - TEXT MESSAGE is the preferred channel — text a one-tap Google review link (under 60 seconds) to the residents who just hit one of those trigger moments, NOT to the whole resident list. A recommendation to "text all residents a review link" is WRONG; always scope it to the trigger segments above.
 - Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
 - "Hug a Building" (≈twice/year per building): power-wash + touch-up + resident gift baskets; use the face-to-face moment to gather feedback and solicit reviews with the QR code in hand.
 - Respond to EVERY review. Never ask specifically for 5 stars — ask for honest feedback. Follow up only once.
-- Employee incentives — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle).
+- Employee incentives (all payouts subject to owner/client approval) — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle). Any recommendation to pay these MUST say it is subject to owner/client approval.
 
 LEAD NURTURING (CRES Leasing Lead Nurturing): Speed to lead is key. Days 1–7: call + text + email DAILY until a tour is booked or they opt out (call first, then text with a booking link, then a follow-up email). Days 8–30: all three channels every Monday. Post-tour: thank-you text + email within 1 hour; days 1–3 daily; days 4–14 every 3 days; days 15–30 weekly. Always learn where a lost lead leased and why, and log it in the CRM.
 
@@ -162,23 +164,40 @@ function RecCard({
           {card.title}
         </div>
         {onSetAside && (
-          <button
-            onClick={() => setChoosing((v) => !v)}
-            title="Set this recommendation aside if it isn't feasible or worth it"
-            style={{
-              flexShrink: 0,
-              background: "transparent",
-              border: "1px solid #d4d8dd",
-              borderRadius: 20,
-              padding: "2px 10px",
-              fontFamily: "'Josefin Sans',sans-serif",
-              fontSize: 11,
-              color: choosing ? B.tangelo : "#8a909a",
-              cursor: "pointer",
-            }}
-          >
-            {choosing ? "Cancel" : "Set aside"}
-          </button>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <button
+              onClick={() => onSetAside(card, DONE_REASON)}
+              title="Mark this recommendation done — it's already been completed. It leaves the active list and won't be recommended again."
+              style={{
+                background: "transparent",
+                border: `1px solid ${B.caribbean}`,
+                borderRadius: 20,
+                padding: "2px 10px",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11,
+                color: B.caribbean,
+                cursor: "pointer",
+              }}
+            >
+              ✓ Done
+            </button>
+            <button
+              onClick={() => setChoosing((v) => !v)}
+              title="Set this recommendation aside if it isn't feasible or worth it"
+              style={{
+                background: "transparent",
+                border: "1px solid #d4d8dd",
+                borderRadius: 20,
+                padding: "2px 10px",
+                fontFamily: "'Josefin Sans',sans-serif",
+                fontSize: 11,
+                color: choosing ? B.tangelo : "#8a909a",
+                cursor: "pointer",
+              }}
+            >
+              {choosing ? "Cancel" : "Set aside"}
+            </button>
+          </div>
         )}
       </div>
       {choosing && onSetAside && (
@@ -319,11 +338,13 @@ function SetAsideRecap({
           cursor: "pointer",
         }}
       >
-        {open ? "▾" : "▸"} Considered &amp; Set Aside ({items.length})
+        {open ? "▾" : "▸"} Completed &amp; Set Aside ({items.length})
       </button>
       {open && (
         <div style={{ marginTop: 10 }}>
-          {items.map((s) => (
+          {items.map((s) => {
+            const done = s.reason === DONE_REASON;
+            return (
             <div
               key={s.key}
               style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7 }}
@@ -333,7 +354,8 @@ function SetAsideRecap({
                   fontFamily: "'Josefin Sans',sans-serif",
                   fontSize: 13,
                   color: "#8a909a",
-                  textDecoration: "line-through",
+                  // Completed items read as accomplished, not dismissed — no strike-through.
+                  textDecoration: done ? "none" : "line-through",
                   flex: 1,
                   lineHeight: 1.4,
                 }}
@@ -345,13 +367,13 @@ function SetAsideRecap({
                   flexShrink: 0,
                   fontFamily: "'Josefin Sans',sans-serif",
                   fontSize: 11,
-                  color: "#8a909a",
-                  background: "#eef0f2",
+                  color: done ? B.caribbean : "#8a909a",
+                  background: done ? "#e3f0ee" : "#eef0f2",
                   borderRadius: 20,
                   padding: "2px 10px",
                 }}
               >
-                {s.reason}
+                {done ? "✓ Completed" : s.reason}
               </span>
               {onRestore && (
                 <button
@@ -373,7 +395,7 @@ function SetAsideRecap({
                 </button>
               )}
             </div>
-          ))}
+          );})}
         </div>
       )}
     </div>
@@ -391,7 +413,7 @@ function RecommendationsBlock({
   /** The property's full set-aside list (used to filter + build the recap). */
   setAsideList?: SetAsideRec[];
   /** Which audit this block belongs to; scopes the recap to that audit. */
-  audit?: "marketing" | "seo";
+  audit?: "marketing" | "seo" | "review";
   onSetAside?: (card: RecommendationCard, reason: string) => void;
   onRestore?: (key: string) => void;
 }) {
@@ -407,7 +429,7 @@ function RecommendationsBlock({
         ))}
         {active.length === 0 && recap.length > 0 && (
           <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#8a909a", fontStyle: "italic" }}>
-            All recommendations from this audit have been set aside.
+            All recommendations from this audit have been completed or set aside.
           </p>
         )}
         <SetAsideRecap items={recap} onRestore={onRestore} />
@@ -6232,7 +6254,7 @@ RULES:
 - sentimentPeriod: derive themes ONLY from the period review texts above; if a review names a staff member in a 4/5-star, note the $25 incentive per CRES P&P.
 - responseGaps: one entry per [gN] review above, using its exact id. Empty array if there are none.
 - responseQuality: HIGH BAR — include a [qN] reply ONLY if it is GENUINELY problematic: (a) on a 1-2 star review, the reply is defensive, dismissive, argumentative, or fails to acknowledge the concern / offer a contact; OR (b) the SAME reply text is copy-pasted verbatim across 3+ different reviews. A warm, polite, on-brand thank-you to a positive review is GOOD — do NOT flag it for being short, using emojis, or sounding boilerplate. Most replies should NOT be flagged; when in doubt, OMIT. Empty array is the expected, common result.
-- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$150/$250 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.`;
+- recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$150/$250 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.${setAsidePromptNote(current)}`;
 
       // maxTokens must cover narratives + up to 12 suggested replies + up to 12
       // rewrites + 5 rec cards; at 4000 the JSON was being TRUNCATED mid-array on
@@ -6429,12 +6451,29 @@ RULES:
         </div>
       )}
 
-      {results && <ReviewAuditResultView results={results} snapshots={property.reviewSnapshots || []} />}
+      {results && (
+        <ReviewAuditResultView
+          results={results}
+          snapshots={property.reviewSnapshots || []}
+          property={property}
+          onUpdateProperty={onUpdateProperty}
+        />
+      )}
     </div>
   );
 }
 
-function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditResult; snapshots: ReviewSnapshot[] }) {
+function ReviewAuditResultView({
+  results,
+  snapshots,
+  property,
+  onUpdateProperty,
+}: {
+  results: ReviewAuditResult;
+  snapshots: ReviewSnapshot[];
+  property: Property;
+  onUpdateProperty: (p: Property) => void;
+}) {
   const k = results.kpis;
   const sectionTitle: React.CSSProperties = {
     fontFamily: "'Barlow Condensed',sans-serif",
@@ -6661,7 +6700,13 @@ function ReviewAuditResultView({ results, snapshots }: { results: ReviewAuditRes
       {isStructuredRecs(results.recommendations) && (
         <>
           <div style={sectionTitle}>CRES Recommendations</div>
-          <RecommendationsBlock recs={results.recommendations} />
+          <RecommendationsBlock
+            recs={results.recommendations}
+            setAsideList={property.setAsideRecs}
+            audit="review"
+            onSetAside={(card, reason) => onUpdateProperty(withSetAside(property, card, reason, "review"))}
+            onRestore={(key) => onUpdateProperty(withRestored(property, key))}
+          />
         </>
       )}
     </div>
@@ -7074,8 +7119,11 @@ function dedupeRecCards(cards: RecommendationCard[]): RecommendationCard[] {
 }
 
 /* ================= SET-ASIDE RECOMMENDATIONS ==================== */
-/** Preset reasons a user can pick when setting a recommendation aside. */
-const SET_ASIDE_REASONS = ["Not feasible", "Not worth it", "Already handled"] as const;
+/** Preset reasons a user can pick when setting a recommendation aside (declining it). */
+const SET_ASIDE_REASONS = ["Not feasible", "Not worth it"] as const;
+/** Reason stamped when a user marks a recommendation DONE — it's removed from the
+ *  active list and, like a set-aside, fed back so the audit stops re-proposing it. */
+const DONE_REASON = "Completed";
 
 /**
  * Stable key used to recognize the "same" recommendation across audit re-runs,
@@ -7101,8 +7149,10 @@ function isSetAside(card: RecommendationCard, keys: Set<string>): boolean {
 function setAsidePromptNote(property: Property): string {
   const list = property.setAsideRecs ?? [];
   if (list.length === 0) return "";
-  const lines = list.map((s) => `- ${s.title} (client reason: ${s.reason})`).join("\n");
-  return `\n\nALREADY DECLINED BY THE CLIENT — DO NOT RECOMMEND THESE AGAIN (they have reviewed and set them aside; do not re-propose them even reworded):\n${lines}`;
+  const lines = list
+    .map((s) => `- ${s.title} (${s.reason === DONE_REASON ? "already COMPLETED by the team" : `client set aside: ${s.reason}`})`)
+    .join("\n");
+  return `\n\nALREADY COMPLETED OR DECLINED BY THE CLIENT — DO NOT RECOMMEND THESE AGAIN (the team has already done them or reviewed and set them aside; do not re-propose them even reworded):\n${lines}`;
 }
 
 /** Return a copy of `property` with `card` added to the set-aside list (dedup by key). */
@@ -7110,7 +7160,7 @@ function withSetAside(
   property: Property,
   card: RecommendationCard,
   reason: string,
-  audit: "marketing" | "seo"
+  audit: "marketing" | "seo" | "review"
 ): Property {
   const key = setAsideKey(card);
   const rest = (property.setAsideRecs ?? []).filter((s) => s.key !== key);
@@ -7350,15 +7400,21 @@ function ReviewAuditReport({ property }: { property: Property }) {
               </>
             )}
 
-            {/* Recommendations */}
-            {isStructuredRecs(ra.recommendations) && (
-              <section className="pb-before">
-                <PrintSectionHeader>CRES Recommendations</PrintSectionHeader>
-                {ra.recommendations.map((card, i) => (
-                  <PrintRecCard key={i} card={card} />
-                ))}
-              </section>
-            )}
+            {/* Recommendations — completed / set-aside items are excluded from the
+                client-facing PDF (they've been done or declined). */}
+            {isStructuredRecs(ra.recommendations) && (() => {
+              const asideKeys = new Set((property.setAsideRecs ?? []).map((s) => s.key));
+              const activeRecs = ra.recommendations.filter((c) => !isSetAside(c, asideKeys));
+              if (activeRecs.length === 0) return null;
+              return (
+                <section className="pb-before">
+                  <PrintSectionHeader>CRES Recommendations</PrintSectionHeader>
+                  {activeRecs.map((card, i) => (
+                    <PrintRecCard key={i} card={card} />
+                  ))}
+                </section>
+              );
+            })()}
 
           </>
         )}

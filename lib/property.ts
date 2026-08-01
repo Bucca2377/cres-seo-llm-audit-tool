@@ -53,9 +53,9 @@ export type AuditRecommendations = string | RecommendationCard[];
 export interface SetAsideRec {
   key: string;                    // normalized topic key for cross-run matching
   title: string;                  // the rec title, for display in the recap
-  reason: string;                 // "Not feasible" | "Not worth it" | "Already handled" | custom
+  reason: string;                 // "Completed" (done) | "Not feasible" | "Not worth it" | custom
   note?: string;                  // optional free-text detail
-  audit: "marketing" | "seo";     // which audit surfaced it (for display grouping)
+  audit: "marketing" | "seo" | "review"; // which audit surfaced it (for display grouping)
   setAsideAt: string;             // ISO timestamp
 }
 
