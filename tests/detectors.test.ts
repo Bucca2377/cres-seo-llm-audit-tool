@@ -319,6 +319,27 @@ test("hours: parseWeekHours expands day RANGES (the Contact-page 'Mon-Fri' forma
   assert.match(h2.tuesday, /9 AM - 6 PM/i);
 });
 
+test("hours: parseWeekHours reads the compact 'M-F ... to ...' footer (the Station House case)", () => {
+  // Station House (stationhousestl.com) footer: "M-F 9:00 AM to 5:00 PM" — single-letter
+  // day range + the word "to" as the time separator. Both used to fail -> "couldn't read".
+  const h = parseWeekHours("STATION HOUSE (314) 627-2559 - call or text us! M-F 9:00 AM to 5:00 PM 1019 N Skinker Pkwy St. Louis, MO 63112");
+  assert.match(h.monday, /9:00 AM to 5:00 PM/i); // range expanded across M-F
+  assert.match(h.wednesday, /9:00 AM to 5:00 PM/i);
+  assert.match(h.friday, /9:00 AM to 5:00 PM/i);
+  assert.equal(h.saturday, undefined); // weekend not listed -> not fabricated
+  assert.equal(h.sunday, undefined);
+  // Mixed compact abbreviations, per-day.
+  const h2 = parseWeekHours("M-Th 9am - 6pm F 9am - 5pm Sa 10am - 2pm");
+  assert.match(h2.tuesday, /9am - 6pm/i);
+  assert.match(h2.friday, /9am - 5pm/i);
+  assert.match(h2.saturday, /10am - 2pm/i);
+  // A stray day letter in prose with NO hours after it must not produce a day.
+  assert.equal(Object.keys(parseWeekHours("Welcome. Move in by Friday and save. Our team is fast.")).length, 0);
+  // officeHoursFromHtml pulls it straight out of a rendered footer.
+  const hh = officeHoursFromHtml("<html><footer>M-F 9:00 AM to 5:00 PM</footer></html>")!;
+  assert.match(hh.monday, /9:00 AM to 5:00 PM/i);
+});
+
 const WEEK_9_5 = { monday: "9 AM-5 PM", tuesday: "9 AM-5 PM", wednesday: "9 AM-5 PM", thursday: "9 AM-5 PM", friday: "9 AM-5 PM", saturday: "10 AM-4 PM", sunday: "Closed" };
 
 test("hours: the Village at Snowfield case — flags the Apartments.com outlier, not the consensus", () => {

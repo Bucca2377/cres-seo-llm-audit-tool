@@ -25,7 +25,8 @@ export function parseHoursToken(s: string): "closed" | "24h" | { open: number; c
   if (!t) return null;
   if (/^clos/.test(t)) return "closed";
   if (t.includes("24 hour") || t.includes("open 24")) return "24h";
-  const parts = t.split(/[–—-]/).map((x) => x.trim());
+  // Split on a dash OR the word "to" ("9:00 am to 5:00 pm" is as common as a dash).
+  const parts = t.split(/\s+to\s+|[–—-]/).map((x) => x.trim());
   if (parts.length !== 2) return null;
   const toMin = (x: string): number | null => {
     const m = x.match(/(\d{1,2})(?::(\d{2}))?\s*(a|p)\.?m/i);
@@ -55,6 +56,27 @@ function canonOf(s: string | undefined | null): string | null {
 function dayIndex(key: string): number {
   const k = (key || "").trim().toLowerCase().slice(0, 3);
   return ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].indexOf(k);
+}
+
+/**
+ * Map a day token to its index (0=Mon..6=Sun), tolerating the COMPACT
+ * abbreviations real footers use — "M-F", "M-Th", "Sa", "Su" — not just full
+ * names / 3-letter forms. Deliberately omits bare "t" and "s" (ambiguous between
+ * Tue/Thu and Sat/Sun); those must be written "tu"/"th"/"sa"/"su".
+ */
+function abbrevDayIndex(s: string): number {
+  const t = (s || "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  const MAP: Record<string, number> = {
+    m: 0, mo: 0, mon: 0, monday: 0,
+    tu: 1, tue: 1, tues: 1, tuesday: 1,
+    w: 2, we: 2, wed: 2, weds: 2, wednesday: 2,
+    th: 3, thu: 3, thur: 3, thurs: 3, thursday: 3,
+    f: 4, fr: 4, fri: 4, friday: 4,
+    sa: 5, sat: 5, saturday: 5,
+    su: 6, sun: 6, sunday: 6,
+  };
+  if (t in MAP) return MAP[t];
+  return ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].indexOf(t.slice(0, 3));
 }
 
 function minToDisp(m: number): string {
@@ -90,19 +112,24 @@ function normalizeDisplay(v: string): string {
  */
 export function parseWeekHours(text: string): Record<string, string> {
   const flat = (text || "").replace(/\s+/g, " ");
+  // Longest form first in each alternation so "monday" wins over "mon"/"m". The
+  // single-letter forms (m/w/f + tu/th/sa/su) let "M-F 9-5" footers parse; bare
+  // "t"/"s" are intentionally excluded (ambiguous), and every match is gated on a
+  // real hours VALUE right after, so a stray letter in prose can't produce a day.
   const days: [string, string][] = [
-    ["monday", "monday|mon"],
-    ["tuesday", "tuesday|tues|tue"],
-    ["wednesday", "wednesday|weds|wed"],
-    ["thursday", "thursday|thurs|thur|thu"],
-    ["friday", "friday|fri"],
-    ["saturday", "saturday|sat"],
-    ["sunday", "sunday|sun"],
+    ["monday", "monday|mon|mo|m"],
+    ["tuesday", "tuesday|tues|tue|tu"],
+    ["wednesday", "wednesday|weds|wed|we|w"],
+    ["thursday", "thursday|thurs|thur|thu|th"],
+    ["friday", "friday|fri|fr|f"],
+    ["saturday", "saturday|sat|sa"],
+    ["sunday", "sunday|sun|su"],
   ];
+  // A time range separated by a dash OR the word "to" ("9:00 AM to 5:00 PM").
   const VAL =
-    "(closed|open 24 hours|24 hours|\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?\\s*[–—-]\\s*\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?)";
+    "(closed|open 24 hours|24 hours|\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?\\s*(?:[–—-]|to)\\s*\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?)";
   const out: Record<string, string> = {};
-  const dayTok = (s: string) => ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].indexOf((s || "").trim().toLowerCase().slice(0, 3));
+  const dayTok = (s: string) => abbrevDayIndex(s);
   // Pass 1 — day RANGES first ("Mon-Fri 8:30 AM - 5:30 PM", "Monday - Thursday 9-5"),
   // the common Contact-page format. Expand the range across every day it spans.
   const dayAlt = days.map(([, alt]) => alt).join("|");
