@@ -17,7 +17,7 @@
  * property sites (Sawmill, Edge 26, Sixcord, Station House).
  */
 export const CONCESSION_RE =
-  /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|\$0\s+(security\s+)?deposit|deposit\s+special|\brent\s+special|months?\s+free\s+rent|\$[\d,]+\s+(?:in\s+)?free\s+rent/i;
+  /waived?\s+\w{0,12}\s*(application|app|admin|amenity|move|fee)|(application|app|admin|amenity|move[-\s]?in)\s+fees?\s+waived|(half|1\/2)[-\s]?off|(first|1st|one|two|three|1|2|3)\s+month.?s?\s+free|\d+\s+weeks?\s+free|move[-\s]?in\s+special|limited[-\s]?time\s+special|look\s*(and|&|\+)\s*lease|\$\d[\d,]*\s*off|\d+%\s*off|reduced\s+deposit|\$0\s+(security\s+)?deposit|deposit\s+special|\brent\s+special|months?\s+free\s+rent|\$[\d,]+\s+(?:in\s+)?free\s+rent|\$\d[\d,]*\s*(?:\w+\s+){0,2}gift\s*cards?/i;
 // NOTE: `\brent` (word boundary) is deliberate — a bare `rent\s+special` matched
 // inside "cur-RENT SPECIALs" and false-flagged "no current specials" as a concession
 // (caught by tests/detectors.test.ts). Keep boundaries on substring-prone words.
@@ -33,23 +33,37 @@ export function detectWebsiteSpecial(siteText: string): string | null {
   // "=== <url> (status 200) ===" header, and a greedy match otherwise reaches back
   // across that separator and prepends the header's URL/status noise to the special
   // (e.g. "com/ (status 200) === LOOK & LEASE…"), which also pushed the real wording
-  // past the 90-char cap and truncated it. Stopping at "=" keeps the match on one page.
-  const sentence = flat.match(new RegExp("[^.!?\\n=]*(?:" + CONCESSION_RE.source + ")[^.!?\\n=]*", "i"));
-  if (!sentence) return null;
-  let raw = sentence[0];
+  // past the cap and truncated it. Stopping at "=" keeps the match on one page.
+  const re = new RegExp("[^.!?\\n=]*(?:" + CONCESSION_RE.source + ")[^.!?\\n=]*", "gi");
+  // A special can appear more than once (a clean hero banner AND a messy social-feed
+  // post with hashtags/carousel labels around it). Clean EACH candidate and keep the
+  // longest — the fullest clean wording — instead of whichever matched first.
+  let best: string | null = null;
+  for (const m of flat.matchAll(re)) {
+    const cleaned = cleanSpecial(m[0]);
+    if (cleaned && (!best || cleaned.length > best.length)) best = cleaned;
+  }
+  return best;
+}
+
+/** Strip a single concession window down to clean, readable special wording. */
+function cleanSpecial(rawWindow: string): string | null {
+  let raw = rawWindow;
   // Belt-and-suspenders: if a transcript header still leaked in on some other
   // separator, drop everything up to its closing "===" or "(status NNN)" marker.
   const sep = raw.lastIndexOf("===");
   if (sep >= 0) raw = raw.slice(sep + 3);
   raw = raw.replace(/.*\(status\s+\d+\)\s*/i, ""); // raw is already single-line (whitespace collapsed)
-  return (
-    raw
-      .replace(/\\+/g, " ") // drop JSON-escape residue (\/, \", \\) that leaks in from raw HTML
-      .replace(/\s+/g, " ")
-      .replace(/^[^A-Za-z0-9$]+/, "")
-      .trim()
-      .slice(0, 90) || null
-  );
+  raw = raw
+    .replace(/#[A-Za-z0-9_]+/g, " ") // social hashtags (#washu, #stl) around a feed post
+    .replace(/\b\d+\s*\(current\)\s*\d*/gi, " ") // image-carousel / slider pager ("1 (current) 2")
+    .replace(/\\+/g, " ") // JSON-escape residue (\/, \", \\) that leaks in from raw HTML
+    .replace(/\s+/g, " ")
+    .replace(/^[^A-Za-z0-9$]+/, "") // leading punctuation/space left after stripping
+    .trim();
+  // Cap length but never cut mid-word (a "$5" tail from "$500" reads as an error).
+  if (raw.length > 110) raw = raw.slice(0, 110).replace(/\s+\S*$/, "");
+  return raw || null;
 }
 
 /**

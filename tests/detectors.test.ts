@@ -78,6 +78,26 @@ test("concession: specialFromHtml pulls a clean string out of escaped raw HTML",
   assert.doesNotMatch(out!, /\\u|\\"/, "should be JSON-unescaped (no residue)");
 });
 
+test("concession: strips social hashtags + carousel labels from the special (the Station House bug)", () => {
+  // Real Station House homepage text: the special sits in a social-feed post with
+  // Instagram hashtags and image-carousel pager labels and NO punctuation boundary,
+  // so the window used to grab "#washu ... 1 (current) 2 ..." as part of the special.
+  const text =
+    "SQFT, walk in closet, full sized kitchen, and a washer/dryer in-unit. #stl #washu #washu23 #umsl #slu 1 (current) 2 NEW MOVE-IN SPECIAL $500 GIFT CARD Move into STATION HOUSE by August 15th to receive a $500 GIFT CARD!* *Must sign a 12-month lease View Availability";
+  const s = detectWebsiteSpecial(text)!;
+  assert.ok(s);
+  assert.doesNotMatch(s, /#\w+|\(current\)/i); // no hashtags, no carousel pager
+  assert.doesNotMatch(s, /^[^A-Za-z0-9$]|^\d/); // clean leading char (not "#" or a pager digit)
+  assert.match(s, /move-in special/i);
+  assert.match(s, /\$500 gift card/i);
+});
+
+test("concession: recognizes a '$X gift card' offer (no 'special' wording needed)", () => {
+  assert.ok(detectWebsiteSpecial("Move in by Aug 15 to receive a $500 Visa gift card."));
+  // "gift" without a $ amount + "card" is not a concession (no false-fire).
+  assert.equal(detectWebsiteSpecial("Browse gift shop items in our lobby."), null);
+});
+
 // ----- Apartments.com active-vs-dark detection (from RAW HTML) ---------------
 
 test("apts: DARK shell (Explore Similar Rentals Nearby, no own pricing) -> false", () => {
