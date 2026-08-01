@@ -430,9 +430,26 @@ export function reconcileOfficeHours(platforms: HoursPlatform[]): Record<string,
           ? { status, note: `Lists ${mineTxt}, but ${others2} show ${consTxt}. This conflict misleads prospects — align it.` }
           : { status, note: `Lists ${mineTxt}, while ${others2} show ${consTxt}. Verify the listing and align it.` };
     } else if (ties.length) {
+      // Two listings disagree with no majority to pick a winner. SHOW each side's
+      // ACTUAL hours for the differing days (not just "they differ") so the user can
+      // resolve it at a glance instead of opening both listings to compare.
+      const others = parsed.filter((q) => q.key !== p.key);
+      const mineTxt = ties.map((d) => `${DAY_ABBR[d]} ${p.rawDay[d] ?? displayCanon(p.canonDay[d])}`).join(", ");
+      const otherTxt = others
+        .map((q) => {
+          const vals = ties
+            .filter((d) => q.canonDay[d] !== null)
+            .map((d) => `${DAY_ABBR[d]} ${q.rawDay[d]}`)
+            .join(", ");
+          return vals ? `${q.label} shows ${vals}` : "";
+        })
+        .filter(Boolean)
+        .join("; ");
       result[p.key] = {
         status: "amber",
-        note: `Hours for ${ties.map((d) => DAY_ABBR[d]).join(", ")} differ between listings — verify which is correct and align them.`,
+        note: otherTxt
+          ? `Lists ${mineTxt}, while ${otherTxt}. Verify which is correct and align them.`
+          : `Hours for ${ties.map((d) => DAY_ABBR[d]).join(", ")} differ between listings. Verify which is correct and align them.`,
       };
     } else {
       result[p.key] = { status: "green", note: formatWeek(p.rawDay, p.canonDay) || "Hours consistent across listings." };

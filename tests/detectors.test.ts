@@ -428,6 +428,12 @@ test("hours: two sources that simply disagree (no majority) -> amber verify, nul
   ])!;
   assert.equal(tie.website.status, "amber");
   assert.equal(tie.google.status, "amber");
+  // The note must SHOW each side's actual hours for the differing day, not just say
+  // "they differ" — so the user can resolve it without opening both listings.
+  assert.match(tie.website.note, /Mon 9 AM.5 PM/i); // this cell's own value
+  assert.match(tie.website.note, /Google shows Mon closed/i); // and the other side's
+  assert.match(tie.google.note, /Mon closed/i);
+  assert.match(tie.google.note, /website shows Mon 9 AM.5 PM/i);
   // Only one source with parseable hours -> nothing to compare.
   assert.equal(reconcileOfficeHours([{ key: "website", label: "the website", hours: WEEK_9_5, authoritative: true }]), null);
 });
