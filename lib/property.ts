@@ -230,6 +230,14 @@ export interface Property {
    * adding a query and prunes it by removing one — edits persist here.
    */
   trackedQueries?: string[];
+  /**
+   * Which generation of the query-building logic produced {@link trackedQueries}.
+   * When it's behind the app's current SEO_QUERY_SET_VERSION, the next SEO audit
+   * regenerates the set to the current standard (city-targeted, demand-grounded,
+   * ~10) and re-stamps it — so improvements reach EXISTING properties automatically,
+   * with no manual "Reset SEO history". Absent/older = pre-standard, regenerate once.
+   */
+  seoQuerySetVersion?: number;
   checklistStatuses?: Record<string, ChecklistStatus>;
   checklistEvidence?: Record<string, string>;
   llmAuditRecommendations?: AuditRecommendations;

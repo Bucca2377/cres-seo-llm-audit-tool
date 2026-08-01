@@ -40,6 +40,17 @@ import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
 
+/**
+ * Current generation of the SEO tracked-query builder. Bump this whenever the
+ * query-generation standard changes materially (phrasing, geo targeting, the
+ * always-track stock searches). A property whose saved set was built under an
+ * older version is auto-regenerated to the current standard on its next SEO
+ * audit — so improvements reach EXISTING properties without a manual reset.
+ * v2 = city-targeted, brand-led, bedroom+amenity stock searches, autocomplete-
+ * grounded picks, target 10 (supersedes the old broad county-based sets).
+ */
+const SEO_QUERY_SET_VERSION = 2;
+
 /* -- BRAND ---------------------------------------------------------- */
 const B = {
   oxford: "#062347",
@@ -2845,6 +2856,7 @@ function SEOAudit({
     // run" would silently reload the OLD phrases and never regenerate.
     delete (cleaned as unknown as Record<string, unknown>).trackedQueries;
     delete (cleaned as unknown as Record<string, unknown>).pinnedQueries;
+    delete (cleaned as unknown as Record<string, unknown>).seoQuerySetVersion;
     onUpdateProperty(cleaned);
     setResults(null);
     setStage("idle");
@@ -2892,8 +2904,14 @@ function SEOAudit({
         .map((q) => q.trim())
         .filter(Boolean);
 
+      // Only reuse a saved set that was built by the CURRENT query standard. A set
+      // from an older generation (broad county-based phrasing, no brand, thin) is NOT
+      // reused — it falls through to full regeneration below and is re-stamped to the
+      // current version, so every existing property upgrades itself on its next audit
+      // with no manual "Reset SEO history". (First run / no set also regenerates.)
+      const querySetIsCurrent = currentProperty.seoQuerySetVersion === SEO_QUERY_SET_VERSION;
       let queries: string[];
-      if (stickySet.length > 0) {
+      if (stickySet.length > 0 && querySetIsCurrent) {
         // Reuse the saved set — no AI generation, no drift — so keyword-rank movement
         // stays comparable run to run.
         setProgress("Loading your tracked search queries…");
@@ -3494,6 +3512,9 @@ Recommendation rules (STRICT):
         // Persist the exact set we checked so every future run reuses it
         // (sticky). User add/remove edits this list between runs.
         trackedQueries: queries,
+        // Stamp the standard this set was built under, so it's reused as-is next
+        // run (comparable) and only regenerated when the standard advances again.
+        seoQuerySetVersion: SEO_QUERY_SET_VERSION,
       });
       setStage("done");
     } catch (e) {
