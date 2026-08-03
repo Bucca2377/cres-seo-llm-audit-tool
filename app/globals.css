@@ -60,6 +60,13 @@ textarea {
     display: none !important;
   }
 
+  /* The app shell carries a grey-blue background on screen; in print it must be
+     white, or it shows through the slack a forced page break leaves at the bottom
+     of a page (read as an empty grey box below the last card). */
+  .app-shell {
+    background: #fff !important;
+  }
+
   /* Show only the printable report. The horizontal padding is a safety
      gutter: if the browser's print dialog has margins set to "None" or
      "Minimum", the @page margin is ignored and content would otherwise run

@@ -8532,7 +8532,7 @@ export default function MarketingHub() {
   })();
 
   return (
-    <div style={{ minHeight: "100vh", background: "#eff2f5", fontFamily: "'Josefin Sans',sans-serif" }}>
+    <div className="app-shell" style={{ minHeight: "100vh", background: "#eff2f5", fontFamily: "'Josefin Sans',sans-serif" }}>
       {/* Build stamp — glance to confirm which commit is actually deployed and
           end the "is this the latest build?" ambiguity. Hidden in print. */}
       <div
