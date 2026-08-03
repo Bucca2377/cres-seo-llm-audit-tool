@@ -36,6 +36,7 @@ import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, ex
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
+import { setAsideKey, setAsideKeySet, isSetAside } from "@/lib/recs";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
@@ -419,7 +420,7 @@ function RecommendationsBlock({
 }) {
   if (!recs) return null;
   if (isStructuredRecs(recs)) {
-    const keys = new Set((setAsideList ?? []).map((s) => s.key));
+    const keys = setAsideKeySet(setAsideList);
     const active = recs.filter((c) => !isSetAside(c, keys));
     const recap = (setAsideList ?? []).filter((s) => !audit || s.audit === audit);
     return (
@@ -7071,38 +7072,12 @@ IF the page shows "This property is not currently advertising on Apartments.com"
 }
 
 /**
- * Classify a recommendation into a coarse topic so the printed report can
- * drop near-duplicates when the LLM-audit and SEO-audit card sets are
- * merged. Returns null for topics that are usually distinct (landing pages,
- * Map Pack tactics, etc.) — those are never deduped. Note that responding
- * to reviews and generating reviews are deliberately SEPARATE topics.
- */
-function recTopicKey(card: RecommendationCard): string | null {
-  const t = `${card.title} ${card.what}`.toLowerCase();
-  if (/\breview/.test(t)) {
-    return /(respond|reply|repl ?y|response|owner reply|monitor reviews?)/.test(t)
-      ? "review-response"
-      : "review-generation";
-  }
-  if (/\bfaq\b|frequently asked|q&a page|q & a/.test(t)) return "faq";
-  if (/schema|json-?ld|structured data markup/.test(t)) return "schema";
-  if (/amenit/.test(t)) return "amenities";
-  if (/name.{0,12}address.{0,12}phone|listing consistency|consistent name/.test(t)) return "listings";
-  return null;
-}
-
-/**
  * Merge structured card sets from multiple audits (order: marketing ->
  * checklist -> SEO) and drop only TRUE duplicates — cards proposing the same
  * action, keyed by normalized title. Two audits that both say "Add JSON-LD
  * schema" collapse to one; distinct recommendations that merely share a broad
  * topic (e.g. marketing "list amenities on the ILS listing" vs SEO "add an
  * amenities landing page for search") are BOTH kept. Earlier cards win ties.
- *
- * NOTE: this intentionally does NOT use recTopicKey. The coarse topic key is
- * right for matching set-aside items across re-runs (setAsideKey), but as a
- * dedup key it collapsed genuinely-different same-topic cards — silently
- * dropping SEO recs from the combined report.
  */
 function dedupeRecCards(cards: RecommendationCard[]): RecommendationCard[] {
   const seen = new Set<string>();
@@ -7124,21 +7099,6 @@ const SET_ASIDE_REASONS = ["Not feasible", "Not worth it"] as const;
 /** Reason stamped when a user marks a recommendation DONE — it's removed from the
  *  active list and, like a set-aside, fed back so the audit stops re-proposing it. */
 const DONE_REASON = "Completed";
-
-/**
- * Stable key used to recognize the "same" recommendation across audit re-runs,
- * even when the model rewords it. Prefers the coarse topic key (so any
- * review/FAQ/schema/amenities/listings card matches its set-aside twin) and
- * falls back to a normalized title for everything else.
- */
-function setAsideKey(card: RecommendationCard): string {
-  return recTopicKey(card) || (card.title || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-/** True when a card has been set aside (matched against the property's list). */
-function isSetAside(card: RecommendationCard, keys: Set<string>): boolean {
-  return keys.has(setAsideKey(card));
-}
 
 /**
  * Prompt fragment appended to the Marketing + SEO audit prompts so the model
@@ -7403,7 +7363,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
             {/* Recommendations — completed / set-aside items are excluded from the
                 client-facing PDF (they've been done or declined). */}
             {isStructuredRecs(ra.recommendations) && (() => {
-              const asideKeys = new Set((property.setAsideRecs ?? []).map((s) => s.key));
+              const asideKeys = setAsideKeySet(property.setAsideRecs);
               const activeRecs = ra.recommendations.filter((c) => !isSetAside(c, asideKeys));
               if (activeRecs.length === 0) return null;
               return (
@@ -7490,7 +7450,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
   // Recommendations the client has set aside are dropped from the active
   // printed lists and instead summarized in a "Considered & Set Aside" recap.
   const setAsideList = property.setAsideRecs ?? [];
-  const setAsideKeys = new Set(setAsideList.map((s) => s.key));
+  const setAsideKeys = setAsideKeySet(setAsideList);
   // In SEO-only mode the recap shows just the SEO-sourced items; the combined
   // report shows all of them.
   const setAsideForPrint =

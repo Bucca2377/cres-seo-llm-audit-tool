@@ -14,6 +14,7 @@ import {
   extractFirstJsonObject,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
+import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml } from "../lib/hours";
 import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
@@ -838,4 +839,30 @@ test("brightdata: returns null without creds (never makes a live call)", async (
     restoreEnv("BRIGHTDATA_API_TOKEN", prevToken);
     restoreEnv("BRIGHTDATA_ZONE", prevZone);
   }
+});
+
+// ----- Set-aside / mark-done matching (per-card, not by coarse topic) --------
+
+test("set-aside: setting ONE review rec aside does not remove the others (the review-audit bug)", () => {
+  const rc = (title: string) => ({ priority: "STRATEGIC" as const, title, what: "", why: "", effort: "", success: "", source: "" });
+  const bonus = rc("Track and pay named-employee review incentives");
+  const qr = rc("Deploy QR codes at high-traffic resident touchpoints");
+  const respond = rc("Respond to all six unanswered reviews today");
+  // User set aside ONLY the bonus card.
+  const list = [{ key: setAsideKey(bonus), title: bonus.title, reason: "Not worth it", audit: "review" as const, setAsideAt: "" }];
+  const keys = setAsideKeySet(list);
+  assert.equal(isSetAside(bonus, keys), true); // the one set aside is filtered
+  assert.equal(isSetAside(qr, keys), false); // a DIFFERENT review rec stays
+  assert.equal(isSetAside(respond, keys), false); // and so does this one
+});
+
+test("set-aside: an OLD entry stored under a coarse topic key still matches its card by title", () => {
+  const rc = (title: string) => ({ priority: "STRATEGIC" as const, title, what: "", why: "", effort: "", success: "", source: "" });
+  const bonus = rc("Track and pay named-employee review incentives");
+  const qr = rc("Deploy QR codes at high-traffic resident touchpoints");
+  // Legacy entry saved under the old coarse bucket key, but the title is preserved.
+  const legacy = [{ key: "review-generation", title: bonus.title, reason: "Completed", audit: "review" as const, setAsideAt: "" }];
+  const keys = setAsideKeySet(legacy);
+  assert.equal(isSetAside(bonus, keys), true); // matched by title, not the stale bucket key
+  assert.equal(isSetAside(qr, keys), false); // and ONLY that card
 });
