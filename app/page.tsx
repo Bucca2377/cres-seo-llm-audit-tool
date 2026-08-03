@@ -6602,7 +6602,7 @@ function ReviewAuditResultView({
       )}
 
       {/* Review Breakdown — hide the empty bar chart when no new reviews landed this period */}
-      <div style={sectionTitle}>{results.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</div>
+      <div style={sectionTitle}>{results.period === "1mo" ? "Monthly" : "Period"} Review Breakdown: {results.periodLabel}</div>
       {periodTotal === 0 ? (
         !results.narratives.breakdown && (
           <p style={para}>No new reviews were posted during {results.periodLabel}, so there is no new-review breakdown for this period.</p>
@@ -7327,7 +7327,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
             )}
 
             {/* Breakdown — star bars (hidden when no new reviews this period) */}
-            <PrintSectionHeader>{ra.period === "1mo" ? "Monthly" : "Period"} Review Breakdown</PrintSectionHeader>
+            <PrintSectionHeader>{ra.period === "1mo" ? "Monthly" : "Period"} Review Breakdown: {ra.periodLabel}</PrintSectionHeader>
             {(ra.starBreakdown.s5 + ra.starBreakdown.s4 + ra.starBreakdown.s3 + ra.starBreakdown.s2 + ra.starBreakdown.s1) === 0 ? (
               !ra.narratives.breakdown && (
                 <p style={bodyP}>No new reviews were posted during {ra.periodLabel}, so there is no new-review breakdown for this period.</p>
