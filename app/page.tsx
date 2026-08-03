@@ -5982,6 +5982,7 @@ function reviewResponseText(r: any): string {
 }
 const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string; maxPages: number }[] = [
   { id: "1mo", label: "Last month", days: 31, windowLabel: "Last 30 days", maxPages: 4 },
+  { id: "3mo", label: "Past 3 months", days: 93, windowLabel: "Last 3 months", maxPages: 6 },
   { id: "6mo", label: "Past 6 months", days: 186, windowLabel: "Last 6 months", maxPages: 8 },
   { id: "12mo", label: "Past 12 months", days: 366, windowLabel: "Last 12 months", maxPages: 14 },
 ];
@@ -6137,6 +6138,17 @@ function ReviewAuditTab({
         else if (n === 3) star.s3++;
         else if (n === 4) star.s4++;
         else if (n === 5) star.s5++;
+      });
+      // FIXED trailing-30-day window — computed ALWAYS, regardless of the selected
+      // reporting period, so the team has a consistent "right now" snapshot that maps
+      // to the MONTHLY bonus structure (zero 1-2 star, 10+ 4-5 star per month). These
+      // reviews are a subset of what we already paged in, so there's no extra cost.
+      const cutoff30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const last30 = { s1: 0, s2: 0, s3: 0, s4: 0, s5: 0 };
+      allReviews.forEach((r) => {
+        if (!r?.iso_date || new Date(r.iso_date) < cutoff30) return;
+        const n = Math.round(r.rating || 0);
+        if (n >= 1 && n <= 5) last30[`s${n}` as keyof typeof last30]++;
       });
       const newReviews = windowed.length;
       const windowWithResp = windowed.filter(reviewHasResponse).length;
@@ -6327,6 +6339,7 @@ RULES:
           responseRateAllTime,
         },
         starBreakdown: star,
+        last30Breakdown: last30,
         sentimentPeriod: (parsed.sentimentPeriod || []) as ReviewSentimentRow[],
         reviews,
         responseGaps,
@@ -6516,6 +6529,21 @@ function ReviewAuditResultView({
   ];
   const maxStar = Math.max(1, ...starRows.map((r) => r[1]));
   const periodTotal = starRows.reduce((sum, r) => sum + r[1], 0);
+  // Fixed 30-day window (always shown). Optional on older saved audits.
+  const l30 = results.last30Breakdown;
+  const last30Rows: [string, number, string][] = l30
+    ? [
+        ["5 Star", l30.s5, STAR_COLORS[0]],
+        ["4 Star", l30.s4, STAR_COLORS[1]],
+        ["3 Star", l30.s3, STAR_COLORS[2]],
+        ["2 Star", l30.s2, STAR_COLORS[3]],
+        ["1 Star", l30.s1, STAR_COLORS[4]],
+      ]
+    : [];
+  const last30Max = Math.max(1, ...last30Rows.map((r) => r[1]));
+  const last30Total = last30Rows.reduce((sum, r) => sum + r[1], 0);
+  const last30Good = l30 ? l30.s5 + l30.s4 : 0; // 4-5 star (monthly positive target: 10+)
+  const last30Bad = l30 ? l30.s1 + l30.s2 : 0; // 1-2 star (monthly no-negative target: 0)
 
   const renderSentiment = (rows: ReviewSentimentRow[], withRecommendation = true) => (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -6593,6 +6621,43 @@ function ReviewAuditResultView({
         </div>
       )}
       {results.narratives.breakdown && <p style={para}>{results.narratives.breakdown}</p>}
+
+      {/* Last 30 Days — a FIXED window shown regardless of the selected period, so
+          the most recent momentum and monthly-bonus progress are always visible. */}
+      {l30 && (
+        <>
+          <div style={sectionTitle}>Last 30 Days</div>
+          <p style={{ ...para, fontSize: 11.5, color: "#888" }}>
+            A fixed 30-day window, independent of the reporting period above, so recent momentum and monthly-bonus progress are always visible.
+          </p>
+          {last30Total === 0 ? (
+            <p style={para}>No new reviews in the last 30 days.</p>
+          ) : (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                {last30Rows.map(([label, count, color]) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <span style={{ width: 54, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>{label}</span>
+                    <div style={{ flex: 1, background: "#f0f2f4", borderRadius: 3, height: 16, position: "relative" }}>
+                      <div style={{ width: `${(count / last30Max) * 100}%`, background: color, height: "100%", borderRadius: 3, minWidth: count > 0 ? 4 : 0 }} />
+                    </div>
+                    <span style={{ width: 24, textAlign: "right", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: B.oxford }}>{count}</span>
+                  </div>
+                ))}
+              </div>
+              <p style={{ ...para, fontSize: 12 }}>
+                <strong>{last30Bad}</strong> one/two-star and <strong>{last30Good}</strong> four/five-star in the last 30 days.{" "}
+                {last30Bad === 0
+                  ? "Zero negatives — on pace for the monthly no-negative team bonus."
+                  : `${last30Bad} negative review${last30Bad > 1 ? "s" : ""} this month.`}{" "}
+                {last30Good >= 10
+                  ? "10+ four/five-star — monthly positive-review target met."
+                  : `${10 - last30Good} more four/five-star to hit the monthly positive-review target.`}
+              </p>
+            </>
+          )}
+        </>
+      )}
 
       {/* Rating Overview */}
       {results.narratives.ratingOverview && (
@@ -7286,6 +7351,46 @@ function ReviewAuditReport({ property }: { property: Property }) {
               </div>
             )}
             {ra.narratives.breakdown && <p style={bodyP}>{ra.narratives.breakdown}</p>}
+
+            {/* Last 30 Days — fixed window, always shown regardless of period. */}
+            {ra.last30Breakdown && (() => {
+              const l = ra.last30Breakdown;
+              const total = l.s1 + l.s2 + l.s3 + l.s4 + l.s5;
+              const good = l.s4 + l.s5;
+              const bad = l.s1 + l.s2;
+              const maxC = Math.max(1, l.s1, l.s2, l.s3, l.s4, l.s5);
+              const colors = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"];
+              return (
+                <div className="pb-avoid">
+                  <PrintSectionHeader>Last 30 Days</PrintSectionHeader>
+                  {total === 0 ? (
+                    <p style={bodyP}>No new reviews in the last 30 days.</p>
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: 6 }}>
+                        {(["s5", "s4", "s3", "s2", "s1"] as const).map((key, idx) => {
+                          const count = l[key];
+                          return (
+                            <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                              <span style={{ width: 44, fontSize: 9.5, color: "#555" }}>{5 - idx} Star</span>
+                              <div style={{ flex: 1, background: "#f0f2f4", height: 11, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+                                <div style={{ width: `${(count / maxC) * 100}%`, background: colors[idx], height: "100%", minWidth: count > 0 ? 4 : 0, WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }} />
+                              </div>
+                              <span style={{ width: 18, textAlign: "right", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 12, color: PRINT_NAVY }}>{count}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p style={bodyP}>
+                        {bad} one/two-star and {good} four/five-star in the last 30 days.{" "}
+                        {bad === 0 ? "Zero negatives this month." : ""}{" "}
+                        {good >= 10 ? "10+ four/five-star this month." : `${10 - good} more four/five-star to hit the monthly positive target.`}
+                      </p>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Rating Overview */}
             {ra.narratives.ratingOverview && (

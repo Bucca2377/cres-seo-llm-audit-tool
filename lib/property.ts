@@ -313,7 +313,7 @@ export interface Property {
 }
 
 /* ---- Review Audit types ---- */
-export type ReviewPeriod = "1mo" | "6mo" | "12mo";
+export type ReviewPeriod = "1mo" | "3mo" | "6mo" | "12mo";
 
 export interface ReviewSnapshot {
   month: string; // "YYYY-MM" — one point per calendar month (upserted)
@@ -384,6 +384,12 @@ export interface ReviewAuditResult {
   periodLabel: string; // e.g. "Last 30 days" / "Last 6 months"
   kpis: ReviewKpis;
   starBreakdown: ReviewStarBreakdown;
+  /**
+   * Star breakdown for a FIXED trailing-30-day window, computed regardless of the
+   * selected reporting period, so the "right now" snapshot (and monthly-bonus
+   * progress) is always visible. Optional for backward-compat with older saved audits.
+   */
+  last30Breakdown?: ReviewStarBreakdown;
   sentimentPeriod: ReviewSentimentRow[];
   reviews: ReviewItem[];
   responseGaps: ReviewResponseGap[];
