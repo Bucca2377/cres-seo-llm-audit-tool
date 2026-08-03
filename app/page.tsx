@@ -6271,7 +6271,7 @@ Return ONLY this JSON object, no prose:
 RULES:
 - sentimentPeriod: derive themes ONLY from the period review texts above; if a review names a staff member in a 4/5-star, note the $25 incentive per CRES P&P.
 - responseGaps: one entry per [gN] review above, using its exact id. Empty array if there are none.
-- responseQuality: HIGH BAR — include a [qN] reply ONLY if it is GENUINELY problematic: (a) on a 1-2 star review, the reply is defensive, dismissive, argumentative, or fails to acknowledge the concern / offer a contact; OR (b) the SAME reply text is copy-pasted verbatim across 3+ different reviews. A warm, polite, on-brand thank-you to a positive review is GOOD — do NOT flag it for being short, using emojis, or sounding boilerplate. Most replies should NOT be flagged; when in doubt, OMIT. Empty array is the expected, common result.
+- responseQuality: HIGH BAR — include a [qN] reply ONLY if it is GENUINELY problematic: (a) on a 1-2 star review, the reply is defensive, dismissive, argumentative, or fails to acknowledge the concern / offer a contact; OR (b) the SAME reply text is copy-pasted verbatim across 3+ different reviews; OR (c) the reply names the WRONG person / detail — it thanks a staff member (or uses a pronoun) the review never mentions (e.g. the review praises "Matt/he" but the reply thanks "Haley/she"), a copy-paste slip that misattributes credit and confuses the reviewer. A warm, polite, on-brand thank-you to a positive review is GOOD — do NOT flag it for being short, using emojis, or sounding boilerplate. Most replies should NOT be flagged; when in doubt, OMIT. Empty array is the expected, common result. For every flagged reply, the "issue" MUST state the core reason plainly (what is wrong and why it matters), since that reason is shown to the client as the justification for the rewrite.
 - recommendations: EXACTLY 5 cards, same format/rules as the other audits, grounded in the CRES playbook (text-first review link, QR touchpoints, $25/$150/$250 incentives, solicitation timing). Plain English, no em dashes, no fabricated program names. Base them ONLY on THIS reporting period's reviews (listed above); do NOT recommend acting on an all-time/historical-only theme that no review in this period repeats.${setAsidePromptNote(current)}`;
 
       // maxTokens must cover narratives + up to 12 suggested replies + up to 12
@@ -6737,7 +6737,7 @@ function ReviewAuditResultView({
                 </div>
               ) : null}
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#9a7200", lineHeight: 1.5, marginBottom: 6 }}>
-                {q.issue}
+                <strong>Issue:</strong> {q.issue}
               </div>
               <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#15803d", lineHeight: 1.5, paddingLeft: 10, borderLeft: `2px solid ${B.cambridge}` }}>
                 <strong>Suggested rewrite:</strong> {q.suggestedRewrite}
@@ -7456,7 +7456,7 @@ function ReviewAuditReport({ property, headerLabel }: { property: Property; head
                     {q.originalResponse ? (
                       <p style={{ ...bodyP, margin: "0 0 2px 0", color: "#555" }}>Current reply: &ldquo;{q.originalResponse}&rdquo;</p>
                     ) : null}
-                    <p style={{ ...bodyP, margin: "0 0 2px 0", color: "#9a7200" }}>{q.issue}</p>
+                    <p style={{ ...bodyP, margin: "0 0 2px 0", color: "#9a7200" }}><strong>Issue:</strong> {q.issue}</p>
                     <p style={{ ...bodyP, margin: 0, color: "#15803d", paddingLeft: 10, borderLeft: "2px solid #93b2ab" }}>Suggested rewrite: {q.suggestedRewrite}</p>
                   </div>
                 ))}
