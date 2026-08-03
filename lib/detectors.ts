@@ -247,6 +247,23 @@ export function recommendsCreatingConcession(text: string): boolean {
 }
 
 /**
+ * Does a recommendation propose a PAID review-incentive program — the daily
+ * $25-per-named-review employee bonus or the monthly $150 / $250 team bonuses (or a
+ * cash/gift-card review incentive)? Used to GATE these out for a property already
+ * rated above 4.25, where paying to generate reviews just wastes money. The three
+ * program dollar amounts are unambiguous in a review-audit rec; the incentive/bonus
+ * phrasing catches reworded versions. Responding to reviews, texting a review link,
+ * and QR touchpoints are FREE tactics and correctly return false.
+ */
+export function recommendsReviewIncentive(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  if (/\$\s?(?:25|150|250)\b/.test(t)) return true; // the exact CRES program amounts
+  if (/named[-\s]?review|review[-\s]?incentive|incentive\s+(?:per|for)\s+(?:a\s+)?(?:review|\d|four|five)/.test(t)) return true;
+  if (/monthly\s+(?:team\s+)?bonus|commission\s+bonus|staff\s+bonus|team\s+bonus/.test(t)) return true;
+  return false;
+}
+
+/**
  * Drop dial-confirmed PHANTOM phone numbers from a dialed inventory. A `dialStatus`
  * of "failed" means the carrier couldn't even place the call (invalid / unreachable),
  * i.e. a number the property doesn't actually use — a misparse (bogus area code) or a

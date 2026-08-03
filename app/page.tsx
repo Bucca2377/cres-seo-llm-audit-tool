@@ -32,7 +32,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -81,7 +81,7 @@ RESIDENT REVIEWS (CRES Resident Reviews P&P):
 - Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
 - "Hug a Building" (≈twice/year per building): power-wash + touch-up + resident gift baskets; use the face-to-face moment to gather feedback and solicit reviews with the QR code in hand.
 - Respond to EVERY review. Never ask specifically for 5 stars — ask for honest feedback. Follow up only once.
-- Employee incentives (all payouts subject to owner/client approval) — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle). Any recommendation to pay these MUST say it is subject to owner/client approval.
+- Employee incentives (all payouts subject to owner/client approval) — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle). Any recommendation to pay these MUST say it is subject to owner/client approval. These paid incentives are ONLY for a property that needs to LIFT its rating/volume — do NOT recommend them for a property already rated ABOVE 4.25 (that wastes money).
 
 LEAD NURTURING (CRES Leasing Lead Nurturing): Speed to lead is key. Days 1–7: call + text + email DAILY until a tour is booked or they opt out (call first, then text with a booking link, then a follow-up email). Days 8–30: all three channels every Monday. Post-tour: thank-you text + email within 1 hour; days 1–3 daily; days 4–14 every 3 days; days 15–30 weekly. Always learn where a lost lead leased and why, and log it in the CRM.
 
@@ -6046,6 +6046,11 @@ function ReviewAuditTab({
       const place = serpData?.place_results;
       const dataId = gbp?.dataId || place?.data_id || "";
       const currentRating = gbp?.rating ?? (typeof place?.rating === "number" ? place.rating : null);
+      // COST GATE: a property already rated ABOVE 4.25 does not need PAID review
+      // incentives — recommending the daily $25 / monthly $150-$250 programs there
+      // just wastes money. Suppress those recs (and the "$25 incentive" sentiment
+      // note) in the prompt AND deterministically filter any the model emits anyway.
+      const suppressIncentives = currentRating != null && currentRating > 4.25;
       const totalReviews = gbp?.reviewCount ?? (typeof place?.reviews === "number" ? place.reviews : null);
       if (!dataId) {
         throw new Error("Couldn't find this property's Google listing. Set the Google Business Profile URL in Property Settings, then retry.");
@@ -6242,7 +6247,7 @@ REVIEWS WITH AN OWNER REPLY (flag ONLY a reply that is GENUINELY problematic —
 ${qualityLines}
 
 ${CRES_PLAYBOOK}
-
+${suppressIncentives ? `\nRATING COST GATE — IMPORTANT: this property's Google rating is ${currentRating?.toFixed(2)}, ABOVE 4.25, so it does NOT need paid review-generation spend. Do NOT recommend or mention the paid incentive programs (the daily $25-per-named-review employee bonus or the monthly $150 / $250 team bonuses), and do NOT add a "$25 incentive" note to any sentimentPeriod row. Recommend only FREE tactics (respond to every review, text a one-tap review link at the trigger moments, QR touchpoints, fix specific complaints). Recommending a paid incentive for an already-highly-rated property wastes money.\n` : ""}
 Return ONLY this JSON object, no prose:
 {
   "narratives": {
@@ -6290,9 +6295,14 @@ RULES:
         );
       }
 
-      const recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
+      let recs: AuditRecommendations = isStructuredRecs(parsed.recommendations as AuditRecommendations)
         ? (parsed.recommendations as RecommendationCard[])
         : [];
+      // Rating cost gate (belt-and-suspenders over the prompt): drop any paid
+      // review-incentive rec when the property is already rated above 4.25.
+      if (suppressIncentives && Array.isArray(recs)) {
+        recs = recs.filter((c) => !recommendsReviewIncentive(`${c.title || ""} ${c.what || ""}`));
+      }
 
       // Merge Claude's suggestions onto the code-held review/response text by id.
       const gapSuggById = new Map<string, string>(

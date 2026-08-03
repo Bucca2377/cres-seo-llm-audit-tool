@@ -10,6 +10,7 @@ import {
   recommendsGooglePhotos,
   recommendsNonGoogleFeatureOnGoogle,
   recommendsCreatingConcession,
+  recommendsReviewIncentive,
   dropDeadDialedNumbers,
   extractFirstJsonObject,
 } from "../lib/detectors";
@@ -865,4 +866,18 @@ test("set-aside: an OLD entry stored under a coarse topic key still matches its 
   const keys = setAsideKeySet(legacy);
   assert.equal(isSetAside(bonus, keys), true); // matched by title, not the stale bucket key
   assert.equal(isSetAside(qr, keys), false); // and ONLY that card
+});
+
+// ----- Rating cost gate: no paid review incentives above 4.25 ----------------
+
+test("recs: recommendsReviewIncentive fires on the paid programs, not the free tactics", () => {
+  // The paid programs we gate out for a >4.25 property.
+  assert.equal(recommendsReviewIncentive("Pay staff the $25 named-review incentive for every 5-star that names them."), true);
+  assert.equal(recommendsReviewIncentive("Institute a monthly team bonus of $150 for zero 1-2 star reviews."), true);
+  assert.equal(recommendsReviewIncentive("Award the $250 team bonus when the property hits 10 four/five-star reviews."), true);
+  assert.equal(recommendsReviewIncentive("Launch a review incentive program for the leasing team."), true);
+  // FREE tactics must NOT be gated out.
+  assert.equal(recommendsReviewIncentive("Respond to all six unanswered reviews within 24 hours."), false);
+  assert.equal(recommendsReviewIncentive("Text a one-tap Google review link to residents whose work order just closed."), false);
+  assert.equal(recommendsReviewIncentive("Add framed QR review codes at the front desk and mail room."), false);
 });
