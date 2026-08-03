@@ -7204,7 +7204,7 @@ function withRestored(property: Property, key: string): Property {
 }
 
 /** Standalone printed Resident Review Audit (its own PDF, not combined). */
-function ReviewAuditReport({ property }: { property: Property }) {
+function ReviewAuditReport({ property, headerLabel }: { property: Property; headerLabel?: string }) {
   const ra = property.reviewAudit;
   const snapshots = property.reviewSnapshots || [];
   const now = new Date();
@@ -7216,7 +7216,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
     size: letter;
     margin: 0.85in 0.65in 0.75in 0.65in;
     @top-left {
-      content: "CRES  |  Resident Review Audit  |  ${cssName}  |  ${monthYear}";
+      content: "CRES  |  ${headerLabel || "Resident Review Audit"}  |  ${cssName}  |  ${monthYear}";
       font-family: 'Josefin Sans', sans-serif;
       font-size: 8.5pt;
       color: #062347;
@@ -7494,7 +7494,7 @@ function ReviewAuditReport({ property }: { property: Property }) {
   );
 }
 
-function PrintableReport({ property, mode = "combined" }: { property: Property; mode?: "combined" | "seo" | "marketing" }) {
+function PrintableReport({ property, mode = "combined", headerLabel }: { property: Property; mode?: "combined" | "seo" | "marketing"; headerLabel?: string }) {
   const llmRecs = property.llmAuditRecommendations;
   const llmTs = property.llmAuditTimestamp;
   const seo = property.seoAudit;
@@ -7532,7 +7532,7 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
     size: letter;
     margin: 0.85in 0.65in 0.75in 0.65in;
     @top-left {
-      content: "CRES  |  ${mode === "seo" ? "SEO Audit" : mode === "marketing" ? "Marketing Audit" : "Marketing & SEO Audit"}  |  ${cssName}  |  ${monthYear}";
+      content: "CRES  |  ${headerLabel || (mode === "seo" ? "SEO Audit" : mode === "marketing" ? "Marketing Audit" : "Marketing & SEO Audit")}  |  ${cssName}  |  ${monthYear}";
       font-family: 'Josefin Sans', sans-serif;
       font-size: 8.5pt;
       color: #062347;
@@ -8490,13 +8490,13 @@ export default function MarketingHub() {
   // Which report to print: the combined Marketing/SEO/LLM doc, or the
   // standalone Review Audit. Set just before window.print() so only the
   // targeted .printable-report is in the DOM.
-  const [printTarget, setPrintTarget] = useState<"combined" | "seo" | "review" | "marketing">("combined");
+  const [printTarget, setPrintTarget] = useState<"combined" | "seo" | "review" | "marketing" | "all">("combined");
   const [printNonce, setPrintNonce] = useState(0);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   useEffect(() => {
     if (printNonce > 0) window.print();
   }, [printNonce]);
-  const doPrint = (target: "combined" | "seo" | "review" | "marketing") => {
+  const doPrint = (target: "combined" | "seo" | "review" | "marketing" | "all") => {
     setPrintTarget(target);
     setPrintMenuOpen(false);
     setPrintNonce((n) => n + 1);
@@ -8780,6 +8780,14 @@ export default function MarketingHub() {
                     Print together
                   </div>
                   <button
+                    onClick={() => doPrint("all")}
+                    style={{ display: "block", width: "100%", textAlign: "left", background: "white", border: "none", padding: "9px 16px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, fontWeight: 400, color: B.oxford, cursor: "pointer", whiteSpace: "nowrap" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f7f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
+                  >
+                    🖨 All three (Marketing + SEO + Review)
+                  </button>
+                  <button
                     onClick={() => doPrint("combined")}
                     style={{ display: "block", width: "100%", textAlign: "left", background: "white", border: "none", padding: "9px 16px 11px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: B.oxford, cursor: "pointer", whiteSpace: "nowrap" }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f7f9")}
@@ -8813,6 +8821,17 @@ export default function MarketingHub() {
 
       {printTarget === "review" ? (
         <ReviewAuditReport property={property} />
+      ) : printTarget === "all" ? (
+        // All three in one document: Marketing + SEO, then the Review audit forced
+        // onto a fresh page. Both carry the SAME running page-header so it reads
+        // consistently across the whole PDF (otherwise the two reports' @page rules
+        // would fight and stamp one report's header on the other's pages).
+        <>
+          <PrintableReport property={property} mode="combined" headerLabel="Marketing, SEO & Review Audit" />
+          <div className="pb-before">
+            <ReviewAuditReport property={property} headerLabel="Marketing, SEO & Review Audit" />
+          </div>
+        </>
       ) : (
         <PrintableReport
           property={property}
