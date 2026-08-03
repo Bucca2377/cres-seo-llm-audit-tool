@@ -7230,6 +7230,12 @@ function ReviewAuditReport({ property }: { property: Property }) {
       margin-bottom: 0.4in;
     }
   }
+  /* Keep a section header with the start of its section (no orphaned header stranded
+     at the bottom of a page), and keep its intro line attached to the content too. */
+  h2, h3 { break-after: avoid; page-break-after: avoid; }
+  h2 + *, h3 + * { break-after: avoid; page-break-after: avoid; }
+  /* Don't split a single row / card across a page boundary. */
+  .pb-avoid { break-inside: avoid; page-break-inside: avoid; }
 }`;
   const bodyP: React.CSSProperties = { fontFamily: "'Josefin Sans', sans-serif", fontSize: 11, lineHeight: 1.6, color: PRINT_BODY, margin: "0 0 10px 0" };
   const td: React.CSSProperties = { padding: "5px 8px", fontSize: 10, lineHeight: 1.45, color: PRINT_BODY, verticalAlign: "top", borderBottom: "0.5px solid #d8d8d8" };
@@ -7541,6 +7547,12 @@ function PrintableReport({ property, mode = "combined" }: { property: Property; 
       margin-bottom: 0.4in;
     }
   }
+  /* Keep a section header with the start of its section (no orphaned header stranded
+     at the bottom of a page), and keep its intro line attached to the content too. */
+  h2, h3 { break-after: avoid; page-break-after: avoid; }
+  h2 + *, h3 + * { break-after: avoid; page-break-after: avoid; }
+  /* Don't split a single row / card across a page boundary. */
+  .pb-avoid { break-inside: avoid; page-break-inside: avoid; }
 }`;
 
   const seoSummaryLine = seo
