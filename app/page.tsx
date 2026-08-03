@@ -6548,8 +6548,8 @@ function ReviewAuditResultView({
         <KPI label="Prior Rating" value={k.priorRating !== null ? k.priorRating.toFixed(1) : "—"} sub={k.priorIsEstimated ? "estimated" : "prior month"} trend={delta !== null && delta !== 0 ? delta : undefined} accent={B.oxford} />
         <KPI label="Total Reviews" value={k.totalReviews ?? "—"} sub="all-time on Google" accent={B.oxford} />
         <KPI label="New Reviews" value={k.newReviews} sub={results.periodLabel} accent={B.tangelo} />
-        <KPI label="Response Rate" value={k.responseRatePeriod !== null ? `${k.responseRatePeriod}%` : "—"} sub="this period" accent={k.responseRatePeriod !== null && k.responseRatePeriod >= 90 ? "#22c55e" : "#f59e0b"} />
-        <KPI label="Response Rate" value={k.responseRateAllTime !== null ? `${k.responseRateAllTime}%` : "—"} sub="of reviews checked" accent={k.responseRateAllTime !== null && k.responseRateAllTime >= 90 ? "#22c55e" : "#f59e0b"} />
+        <KPI label="Period Response Rate" value={k.responseRatePeriod !== null ? `${k.responseRatePeriod}%` : "—"} sub="of this period's reviews" accent={k.responseRatePeriod !== null && k.responseRatePeriod >= 90 ? "#22c55e" : "#f59e0b"} />
+        <KPI label="All-Time Response Rate" value={k.responseRateAllTime !== null ? `${k.responseRateAllTime}%` : "—"} sub="of all reviews checked" accent={k.responseRateAllTime !== null && k.responseRateAllTime >= 90 ? "#22c55e" : "#f59e0b"} />
       </div>
 
       {/* Trend — one point per calendar month */}
@@ -7229,8 +7229,8 @@ function ReviewAuditReport({ property }: { property: Property }) {
                 ["Prior Rating", ra.kpis.priorRating !== null ? ra.kpis.priorRating.toFixed(1) : "—", ra.kpis.priorIsEstimated ? "estimated" : "prior month"],
                 ["Total Reviews", String(ra.kpis.totalReviews ?? "—"), "all-time"],
                 ["New Reviews", String(ra.kpis.newReviews), ra.periodLabel],
-                ["Response Rate", ra.kpis.responseRatePeriod !== null ? `${ra.kpis.responseRatePeriod}%` : "—", "this period"],
-                ["Response Rate", ra.kpis.responseRateAllTime !== null ? `${ra.kpis.responseRateAllTime}%` : "—", "reviews checked"],
+                ["Period Response Rate", ra.kpis.responseRatePeriod !== null ? `${ra.kpis.responseRatePeriod}%` : "—", "of this period's reviews"],
+                ["All-Time Response Rate", ra.kpis.responseRateAllTime !== null ? `${ra.kpis.responseRateAllTime}%` : "—", "of all reviews checked"],
               ] as [string, string, string][]).map(([label, val, sub], i) => (
                 <div key={i} style={{ flex: "1 1 28%", minWidth: 120, padding: "7px 10px", border: "1px solid #cfcfcf", borderLeft: `3px solid ${PRINT_TEAL}` }}>
                   <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 8.5, color: "#666", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>{label}</div>
