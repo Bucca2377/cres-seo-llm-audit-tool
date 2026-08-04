@@ -4670,6 +4670,7 @@ function MarketingAuditTab({
       let aptHoursVerified = false;
       let aptWebsiteUrl: string | null = null;
       let aptHasVirtualTour = false;
+      let aptRawFetchOk = false; // true when the Apartments.com raw-HTML read succeeded this run
       if (current.apartmentsUrl && aptRead) {
         try {
           const sr = await fetch("/api/apts-status", {
@@ -4685,6 +4686,7 @@ function MarketingAuditTab({
             virtualTour?: boolean | null;
           };
           const rawFetchOk = typeof sj.advertising === "boolean";
+          aptRawFetchOk = rawFetchOk;
           if (rawFetchOk) {
             aptRead.advertising = sj.advertising as boolean;
             aptRead.ok = true;
@@ -5251,13 +5253,25 @@ Return ONLY this JSON object, no prose before or after:
       if (aptRead && aptRead.ok && aptRead.advertising !== false) {
         const vtRow = consistency.find((r) => /virtual tour/i.test(r?.label || ""));
         if (vtRow) {
-          if (aptHasVirtualTour) {
-            vtRow.apartments = { status: "green", note: "Matterport / 3D tour present on the listing." };
-          } else if (aptRead.mediaCounts.virtualTours !== null) {
-            const vts = aptRead.mediaCounts.virtualTours;
-            vtRow.apartments = vts > 0
-              ? { status: "green", note: `Media summary lists ${vts} virtual tour${vts > 1 ? "s" : ""}.` }
-              : { status: "amber", note: "No virtual tour found in the media summary — verify on the listing." };
+          const mediaVts = aptRead.mediaCounts.virtualTours;
+          if (aptHasVirtualTour || (mediaVts ?? 0) > 0) {
+            // EITHER source positive -> present. (Raw-HTML Matterport/3D marker OR the
+            // media badge's tour count; the badge often under-reads, so raw HTML wins.)
+            vtRow.apartments = {
+              status: "green",
+              note: aptHasVirtualTour
+                ? "Matterport / 3D tour present on the listing."
+                : `Media summary lists ${mediaVts} virtual tour${mediaVts! > 1 ? "s" : ""}.`,
+            };
+          } else if (aptRawFetchOk) {
+            // The raw-HTML read SUCCEEDED and found no virtual-tour markers, and the
+            // media badge shows none either -> genuinely absent.
+            vtRow.apartments = { status: "amber", note: "No virtual tour on the listing — verify, and add a Matterport/3D tour so remote prospects can walk the units." };
+          } else {
+            // The raw-HTML read was inconclusive this run (slow/blocked fetch) and the
+            // media badge didn't confirm one -> we couldn't check. Do NOT assert absence
+            // (Apartments.com listings very often carry a tour); flag it as unconfirmed.
+            vtRow.apartments = { status: "amber", note: "Couldn’t confirm a virtual tour this run (the listing read came back incomplete) — verify on the listing." };
           }
         }
       }

@@ -9,7 +9,7 @@ import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
 import { brightDataRaw } from "@/lib/brightdata";
 
 export const runtime = "nodejs";
-export const maxDuration = 90;
+export const maxDuration = 150;
 
 /**
  * Deterministic "is this Apartments.com listing actively advertising?" check.
@@ -41,7 +41,12 @@ export async function POST(req: NextRequest) {
     // falls the audit back to a false "couldn't read the hours this run." A real
     // Apartments.com listing (active or dark shell) is hundreds of KB, so require a
     // substantial body before trusting it.
-    const html = await brightDataRaw(url, { minLength: 5000, attempts: 3 });
+    // Apartments.com via the Unlocker can be genuinely SLOW (50s+) as well as
+    // empty-fast, so give each attempt a longer window than the default 35s — a
+    // 35s cap kills a slow-but-successful fetch, dropping VT/hours/concession and
+    // producing a false "couldn't confirm" (the recurring virtual-tour CHECK). 3
+    // attempts x 45s stays under the route's maxDuration.
+    const html = await brightDataRaw(url, { minLength: 5000, attempts: 3, timeoutMs: 45000 });
     if (!html) return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null });
     // Office hours + concession from the RAW HTML are AUTHORITATIVE. The visible
     // listing collapses hours behind "View All Hours" (model misreads closed days as
