@@ -94,6 +94,19 @@ test("concession: strips social hashtags + carousel labels from the special (the
   assert.match(s, /\$500 gift card/i);
 });
 
+test("concession: strips a long NAV prefix and starts at the offer (the J&G Paddocks bug)", () => {
+  // Real jandgcommunities.com text: a long nav run sits before the concession with no
+  // punctuation between, so the window grabbed the nav and the cap returned only that.
+  const text =
+    "Skip to main content Resident Login Property Management Our Communities Availability Resident Portal Our Team About Us Paddocks at Ridge Park Deposit discounted to $99 PLUS receive $250 off move-in costs when you sign your lease by 7/30/26! More info below";
+  const s = detectWebsiteSpecial(text)!;
+  assert.ok(s);
+  assert.doesNotMatch(s, /Resident Login|About Us|Skip to main content|Resident Portal/i); // no nav
+  assert.match(s, /\$250 off/i);
+  assert.match(s, /\$99/); // the deposit half kept via the $-amount lead-in
+  assert.match(s, /7\/30\/26/);
+});
+
 test("concession: recognizes a '$X gift card' offer (no 'special' wording needed)", () => {
   assert.ok(detectWebsiteSpecial("Move in by Aug 15 to receive a $500 Visa gift card."));
   // "gift" without a $ amount + "card" is not a concession (no false-fire).

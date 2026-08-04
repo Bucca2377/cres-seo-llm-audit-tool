@@ -59,8 +59,22 @@ function cleanSpecial(rawWindow: string): string | null {
     .replace(/\b\d+\s*\(current\)\s*\d*/gi, " ") // image-carousel / slider pager ("1 (current) 2")
     .replace(/\\+/g, " ") // JSON-escape residue (\/, \", \\) that leaks in from raw HTML
     .replace(/\s+/g, " ")
-    .replace(/^[^A-Za-z0-9$]+/, "") // leading punctuation/space left after stripping
     .trim();
+  // TRIM THE LEADING EDGE to the actual offer. The window grabs everything back to the
+  // last sentence break, which on a nav-heavy page is a long run of menu text ("Skip to
+  // main content Resident Login Our Team About Us …") sitting before the concession —
+  // and the length cap would then return only that nav prefix. Start the special at the
+  // concession phrase itself, but back up to include an immediately-preceding "$amount"
+  // lead-in (e.g. "$99 PLUS receive $250 off …") so the deposit half isn't dropped.
+  const cm = raw.match(CONCESSION_RE);
+  if (cm && cm.index !== undefined && cm.index > 0) {
+    let start = cm.index;
+    const lead = raw.slice(Math.max(0, start - 45), start);
+    const dollarLead = lead.search(/\$\s?\d/);
+    if (dollarLead >= 0) start = Math.max(0, start - 45) + dollarLead;
+    raw = raw.slice(start);
+  }
+  raw = raw.replace(/^[^A-Za-z0-9$]+/, "").trim(); // leading punctuation/space
   // Cap length but never cut mid-word (a "$5" tail from "$500" reads as an error).
   if (raw.length > 110) raw = raw.slice(0, 110).replace(/\s+\S*$/, "");
   return raw || null;
