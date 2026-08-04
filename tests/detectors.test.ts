@@ -273,14 +273,31 @@ test("coverage: injects for an uncovered virtual-tour red, naming the right plat
   assert.match(cards[0].what, /the website/i);
 });
 
-test("coverage: NEVER injects a Google-photos card (hard rule)", () => {
+test("coverage: a confirmed Google-photos gap injects an UPLOAD-existing-photos card (not a shoot)", () => {
+  // The website has the pro set; a vision check confirmed the Google profile lacks it.
   const row = {
     label: "Photos quality",
     apartments: { status: "na" },
-    google: { status: "red", note: "Mostly visitor snapshots" },
+    google: { status: "red", note: "Professional website photos aren't on the Google Business Profile — upload the existing set." },
     website: { status: "green" },
   };
-  assert.equal(missingFindingCards([row], [], { aptIsDark: false }).length, 0);
+  const cards = missingFindingCards([row], [], { aptIsDark: false });
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].title, /upload .*google business profile/i);
+  assert.doesNotMatch(cards[0].what, /photographer|shoot/i); // upload existing, not a new shoot
+});
+
+test("coverage: a website/Apartments.com photo red still yields an upgrade-the-gallery (shoot) card", () => {
+  const row = {
+    label: "Photos quality",
+    apartments: { status: "na" },
+    google: { status: "green" },
+    website: { status: "red", note: "Blurry, sparse photos" },
+  };
+  const cards = missingFindingCards([row], [], { aptIsDark: false });
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].title, /upgrade the photo gallery/i);
+  assert.match(cards[0].what, /professional/i);
 });
 
 test("coverage: skips a dark-Apartments.com red (reactivation card covers it) and green/na rows", () => {

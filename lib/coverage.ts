@@ -131,18 +131,37 @@ const TOPICS: Topic[] = [
     label: /photo|gallery/i,
     covers: /photo|gallery|image/i,
     card: (red) => {
-      const p = red.filter((x) => x !== "google"); // hard rule: NEVER recommend Google photos
-      return p.length
-        ? {
-            priority: "CONTENT",
-            title: `Upgrade the photo gallery on ${listPhrase(p)}`,
-            what: `The photos on ${listPhrase(p)} are weak or missing. Add professional, well-lit photos covering interiors/units, amenities, and the exterior so the property presents at its best.`,
-            why: "Amateur or sparse photos are a top reason prospects skip a listing during comparison shopping.",
-            effort: "~1 day · marketing manager + photographer",
-            success: `A professional photo set live on ${listPhrase(p)} within 2 weeks.`,
-            source: "Fixes the photo-quality finding.",
-          }
-        : null;
+      // The property's OWN listing photos (website / Apartments.com) are weak or
+      // missing -> produce a professional set (a real shoot).
+      const others = red.filter((x) => x !== "google");
+      if (others.length) {
+        return {
+          priority: "CONTENT",
+          title: `Upgrade the photo gallery on ${listPhrase(others)}`,
+          what: `The photos on ${listPhrase(others)} are weak or missing. Add professional, well-lit photos covering interiors/units, amenities, and the exterior so the property presents at its best.`,
+          why: "Amateur or sparse photos are a top reason prospects skip a listing during comparison shopping.",
+          effort: "~1 day · marketing manager + photographer",
+          success: `A professional photo set live on ${listPhrase(others)} within 2 weeks.`,
+          source: "Fixes the photo-quality finding.",
+        };
+      }
+      // ONLY the Google Business Profile is missing the professional set that already
+      // exists on the website / Apartments.com -> upload the existing photos (no shoot
+      // needed). This fires only when a vision check confirmed the profile lacks the
+      // pro set, so it's a reliable, fully-controllable fix — NOT the old "refresh the
+      // Google gallery" guesswork the hard rule used to drop.
+      if (red.includes("google")) {
+        return {
+          priority: "QUICK WIN",
+          title: "Upload your professional photos to the Google Business Profile",
+          what: "Your professional photo set is on the website and Apartments.com but not on the Google Business Profile. Upload the same interior, amenity, and exterior photos to the profile so searchers see the property at its best right in Google.",
+          why: "Most prospects judge a property from its Google photos first; a thin or amateur Google gallery loses clicks to competitors that show a full set.",
+          effort: "~20 min · marketing manager with Google Business access",
+          success: "A professional photo set live on the Google Business Profile within 1 week.",
+          source: "Fixes the missing Google-profile photos finding.",
+        };
+      }
+      return null;
     },
   },
   {

@@ -5388,11 +5388,12 @@ Return ONLY this JSON object, no prose before or after:
       }
 
       // --- Google photos verdict: flag only a real, actionable gap ---
-      // If the property has professional photos on the website or Apartments.com
-      // but its Google profile is missing that set, flag it (amber) — prospects
-      // lean on the Google profile and it isn't showing the property at its best.
-      // Otherwise GOOD. Capped at amber (a Google gallery is never a red issue), and
-      // a failed/unavailable check (googleHasPro null) is never flagged.
+      // If the property has professional photos on the website or Apartments.com but a
+      // VISION CHECK confirms its Google profile is missing that set, that's a real,
+      // fixable ISSUE (prospects judge a property from its Google photos first, and the
+      // owner fully controls what they upload) — mark it RED, with a coverage rec to
+      // upload the existing set. A failed/unavailable check (googleHasPro null) is never
+      // flagged, so we only ever flag a gap we're confident about.
       if (googlePhotos.length >= 2) {
         const row = consistency.find((c) => /photo/i.test(c.label));
         if (row) {
@@ -5404,8 +5405,8 @@ Return ONLY this JSON object, no prose before or after:
               : "";
           if (googleHasPro === false && proSource) {
             row.google = {
-              status: "amber",
-              note: `Professional ${proSource} photos aren't on the Google profile — upload them so prospects see the property at its best.`,
+              status: "red",
+              note: `Professional ${proSource} photos aren't on the Google Business Profile — upload the existing set so prospects see the property at its best.`,
             };
           } else if (googleHasPro === true) {
             row.google = { status: "green", note: "Professional photos are posted to the Google profile." };
