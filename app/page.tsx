@@ -6051,11 +6051,16 @@ function reviewResponseText(r: any): string {
   if (typeof c === "object") return (c.snippet || c.text || c.extracted_snippet || "").trim();
   return "";
 }
+// maxPages must cover ALL of a typical property's reviews, because SerpAPI's
+// "newestFirst" sort is NOT strictly chronological — recent reviews are scattered
+// across pages, so we can't stop early and must page through, then window by date.
+// ~10 reviews/page: these caps fully cover properties up to ~50/80/120/180 reviews;
+// beyond that the run is marked a partial sample (truncated).
 const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string; maxPages: number }[] = [
-  { id: "1mo", label: "Last month", days: 31, windowLabel: "Last 30 days", maxPages: 4 },
-  { id: "3mo", label: "Past 3 months", days: 93, windowLabel: "Last 3 months", maxPages: 6 },
-  { id: "6mo", label: "Past 6 months", days: 186, windowLabel: "Last 6 months", maxPages: 8 },
-  { id: "12mo", label: "Past 12 months", days: 366, windowLabel: "Last 12 months", maxPages: 14 },
+  { id: "1mo", label: "Last month", days: 31, windowLabel: "Last 30 days", maxPages: 5 },
+  { id: "3mo", label: "Past 3 months", days: 93, windowLabel: "Last 3 months", maxPages: 8 },
+  { id: "6mo", label: "Past 6 months", days: 186, windowLabel: "Last 6 months", maxPages: 12 },
+  { id: "12mo", label: "Past 12 months", days: 366, windowLabel: "Last 12 months", maxPages: 18 },
 ];
 const STAR_COLORS = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"]; // 5★ → 1★
 
@@ -6179,13 +6184,12 @@ function ReviewAuditTab({
         allReviews = allReviews.concat(batch);
         token = resp?.serpapi_pagination?.next_page_token || "";
         if (!batch.length || !token) break;
-        // Early-break only valid when date-sorted. Under the relevance fallback
-        // we page up to maxPages and window by date afterward.
-        if (sortMode === "newestFirst") {
-          const oldest = batch[batch.length - 1];
-          const oldestDate = oldest?.iso_date ? new Date(oldest.iso_date) : null;
-          if (oldestDate && oldestDate < cutoff) break;
-        }
+        // NO date-based early-break: SerpAPI's "newestFirst" is NOT strictly
+        // chronological — a single old review on an early page used to trip the break
+        // and skip recent reviews scattered on later pages (that under-counted The
+        // View's 5-star reviews: 3 reported vs 5 real in 93 days). Page through to
+        // maxPages and window by date afterward. A token still left at maxPages means
+        // more reviews exist than we paged -> mark the run a partial sample.
         if (pageNum === maxPages - 1 && token) truncated = true;
       }
       // Relevance-fallback means newer reviews may exist beyond what we paged,
