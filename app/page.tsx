@@ -6051,16 +6051,16 @@ function reviewResponseText(r: any): string {
   if (typeof c === "object") return (c.snippet || c.text || c.extracted_snippet || "").trim();
   return "";
 }
-// maxPages must cover ALL of a typical property's reviews, because SerpAPI's
-// "newestFirst" sort is NOT strictly chronological — recent reviews are scattered
-// across pages, so we can't stop early and must page through, then window by date.
-// ~10 reviews/page: these caps fully cover properties up to ~50/80/120/180 reviews;
-// beyond that the run is marked a partial sample (truncated).
-const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string; maxPages: number }[] = [
-  { id: "1mo", label: "Last month", days: 31, windowLabel: "Last 30 days", maxPages: 5 },
-  { id: "3mo", label: "Past 3 months", days: 93, windowLabel: "Last 3 months", maxPages: 8 },
-  { id: "6mo", label: "Past 6 months", days: 186, windowLabel: "Last 6 months", maxPages: 12 },
-  { id: "12mo", label: "Past 12 months", days: 366, windowLabel: "Last 12 months", maxPages: 18 },
+// Hard cap on review pages (see the fetch loop). Under the primary newest-first path we
+// normally stop far sooner — once a page predates the window — so the cap only bites the
+// rare default-sort fallback, where we must page the whole listing (relevance order, no
+// early-stop). ~10 reviews/page, so 45 covers ~450 reviews; beyond that => partial sample.
+const MAX_REVIEW_PAGES = 45;
+const REVIEW_PERIODS: { id: ReviewPeriod; label: string; days: number; windowLabel: string }[] = [
+  { id: "1mo", label: "Last month", days: 31, windowLabel: "Last 30 days" },
+  { id: "3mo", label: "Past 3 months", days: 93, windowLabel: "Last 3 months" },
+  { id: "6mo", label: "Past 6 months", days: 186, windowLabel: "Last 6 months" },
+  { id: "12mo", label: "Past 12 months", days: 366, windowLabel: "Last 12 months" },
 ];
 const STAR_COLORS = ["#22c55e", "#86c34a", "#f59e0b", "#f08a3c", "#e0524f"]; // 5★ → 1★
 
@@ -6138,30 +6138,34 @@ function ReviewAuditTab({
         if (Object.keys(patch).length > 0) current = { ...current, ...patch };
       }
 
-      // 2. Page reviews until we pass the window (cap N pages). We ask Google
-      //    for newest-first, BUT that sort silently returns zero reviews for
-      //    some listings (a Google/SerpAPI quirk — confirmed live on Flats on
-      //    Maple, which has 147 reviews yet returns none under newestFirst).
-      //    When that happens we fall back to Google's default sort so we never
-      //    report "0 reviews" for a listing that clearly has them; since the
-      //    fallback is relevance-ordered, we window by date afterward and skip
-      //    the newest-first early-break.
+      // 2. Page reviews NEWEST-FIRST and stop once we pass the window. THE critical
+      //    detail (confirmed live on The View, 331 reviews): sort_by=newestFirst must
+      //    be sent on EVERY request. If you send it only on page 1 and paginate with
+      //    the token alone, SerpAPI DROPS the sort and silently returns a truncated
+      //    ~62-review set that even omits recent reviews (that's what under-counted the
+      //    audit: 5 of the 12 four/five-star in the last 93 days). Sent every page, it
+      //    returns all reviews in strict newest→oldest order. Because the per-page
+      //    OLDEST review then decreases monotonically (top-of-page edited-review date
+      //    outliers don't affect the last item), once a page's oldest predates the
+      //    cutoff every later page is older too — so we stop there and window by date.
+      //    Rare quirk: a few listings return nothing under newestFirst — fall back to
+      //    the default sort and page the whole listing (relevance-ordered, so window
+      //    after fetching), capped at MAX_REVIEW_PAGES.
       const periodDef = REVIEW_PERIODS.find((p) => p.id === period)!;
       const cutoff = new Date(Date.now() - periodDef.days * 24 * 60 * 60 * 1000);
       let allReviews: any[] = [];
       let token = "";
       let truncated = false;
-      let sortMode: "newestFirst" | "" = "newestFirst"; // "" = Google default (relevance)
-      const maxPages = periodDef.maxPages;
-      for (let pageNum = 0; pageNum < maxPages; pageNum++) {
+      let sortBy = "newestFirst"; // "" = Google default (relevance) fallback
+      for (let pageNum = 0; pageNum < MAX_REVIEW_PAGES; pageNum++) {
         setProgress(`Pulling reviews (page ${pageNum + 1})…`);
         let resp: any;
         try {
           resp = await callSerp({
             engine: "google_maps_reviews",
             data_id: dataId,
-            // sort_by only on the first request; the page token encodes the sort.
-            ...(token ? { next_page_token: token } : sortMode ? { sort_by: sortMode } : {}),
+            ...(sortBy ? { sort_by: sortBy } : {}), // sent EVERY page — the token alone loses the sort
+            ...(token ? { next_page_token: token } : {}),
           });
         } catch {
           if (pageNum === 0)
@@ -6169,32 +6173,26 @@ function ReviewAuditTab({
           truncated = true;
           break;
         }
-        let batch: any[] = Array.isArray(resp?.reviews) ? resp.reviews : [];
-        // newestFirst returned nothing for this listing — retry page 1 with the
-        // default sort and continue paging from there.
-        if (pageNum === 0 && batch.length === 0 && sortMode === "newestFirst") {
-          sortMode = "";
-          try {
-            resp = await callSerp({ engine: "google_maps_reviews", data_id: dataId });
-            batch = Array.isArray(resp?.reviews) ? resp.reviews : [];
-          } catch {
-            /* leave batch empty; the post-loop guard handles it */
-          }
+        const batch: any[] = Array.isArray(resp?.reviews) ? resp.reviews : [];
+        // Some listings return nothing under newestFirst — restart with the default sort.
+        if (pageNum === 0 && batch.length === 0 && sortBy === "newestFirst") {
+          sortBy = "";
+          pageNum = -1;
+          allReviews = [];
+          token = "";
+          continue;
         }
         allReviews = allReviews.concat(batch);
         token = resp?.serpapi_pagination?.next_page_token || "";
-        if (!batch.length || !token) break;
-        // NO date-based early-break: SerpAPI's "newestFirst" is NOT strictly
-        // chronological — a single old review on an early page used to trip the break
-        // and skip recent reviews scattered on later pages (that under-counted The
-        // View's 5-star reviews: 3 reported vs 5 real in 93 days). Page through to
-        // maxPages and window by date afterward. A token still left at maxPages means
-        // more reviews exist than we paged -> mark the run a partial sample.
-        if (pageNum === maxPages - 1 && token) truncated = true;
+        if (!batch.length || !token) break; // reached the end of the listing's reviews
+        // newest-first: stop once this page's oldest review predates the window.
+        if (sortBy === "newestFirst") {
+          const oldestIso = batch[batch.length - 1]?.iso_date;
+          if (oldestIso && new Date(oldestIso) < cutoff) break;
+        }
+        if (pageNum === MAX_REVIEW_PAGES - 1 && token) truncated = true; // more exist than we paged
       }
-      // Relevance-fallback means newer reviews may exist beyond what we paged,
-      // so mark the report as a partial sample.
-      if (sortMode === "") truncated = true;
+      if (sortBy === "") truncated = true; // relevance fallback windows a paged sample
 
       // Guard: a listing that HAS reviews but yields none here means Google
       // returned nothing this call — don't render a misleading "0 new reviews"
