@@ -5133,22 +5133,6 @@ Return ONLY this JSON object, no prose before or after:
                 };
           }
           if (hoursVerdicts.google) hoursRow.google = hoursVerdicts.google;
-          else if (gbpHadData && (!officeHours || Object.keys(officeHours).length === 0)) {
-            // The Google profile is LIVE but carries NO office hours. That's a confirmed
-            // FACT, not a "verify" — SerpAPI returns GBP hours when they exist, so their
-            // absence means the listing genuinely has none (the profile shows "Add
-            // business hours"). It's a real lead gap: searchers can't see when the office
-            // is open. Mark it an ISSUE with the fix, not a soft amber CHECK.
-            const haveElsewhere =
-              Object.keys(websiteHoursParsed || {}).length > 0 ||
-              !!(aptRead?.ok && aptHoursVerified && Object.keys(aptRead.officeHours || {}).length > 0);
-            hoursRow.google = {
-              status: "red",
-              note: haveElsewhere
-                ? "No office hours on the Google Business Profile. Add them so searchers see when the office is open — your website and Apartments.com already list them, so copy those exact hours."
-                : "No office hours on the Google Business Profile. Add your weekly hours so searchers see when the office is open.",
-            };
-          }
           if (hoursVerdicts.apartments && !aptIsDark) hoursRow.apartments = hoursVerdicts.apartments;
           // Apts active but hours NOT confirmed from raw HTML -> don't show the model's
           // collapsed-view guess as a graded schedule; mark it verify (and it was never
@@ -5172,6 +5156,28 @@ Return ONLY this JSON object, no prose before or after:
                   note: "Full weekly hours weren’t readable from the listing this run — verify on Apartments.com (the listing collapses them behind “View All Hours”).",
                 };
           }
+        }
+      }
+      // GOOGLE HAS NO OFFICE HOURS = confirmed gap. Runs INDEPENDENTLY of the
+      // reconciliation above (which only runs when >=2 platforms have parseable
+      // hours, so it can be skipped). The Google profile is live (gbpHadData) but
+      // SerpAPI returned no hours — SerpAPI returns GBP hours when they exist, so the
+      // listing genuinely has none (the profile shows "Add business hours"). That's a
+      // FACT and a real lead gap, not a soft "verify". Mark it a red ISSUE with the
+      // fix; allFindingCards then emits an "add office hours to Google" recommendation
+      // from this red cell.
+      if (gbpHadData && (!officeHours || Object.keys(officeHours).length === 0)) {
+        const hoursRow = consistency.find((r) => /\bhours?\b/i.test(r?.label || ""));
+        if (hoursRow && hoursRow.google?.status !== "green") {
+          const haveElsewhere =
+            Object.keys(websiteHoursParsed || {}).length > 0 ||
+            !!(aptRead?.ok && Object.keys(aptRead.officeHours || {}).length > 0);
+          hoursRow.google = {
+            status: "red",
+            note: haveElsewhere
+              ? "No office hours on the Google Business Profile. Add them so searchers see when the office is open — your website and Apartments.com already list the hours, so copy those exact times."
+              : "No office hours on the Google Business Profile. Add your weekly hours so searchers see when the office is open.",
+          };
         }
       }
       // WEBSITE FEATURE RECONCILIATION. On JS-heavy sites the features live on

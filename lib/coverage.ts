@@ -70,17 +70,33 @@ const TOPICS: Topic[] = [
   {
     label: /\bhours?\b/i,
     covers: /\bhours?\b/i,
-    card: (_red, note, dark) => ({
-      priority: "FOUNDATIONAL",
-      title: "Fix the office-hours conflict across listings",
-      what: `The office hours don't match across your listings${note ? ` (${note})` : ""}. Decide the correct schedule, then update ${
-        dark ? "the Google Business Profile and the website" : "the Google Business Profile, the website, and the Apartments.com listing"
-      } so every platform shows the SAME hours. Verify with a live check afterward.`,
-      why: "Mismatched hours send prospects to a closed leasing office, destroying trust and losing tours on the spot.",
-      effort: "~15 min · marketing manager with Google Business access",
-      success: "All listings show identical office hours within 48 hours, confirmed by a live check.",
-      source: "Fixes the office-hours conflict in the consistency check.",
-    }),
+    card: (red, note, dark) => {
+      // A "missing hours" red (a platform simply has NO hours listed) needs an
+      // ADD-hours card, not a "resolve the conflict" card. Detect it from the note.
+      const isMissing = /no office hours|hours not listed|not listed on|\badd (?:them|your|the )?(?:weekly )?(?:office )?hours\b|add business hours/i.test(note);
+      if (isMissing) {
+        return {
+          priority: "FOUNDATIONAL",
+          title: `Add office hours to ${listPhrase(red)}`,
+          what: `${cap(listPhrase(red))} ${verb(red)} no office hours listed${note ? ` (${note})` : ""}. Add the weekly hours so searchers see when the leasing office is open — copy them from a platform that already shows them.`,
+          why: "A listing with no hours leaves prospects guessing when they can visit or call, and an incomplete profile is a lead leak (Google also favors complete listings).",
+          effort: "~10 min · marketing manager with the listing's admin access",
+          success: `Office hours visible on ${listPhrase(red)} within 24 hours.`,
+          source: "Fixes the missing office-hours finding.",
+        };
+      }
+      return {
+        priority: "FOUNDATIONAL",
+        title: "Fix the office-hours conflict across listings",
+        what: `The office hours don't match across your listings${note ? ` (${note})` : ""}. Decide the correct schedule, then update ${
+          dark ? "the Google Business Profile and the website" : "the Google Business Profile, the website, and the Apartments.com listing"
+        } so every platform shows the SAME hours. Verify with a live check afterward.`,
+        why: "Mismatched hours send prospects to a closed leasing office, destroying trust and losing tours on the spot.",
+        effort: "~15 min · marketing manager with Google Business access",
+        success: "All listings show identical office hours within 48 hours, confirmed by a live check.",
+        source: "Fixes the office-hours conflict in the consistency check.",
+      };
+    },
   },
   {
     label: /website link/i,

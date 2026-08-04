@@ -245,6 +245,21 @@ test("coverage: does NOT double-inject when the model already wrote the fix", ()
   assert.equal(missingFindingCards([hoursConflictRow], recs, { aptIsDark: true }).length, 0);
 });
 
+test("coverage: a MISSING-hours red yields an ADD-hours card (not a conflict card), naming the platform", () => {
+  // Google profile live but no hours listed (the Edge 26 case).
+  const row = {
+    label: "Office hours listed",
+    apartments: { status: "green", note: "Mon-Fri 10am-6pm, Sat 10am-5pm, Sun Closed" },
+    google: { status: "red", note: "No office hours on the Google Business Profile. Add them so searchers see when the office is open." },
+    website: { status: "green", note: "Mon-Fri 10am-6pm, Sat 10am-5pm, Sun Closed" },
+  };
+  const cards = missingFindingCards([row], [], { aptIsDark: false });
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].title, /add office hours/i);
+  assert.match(cards[0].title, /google business profile/i);
+  assert.doesNotMatch(cards[0].what, /don't match|conflict/i); // it's a missing-hours fix, not a conflict
+});
+
 test("coverage: injects for an uncovered virtual-tour red, naming the right platform", () => {
   const row = {
     label: "Virtual tour",
