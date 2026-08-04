@@ -49,8 +49,10 @@ import PropertySettings from "./property-settings";
  * audit — so improvements reach EXISTING properties without a manual reset.
  * v2 = city-targeted, brand-led, bedroom+amenity stock searches, autocomplete-
  * grounded picks, target 10 (supersedes the old broad county-based sets).
+ * v3 = strengthened picks: lead with neighborhood/employer targeting and keep at
+ * most one plain city phrase (no more near-duplicate generic-city variants).
  */
-const SEO_QUERY_SET_VERSION = 2;
+const SEO_QUERY_SET_VERSION = 3;
 
 /* -- BRAND ---------------------------------------------------------- */
 const B = {
@@ -3143,10 +3145,39 @@ Return ONLY a JSON array of 9 strings.`;
           ].filter((q) => !isOffProfileQuery(q, profileOpts));
         }
 
-        // Final set (target 10): brand leads, then the always-tracked bedroom+county
-        // and amenity+county stock searches, then the demand-grounded picks fill the
-        // rest. Deduped + capped.
-        queries = finalizeQuerySet(currentProperty.name, [...stockQueries, ...picked], 10);
+        // STRENGTHEN THE PICKS. For a small submarket, autocomplete real demand skews to
+        // near-duplicate generic "apartments in <city>" phrases — weak and redundant
+        // (e.g. "rentals in wheat ridge co" + "apartments for rent in wheat ridge colorado"
+        // + "cheap apartments in wheat ridge co", three variants of the same search). Lead
+        // instead with the submarket TARGETING the user wants — the property's
+        // neighborhood/district and 1-2 real nearby employers/institutions from the model's
+        // analysis (real named anchors, never invented micro-combos) — then keep at MOST
+        // ONE plain city phrase so the same generic search isn't tracked three times.
+        const anchorTokens = [anchors.neighborhood, ...anchors.employers]
+          .map((x) => (x || "").trim().toLowerCase())
+          .filter((x) => x.length > 2);
+        const looksTargeted = (q: string) => {
+          const s = q.toLowerCase();
+          return /\bnear\b/.test(s) || anchorTokens.some((t) => s.includes(t));
+        };
+        const targetedFromAnchors: string[] = [];
+        if (anchors.neighborhood && anchors.neighborhood.trim().toLowerCase() !== addressCity.toLowerCase())
+          targetedFromAnchors.push(`${unitWord} for rent in ${anchors.neighborhood.trim()}`);
+        for (const emp of (anchors.employers || []).slice(0, 2)) {
+          const e = (emp || "").trim();
+          if (e) targetedFromAnchors.push(`${unitWord} near ${e}`);
+        }
+        // Validated targeted picks (real autocomplete demand) first, then targeting from the
+        // submarket anchors, then a SINGLE generic city phrase. finalizeQuerySet dedupes + caps.
+        const orderedPicks = [
+          ...picked.filter(looksTargeted),
+          ...targetedFromAnchors,
+          ...picked.filter((q) => !looksTargeted(q)).slice(0, 1),
+        ].filter((q) => !isOffProfileQuery(q, profileOpts) && !isSalesIntent(q));
+
+        // Final set (target 10): brand leads, then the always-tracked bedroom+town and
+        // amenity+town stock searches, then the strengthened picks. Deduped + capped.
+        queries = finalizeQuerySet(currentProperty.name, [...stockQueries, ...orderedPicks], 10);
         if (queries.length === 0) throw new Error("Could not generate query candidates.");
       }
 
