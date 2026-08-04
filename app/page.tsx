@@ -51,8 +51,10 @@ import PropertySettings from "./property-settings";
  * grounded picks, target 10 (supersedes the old broad county-based sets).
  * v3 = strengthened picks: lead with neighborhood/employer targeting and keep at
  * most one plain city phrase (no more near-duplicate generic-city variants).
+ * v4 = neighborhood taken from the PROPERTY NAME when it states one (fixes wrong
+ * nearby-area guesses, e.g. "Applewood" for a property named "...at Sloan's Lake").
  */
-const SEO_QUERY_SET_VERSION = 3;
+const SEO_QUERY_SET_VERSION = 4;
 
 /* -- BRAND ---------------------------------------------------------- */
 const B = {
@@ -3003,13 +3005,14 @@ Amenities: ${amenitiesStr}
 Rules:
 - Anchor to the property's SPECIFIC submarket: its neighborhood or suburb, its county, and 1-2 MAJOR nearby employers/institutions (hospital, university, military base, corporate campus, downtown district) that exist for THIS address.
 - Location phrases MUST stay in the city above and its OWN neighborhoods. NEVER relocate the property to a neighboring city (e.g. do not use "Aurora" for a Denver address). Prefer a specific NEIGHBORHOOD of that city over the bare city name. Nearby employers/institutions may appear ONLY in "near <X>" phrases, even if they sit in an adjacent town.
+- The PROPERTY NAME is the most authoritative source of its neighborhood/landmark: if the name states a place ("Edge 26 at Sloan's Lake" -> Sloan's Lake; "The Douglas on Wash Park" -> Washington Park; "Alta at the Lake" -> the named lake district), USE THAT neighborhood verbatim. Do NOT substitute a different nearby district you happen to know (do not answer "Applewood" for a property named "...at Sloan's Lake"). Only fall back to inferring the neighborhood from the address when the name names no place.
 - Do NOT invent hyper-specific amenity + micro-street combinations no one types.
 - Phrases must be how renters ACTUALLY search (type + place, bedroom + place, "near <employer>"), with real demand.
 - These are RENTAL searches. NEVER use sale/purchase wording ("for sale", "to buy", "for sale by owner").
 - Use the word a renter types: "${unitWord}". Do NOT use industry jargon like "multifamily" or "multi-family".
 - Do NOT use a specific apartment community / competitor property name as a query; only generic phrases a stranger would type.
 
-Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. "neighborhood" = the neighborhood/district WITHIN the city above where this exact address sits (e.g. a Denver address on S Akron St -> "Virginia Village") — used only to target the demand-grounded picks.`;
+Return ONLY JSON: {"neighborhood":"","county":"","employers":["",""],"seeds":["10 short seed phrases"]}. "neighborhood" = the neighborhood/district this property sits in — taken from the PROPERTY NAME if it states one (authoritative), otherwise inferred from the address (e.g. a Denver address on S Akron St -> "Virginia Village"). Used to target the demand-grounded picks, so it must be the RIGHT place, not a nearby one.`;
 
         let anchors: { neighborhood: string; county: string; employers: string[]; seeds: string[] } = {
           neighborhood: "",
