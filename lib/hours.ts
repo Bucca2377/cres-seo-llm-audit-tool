@@ -163,15 +163,19 @@ function fullDayIndex(s: string): number {
  * Missing this is what made "Monday & Tuesday, 9am - 5pm" parse as BOTH days Closed.
  */
 function expandDaySpec(spec: string): number[] {
+  const s = (spec || "").trim();
+  if (/\b(daily|every\s*day|7\s*days)\b/i.test(s)) return [0, 1, 2, 3, 4, 5, 6];
   const out = new Set<number>();
-  for (const seg of (spec || "").split(/\s*(?:&|,|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean)) {
+  // Segments split on & / , / "and" / "/". abbrevDayIndex accepts full OR abbreviated
+  // day names ("Monday", "Mon", "Tue"), so grouped/abbreviated listings all parse.
+  for (const seg of s.split(/\s*(?:&|,|\/|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean)) {
     const range = seg.split(/\s*[-–—]\s*/);
     if (range.length === 2) {
-      const a = fullDayIndex(range[0]);
-      const b = fullDayIndex(range[1]);
+      const a = abbrevDayIndex(range[0]);
+      const b = abbrevDayIndex(range[1]);
       if (a >= 0 && b >= 0 && a <= b) for (let i = a; i <= b; i++) out.add(i);
     } else {
-      const i = fullDayIndex(seg);
+      const i = abbrevDayIndex(seg);
       if (i >= 0) out.add(i);
     }
   }
@@ -201,6 +205,7 @@ export function aptOfficeHoursFromRawHtml(html: string): Record<string, string> 
   let found = false;
 
   // Primary: the visible "daysHoursContainer" spans (display text incl. closed days).
+  let sawUnparsedDays = false;
   for (const m of html.matchAll(/daysHoursContainer[^>]*>([\s\S]*?)<\/span>/gi)) {
     const txt = m[1]
       .replace(/<[^>]+>/g, " ")
@@ -208,17 +213,30 @@ export function aptOfficeHoursFromRawHtml(html: string): Record<string, string> 
       .replace(/&amp;/gi, "&") // decode so "Monday &amp; Tuesday" reads as an & group
       .replace(/\s+/g, " ")
       .trim();
-    // "<days>, <hours>": days can be a single day, a dash range ("Tue - Fri"), or an
-    // "&"/"and"/comma group ("Monday & Tuesday"). Anchor the split on the hours (which
-    // start with a digit or Closed/Open/24) so a comma INSIDE the day list can't split it
-    // wrong — and so "Monday & Tuesday, 9am - 5pm" no longer parses as both days Closed.
+    // "<days>, <hours>": days can be a single day, a dash range ("Tue - Fri"), an
+    // "&"/"and"/"/"/comma group ("Monday & Tuesday"), or "Daily". Anchor the split on the
+    // hours (start with a digit or Closed/Open/24) so a comma INSIDE the day list can't
+    // split wrong — and so "Monday & Tuesday, 9am - 5pm" no longer reads as both Closed.
     const mm = txt.match(/^(.+?)\s*[,:]\s*((?:\d|clos|open\b|24).*)$/i);
     if (!mm) continue;
     const hours = /clos/i.test(mm[2]) ? "Closed" : mm[2].trim();
-    for (const idx of expandDaySpec(mm[1])) {
+    const idxs = expandDaySpec(mm[1]);
+    if (idxs.length === 0) {
+      sawUnparsedDays = true; // real hours row, but a day-spec we don't recognize
+      continue;
+    }
+    for (const idx of idxs) {
       out[FULL_DAYS[idx]] = hours;
       found = true;
     }
+  }
+  // FAIL-SAFE: if any real hours row had a day-spec we couldn't parse, the listing uses a
+  // layout variant we don't recognize. Do NOT emit a partial map — the unparsed days would
+  // default to a false "Closed" and manufacture a conflict (the exact bug this guards). Drop
+  // the daysHoursContainer result and let JSON-LD try; if that also fails we return null.
+  if (sawUnparsedDays) {
+    found = false;
+    for (const k of Object.keys(out)) delete out[k];
   }
 
   // Fallback: JSON-LD OpeningHoursSpecification (listed days = open; absent = closed).
