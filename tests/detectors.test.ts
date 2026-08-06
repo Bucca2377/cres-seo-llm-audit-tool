@@ -485,6 +485,25 @@ test("hours: parses Apartments.com weekly schedule from raw HTML (incl. closed M
   assert.equal(aptOfficeHoursFromRawHtml("<html><body>no hours here</body></html>"), null);
 });
 
+test("hours: parses Apartments.com '&'-grouped days (the Flats at Leland false-conflict bug)", () => {
+  // Real markup: "Monday &amp; Tuesday, 9am - 5pm". The old parser only handled single
+  // days and dash ranges, so "&"-grouped days defaulted to Closed -> a false conflict
+  // with the website/Google (which correctly showed Mon-Tue 9-5).
+  const raw =
+    '<span class="daysHoursContainer">Monday &amp; Tuesday, 9am - 5pm</span>' +
+    '<span class="daysHoursContainer">Wednesday, 12pm - 5pm</span>' +
+    '<span class="daysHoursContainer">Thursday &amp; Friday, 9am - 5pm</span>' +
+    '<span class="daysHoursContainer">Saturday &amp; Sunday, Closed</span>';
+  const h = aptOfficeHoursFromRawHtml(raw)!;
+  assert.match(h.monday, /9am - 5pm/i);
+  assert.match(h.tuesday, /9am - 5pm/i); // NOT closed
+  assert.match(h.wednesday, /12pm - 5pm/i);
+  assert.match(h.thursday, /9am - 5pm/i);
+  assert.match(h.friday, /9am - 5pm/i); // NOT closed
+  assert.match(h.saturday, /closed/i);
+  assert.match(h.sunday, /closed/i);
+});
+
 test("hours: raw-HTML apts hours reconcile clean with website+Google (no false conflict)", () => {
   const apts = aptOfficeHoursFromRawHtml(
     '<span class="daysHoursContainer">Monday, Closed</span>' +

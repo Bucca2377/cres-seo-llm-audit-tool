@@ -155,6 +155,28 @@ const FULL_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "satu
 function fullDayIndex(s: string): number {
   return FULL_DAYS.indexOf((s || "").trim().toLowerCase());
 }
+
+/**
+ * Expand an Apartments.com day-spec into day indices. Handles a single day
+ * ("Wednesday"), a dash range ("Tuesday - Friday"), an "&"/"and"/comma group
+ * ("Monday & Tuesday", "Sat & Sun", "Monday, Wednesday & Friday"), and combinations.
+ * Missing this is what made "Monday & Tuesday, 9am - 5pm" parse as BOTH days Closed.
+ */
+function expandDaySpec(spec: string): number[] {
+  const out = new Set<number>();
+  for (const seg of (spec || "").split(/\s*(?:&|,|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean)) {
+    const range = seg.split(/\s*[-–—]\s*/);
+    if (range.length === 2) {
+      const a = fullDayIndex(range[0]);
+      const b = fullDayIndex(range[1]);
+      if (a >= 0 && b >= 0 && a <= b) for (let i = a; i <= b; i++) out.add(i);
+    } else {
+      const i = fullDayIndex(seg);
+      if (i >= 0) out.add(i);
+    }
+  }
+  return [...out];
+}
 function to12h(hh: number, mm: number): string {
   const ap = hh >= 12 ? "PM" : "AM";
   let h = hh % 12;
@@ -180,18 +202,22 @@ export function aptOfficeHoursFromRawHtml(html: string): Record<string, string> 
 
   // Primary: the visible "daysHoursContainer" spans (display text incl. closed days).
   for (const m of html.matchAll(/daysHoursContainer[^>]*>([\s\S]*?)<\/span>/gi)) {
-    const txt = m[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
-    const mm = txt.match(/^([A-Za-z]+(?:\s*[-–—]\s*[A-Za-z]+)?)\s*[,:]\s*(.+)$/);
+    const txt = m[1]
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&") // decode so "Monday &amp; Tuesday" reads as an & group
+      .replace(/\s+/g, " ")
+      .trim();
+    // "<days>, <hours>": days can be a single day, a dash range ("Tue - Fri"), or an
+    // "&"/"and"/comma group ("Monday & Tuesday"). Anchor the split on the hours (which
+    // start with a digit or Closed/Open/24) so a comma INSIDE the day list can't split it
+    // wrong — and so "Monday & Tuesday, 9am - 5pm" no longer parses as both days Closed.
+    const mm = txt.match(/^(.+?)\s*[,:]\s*((?:\d|clos|open\b|24).*)$/i);
     if (!mm) continue;
     const hours = /clos/i.test(mm[2]) ? "Closed" : mm[2].trim();
-    const range = mm[1].split(/\s*[-–—]\s*/);
-    if (range.length === 2) {
-      const a = fullDayIndex(range[0]);
-      const b = fullDayIndex(range[1]);
-      if (a >= 0 && b >= 0 && a <= b) for (let i = a; i <= b; i++) { out[FULL_DAYS[i]] = hours; found = true; }
-    } else {
-      const i = fullDayIndex(mm[1]);
-      if (i >= 0) { out[FULL_DAYS[i]] = hours; found = true; }
+    for (const idx of expandDaySpec(mm[1])) {
+      out[FULL_DAYS[idx]] = hours;
+      found = true;
     }
   }
 
