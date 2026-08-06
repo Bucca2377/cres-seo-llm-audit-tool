@@ -158,10 +158,17 @@ test("apts: reads the listing's OWN concession from raw HTML (not 'July 3', not 
   assert.equal(aptConcessionFromRawHtml("<html><body>no specials</body></html>"), null);
 });
 
-test("apts: detects a Matterport/3D virtual tour from raw HTML (fixes the flaky media-count read)", () => {
-  const withTour = "<html>" + "x".repeat(600) + '<div class="tab">Matterport 3D Tours</div> ...</html>';
-  assert.equal(aptHasVirtualTourFromRawHtml(withTour), true);
-  assert.equal(aptHasVirtualTourFromRawHtml("<html>" + "x".repeat(600) + " no tour markers here </html>"), null);
+test("apts: virtual tour is read from the COUNT badge, not generic page chrome (the Leland false-positive)", () => {
+  // Real tour: the "N Virtual Tours" media-badge count.
+  assert.equal(aptHasVirtualTourFromRawHtml("<html>" + "x".repeat(600) + '<button id="carouselPillVirtualToursLink">2 Virtual Tours</button></html>'), true);
+  // The Flats at Leland: apartments.com carries a generic "Virtual Tour" tab AND a
+  // matterport.com/show embed on EVERY listing — must NOT be read as a tour when the
+  // media badge shows only photos (no count). This was the false-positive.
+  const lelandChrome =
+    "<html>" + "x".repeat(600) +
+    '<a aria-controls="virtualtour-tab" id="virtualtour">Virtual Tour</a>' +
+    '<script src="https://my.matterport.com/show/x.js"></script> 55 Photos</html>';
+  assert.equal(aptHasVirtualTourFromRawHtml(lelandChrome), null);
   assert.equal(aptHasVirtualTourFromRawHtml("short"), null);
 });
 

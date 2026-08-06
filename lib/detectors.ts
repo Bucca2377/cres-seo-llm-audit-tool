@@ -167,7 +167,14 @@ export function recommendsGooglePhotos(text: string): boolean {
  */
 export function aptHasVirtualTourFromRawHtml(html: string): boolean | null {
   if (!html || html.length < 500) return null;
-  return /matterport|\b3d\s*tours?\b|virtual\s*tours?\b/i.test(html) ? true : null;
+  // DO NOT match the bare words: every Apartments.com listing carries a generic
+  // "Virtual Tour" tab, "virtualtour-tab" markup, and even a matterport.com/show
+  // script on the page whether or not THIS listing has a tour (The Flats at Leland
+  // has 89 "virtual tour" hits + a matterport embed yet zero tours). The ONLY
+  // reliable signal is the media-badge COUNT — "2 Virtual Tours" — which appears only
+  // when the listing actually has them. No positive count => not present via this signal.
+  const m = html.match(/(\d+)\s*virtual\s*tours?\b/i);
+  return m && parseInt(m[1], 10) > 0 ? true : null;
 }
 
 /**
