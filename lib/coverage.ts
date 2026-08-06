@@ -167,18 +167,26 @@ const TOPICS: Topic[] = [
   {
     label: /virtual tour|matterport|3d tour/i,
     covers: /virtual tour|matterport|3d tour/i,
-    card: (red) =>
-      red.length
-        ? {
-            priority: "CONTENT",
-            title: `Add a virtual tour to ${listPhrase(red)}`,
-            what: `${cap(listPhrase(red))} ${verb(red)} no virtual tour. Produce a Matterport/360 tour and embed it so remote and out-of-town prospects can walk the units without an in-person visit.`,
-            why: "Listings with a virtual tour convert more remote prospects and cut wasted in-person tours.",
-            effort: "~1 week · marketing manager + tour vendor",
-            success: `A virtual tour live on ${listPhrase(red)} within 3 weeks.`,
-            source: "Fixes the missing virtual-tour finding.",
-          }
-        : null,
+    card: (red) => {
+      if (!red.length) return null;
+      // Apartments.com INCLUDES a Matterport/3D tour with the advertising package, so a
+      // missing tour there is a free ask to the rep, not a production project. When the
+      // gap is ONLY on Apartments.com, frame it that way (quick win); otherwise it's a
+      // real shoot on the property's own site.
+      const aptsOnly = red.length === 1 && red[0] === "apartments";
+      const aptsNote = red.includes("apartments")
+        ? " Apartments.com includes a Matterport/3D tour with your advertising package — request it from your account rep at no extra cost."
+        : "";
+      return {
+        priority: aptsOnly ? "QUICK WIN" : "CONTENT",
+        title: `Add a virtual tour to ${listPhrase(red)}`,
+        what: `${cap(listPhrase(red))} ${verb(red)} no virtual tour. Add a Matterport/360 tour so remote and out-of-town prospects can walk the units without an in-person visit.${aptsNote}`,
+        why: "Listings with a virtual tour convert more remote prospects and cut wasted in-person tours.",
+        effort: aptsOnly ? "~15 min · request from your Apartments.com rep" : "~1 week · marketing manager + tour vendor",
+        success: `A virtual tour live on ${listPhrase(red)} within 2 weeks.`,
+        source: "Fixes the missing virtual-tour finding.",
+      };
+    },
   },
   {
     label: /preferred employer/i,

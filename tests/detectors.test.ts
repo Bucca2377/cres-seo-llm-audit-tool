@@ -286,6 +286,20 @@ test("coverage: injects for an uncovered virtual-tour red, naming the right plat
   assert.match(cards[0].what, /the website/i);
 });
 
+test("coverage: an Apartments.com virtual-tour red frames it as a free ask to the rep (The Flats at Leland)", () => {
+  const row = {
+    label: "Virtual tour",
+    apartments: { status: "red", note: "No virtual tour on the Apartments.com listing — the media badge shows photos but no tour." },
+    google: { status: "na", note: "Not a Google feature" },
+    website: { status: "green" },
+  };
+  const cards = missingFindingCards([row], [], { aptIsDark: false });
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].title, /virtual tour.*apartments\.com/i);
+  assert.match(cards[0].what, /apartments\.com includes/i); // note the tour is included in the package
+  assert.equal(cards[0].priority, "QUICK WIN");
+});
+
 test("coverage: a confirmed Google-photos gap injects an UPLOAD-existing-photos card (not a shoot)", () => {
   // The website has the pro set; a vision check confirmed the Google profile lacks it.
   const row = {

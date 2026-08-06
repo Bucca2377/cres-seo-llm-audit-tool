@@ -5266,14 +5266,19 @@ Return ONLY this JSON object, no prose before or after:
                 ? "Matterport / 3D tour present on the listing."
                 : `Media summary lists ${mediaVts} virtual tour${mediaVts! > 1 ? "s" : ""}.`,
             };
-          } else if (aptRawFetchOk) {
-            // The raw-HTML read SUCCEEDED and found no virtual-tour markers, and the
-            // media badge shows none either -> genuinely absent.
-            vtRow.apartments = { status: "amber", note: "No virtual tour on the listing — verify, and add a Matterport/3D tour so remote prospects can walk the units." };
+          } else if (mediaVts === 0 || aptRawFetchOk) {
+            // CONFIRMED ABSENT. mediaVts === 0 means the media badge WAS read and shows
+            // photos but no virtual tour — and Apartments.com ALWAYS badges a tour when
+            // one exists ("2 Virtual Tours"), so no badge = no tour. (aptRawFetchOk with
+            // no marker is the same confirmation from the raw HTML.) Real gap -> RED with
+            // a rec to add one; Apartments.com includes a 3D tour with the ad package.
+            vtRow.apartments = {
+              status: "red",
+              note: "No virtual tour on the Apartments.com listing — the media badge shows photos but no tour. Add a Matterport/3D tour; Apartments.com includes one with your advertising package, so request it from your rep.",
+            };
           } else {
-            // The raw-HTML read was inconclusive this run (slow/blocked fetch) and the
-            // media badge didn't confirm one -> we couldn't check. Do NOT assert absence
-            // (Apartments.com listings very often carry a tour); flag it as unconfirmed.
+            // Truly couldn't read this run: the media badge was unreadable (mediaVts null)
+            // AND the raw fetch came back thin. Don't assert absence — flag as unconfirmed.
             vtRow.apartments = { status: "amber", note: "Couldn’t confirm a virtual tour this run (the listing read came back incomplete) — verify on the listing." };
           }
         }
