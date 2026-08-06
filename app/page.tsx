@@ -54,7 +54,7 @@ import PropertySettings from "./property-settings";
  * v4 = neighborhood taken from the PROPERTY NAME when it states one (fixes wrong
  * nearby-area guesses, e.g. "Applewood" for a property named "...at Sloan's Lake").
  */
-const SEO_QUERY_SET_VERSION = 4;
+const SEO_QUERY_SET_VERSION = 5;
 
 /* -- BRAND ---------------------------------------------------------- */
 const B = {
@@ -3156,9 +3156,17 @@ Return ONLY a JSON array of 9 strings.`;
         // neighborhood/district and 1-2 real nearby employers/institutions from the model's
         // analysis (real named anchors, never invented micro-combos) — then keep at MOST
         // ONE plain city phrase so the same generic search isn't tracked three times.
+        // A generic city phrase ("cheap apartments in leland nc") must NOT count as
+        // "targeted" just because it contains the city/town name. For a small town with no
+        // distinct neighborhood, the model returns the TOWN itself as the "neighborhood"
+        // (e.g. Leland), which made every generic phrase look targeted — defeating the
+        // "keep one generic" dedup and producing four duplicate Leland variants. So drop
+        // any anchor that IS the city (either direction); only a DISTINCT neighborhood or an
+        // employer/institution counts as targeting.
+        const cityLc = addressCity.trim().toLowerCase();
         const anchorTokens = [anchors.neighborhood, ...anchors.employers]
           .map((x) => (x || "").trim().toLowerCase())
-          .filter((x) => x.length > 2);
+          .filter((x) => x.length > 2 && x !== cityLc && !cityLc.includes(x) && !x.includes(cityLc));
         const looksTargeted = (q: string) => {
           const s = q.toLowerCase();
           return /\bnear\b/.test(s) || anchorTokens.some((t) => s.includes(t));
