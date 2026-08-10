@@ -54,7 +54,7 @@ import PropertySettings from "./property-settings";
  * v4 = neighborhood taken from the PROPERTY NAME when it states one (fixes wrong
  * nearby-area guesses, e.g. "Applewood" for a property named "...at Sloan's Lake").
  */
-const SEO_QUERY_SET_VERSION = 5;
+const SEO_QUERY_SET_VERSION = 6;
 
 /* -- BRAND ---------------------------------------------------------- */
 const B = {
@@ -2920,6 +2920,44 @@ function SEOAudit({
         }
       }
 
+      // Fetch the property's Google listing ONCE, up front. Google's address is
+      // clean and comma-separated ("5700 N Knoll, San Antonio, TX 78240"), so it
+      // is the AUTHORITATIVE source of the CITY used to build the tracked queries.
+      // The stored address is often comma-less ("5700 N Knoll San Antonio TX"),
+      // which makes the address parser over-grab the street name into the city
+      // ("Knoll San Antonio") and poison every stock query. This same fetch also
+      // yields coordinates (to localize the Map Pack) + rating/reviews for the
+      // review-rank card. Best-effort — the city falls back to the stored address.
+      setProgress("Locating the property on Google…");
+      let origin: { lat: number; lng: number } | undefined;
+      let googleRating: number | null = null;
+      let googleReviewCount: number | null = null;
+      let googleCity = "";
+      try {
+        const gbpSerp = await callSerp({
+          query: buildGbpSearchQuery(currentProperty),
+          engine: "google_maps",
+          location: extractLocation(currentProperty.address),
+        });
+        const gbpInfo = extractGBP(gbpSerp, currentProperty);
+        const gbpPlace = gbpSerp?.place_results as { gps_coordinates?: { latitude?: number; longitude?: number }; rating?: number; reviews?: number; address?: string } | undefined;
+        const gps = gbpPlace?.gps_coordinates;
+        if (gps && typeof gps.latitude === "number" && typeof gps.longitude === "number") {
+          origin = { lat: gps.latitude, lng: gps.longitude };
+        }
+        googleRating = gbpInfo?.rating ?? (typeof gbpPlace?.rating === "number" ? gbpPlace.rating : null);
+        googleReviewCount = gbpInfo?.reviewCount ?? (typeof gbpPlace?.reviews === "number" ? gbpPlace.reviews : null);
+        // City from Google's comma-separated address (authoritative). Only trust it
+        // when the address actually has the "…, City, ST ZIP" comma form, where
+        // extractLocation's comma path is reliable — never its comma-less guess.
+        const googleAddr = (gbpInfo?.address || gbpPlace?.address || "").trim();
+        if (googleAddr.includes(",")) {
+          googleCity = (extractLocation(googleAddr) || "").split(",")[0].trim();
+        }
+      } catch {
+        /* best-effort — fall back to stored-address city + city-level localization */
+      }
+
       // Stage 1: assemble the query set. STICKY: once a tracked set exists we
       // reuse it verbatim every run (so keyword-rank movement is comparable),
       // and only auto-generate on the very first run / migration.
@@ -2958,7 +2996,7 @@ function SEOAudit({
         // the rank-trend history on them stays intact while the set fills toward 10.
         // It persists (saved as trackedQueries below), so it self-heals in one run.
         if (queries.length < 8) {
-          const cityGeo = (extractLocation(currentProperty.address) || "").split(",")[0].trim();
+          const cityGeo = googleCity || (extractLocation(currentProperty.address) || "").split(",")[0].trim();
           const topUp = [
             ...bedroomGeoQueries(currentProperty.bedroomTypes || "", cityGeo),
             ...amenityGeoQueries((currentProperty.amenities || []).join(" "), cityGeo, 3),
@@ -2993,7 +3031,7 @@ function SEOAudit({
         // CU Anschutz). The model only supplies the neighborhood WITHIN that city,
         // whether the city is a big central city, the county, employers, and seeds.
         setProgress("Mapping the property's local submarket…");
-        const addressCity = (extractLocation(currentProperty.address) || "").split(",")[0].trim();
+        const addressCity = googleCity || (extractLocation(currentProperty.address) || "").split(",")[0].trim();
         const seedPrompt = `You are choosing Google search phrases to TRACK for a rental property. Identify the LOCAL SUBMARKET a real renter would search, then draft seed phrases.
 
 Property: ${currentProperty.name}
@@ -3192,33 +3230,8 @@ Return ONLY a JSON array of 9 strings.`;
         if (queries.length === 0) throw new Error("Could not generate query candidates.");
       }
 
-      // The property's Google listing, fetched ONCE up front: its coordinates localize
-      // the Map Pack checks to the property's exact spot (not the city centroid), so
-      // ranks and competitors reflect the immediate area; its rating/review count feed
-      // the review-rank card. Best-effort — no coords just falls back to city-level.
-      setProgress("Locating the property on Google…");
-      let origin: { lat: number; lng: number } | undefined;
-      let googleRating: number | null = null;
-      let googleReviewCount: number | null = null;
-      try {
-        const gbpSerp = await callSerp({
-          query: buildGbpSearchQuery(currentProperty),
-          engine: "google_maps",
-          location: extractLocation(currentProperty.address),
-        });
-        const gbpInfo = extractGBP(gbpSerp, currentProperty);
-        const gbpPlace = gbpSerp?.place_results as { gps_coordinates?: { latitude?: number; longitude?: number }; rating?: number; reviews?: number } | undefined;
-        const gps = gbpPlace?.gps_coordinates;
-        if (gps && typeof gps.latitude === "number" && typeof gps.longitude === "number") {
-          origin = { lat: gps.latitude, lng: gps.longitude };
-        }
-        googleRating = gbpInfo?.rating ?? (typeof gbpPlace?.rating === "number" ? gbpPlace.rating : null);
-        googleReviewCount = gbpInfo?.reviewCount ?? (typeof gbpPlace?.reviews === "number" ? gbpPlace.reviews : null);
-      } catch {
-        /* best-effort — fall back to city-level localization + no review card */
-      }
-
-      // Stage 2: parallel rank checks, localized to the property's coordinates.
+      // Stage 2: parallel rank checks, localized to the property's coordinates
+      // (origin + rating/reviews were fetched once, up front, before Stage 1).
       setStage("checking");
       let completed = 0;
       setProgress(`Checking rankings: 0 of ${queries.length} complete`);
