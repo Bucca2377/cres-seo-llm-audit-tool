@@ -272,6 +272,15 @@ export interface Property {
   };
   marketingAudit?: MarketingAuditResult;
   /**
+   * Manual corrections your team makes to the Marketing Audit's ILS & Google
+   * Consistency grid, keyed by `overrideKey(rowLabel, platform)` (see
+   * lib/overrides). A stored cell REPLACES the auto-detected one on screen and
+   * in the printed report; it persists across re-runs until reset to auto. Lets
+   * a leasing/marketing user correct a fuzzy or wrong verdict (e.g. a virtual
+   * tour the detector couldn't confirm) without touching code.
+   */
+  auditOverrides?: Record<string, MarketingSourceCell>;
+  /**
    * Snapshot of the PREVIOUS Marketing Audit run, captured at the start of a
    * re-run before the property is mutated. Powers the deterministic "Progress
    * Since Last Audit" diff (no new AI call). `checklistStatuses` here are the

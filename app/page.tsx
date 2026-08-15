@@ -22,6 +22,7 @@ import {
   type MarketingAuditResult,
   type MarketingStatus,
   type MarketingConsistencyRow,
+  type MarketingSourceCell,
   type PhoneInventory,
   type PhoneNumberEntry,
   type ReviewAuditResult,
@@ -37,6 +38,7 @@ import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "@/lib/recs";
+import { cellOverride, applyConsistencyOverrides, withCellOverride, type OverridePlatform } from "@/lib/overrides";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
@@ -4385,14 +4387,147 @@ function computeAuditProgress(
   return { fixed, stillOpen, regressed, sinceTimestamp: prev.timestamp };
 }
 
-function MkStatusCell({ cell }: { cell: { status: MarketingStatus; note: string } }) {
-  const s = MK_STATUS[cell.status] || MK_STATUS.amber;
+/**
+ * Editable consistency cell (on-screen only — the print report renders the
+ * already-corrected value statically). Shows the effective cell (a team
+ * override replaces the auto-detected one), an "edited" marker when overridden,
+ * and a pencil that opens an inline editor: pick a status, write the note, Save
+ * / Cancel / Reset to auto. The editor also shows what the audit auto-detected
+ * so the team can compare before overriding. Lets leasing/marketing staff
+ * correct a fuzzy or wrong verdict in the deployed app with no code access.
+ */
+function MkEditableCell({
+  auto,
+  override,
+  onChange,
+}: {
+  auto: MarketingSourceCell;
+  override: MarketingSourceCell | null;
+  onChange: (next: MarketingSourceCell | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<MarketingStatus>((override ?? auto).status);
+  const [draftNote, setDraftNote] = useState((override ?? auto).note);
+  const effective = override ?? auto;
+  const s = MK_STATUS[effective.status] || MK_STATUS.amber;
+  const STATUS_ORDER: MarketingStatus[] = ["green", "amber", "red", "na"];
+
+  const openEditor = () => {
+    const cur = override ?? auto;
+    setDraftStatus(cur.status);
+    setDraftNote(cur.note);
+    setOpen(true);
+  };
+
+  if (open) {
+    return (
+      <td style={{ padding: "8px 10px", background: "#fff", borderBottom: "1px solid #eef0f2", verticalAlign: "top", minWidth: 190 }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+          {STATUS_ORDER.map((st) => {
+            const c = MK_STATUS[st];
+            const on = draftStatus === st;
+            return (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setDraftStatus(st)}
+                style={{
+                  cursor: "pointer",
+                  borderRadius: 4,
+                  padding: "3px 7px",
+                  border: on ? `2px solid ${c.fg}` : "1px solid #ccc",
+                  background: on ? c.bg : "#fff",
+                  color: c.fg,
+                  fontFamily: "'Barlow Condensed',sans-serif",
+                  fontWeight: 700,
+                  fontSize: 10,
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+        <textarea
+          value={draftNote}
+          onChange={(e) => setDraftNote(e.target.value)}
+          rows={3}
+          placeholder="What the client should see in this cell…"
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            fontFamily: "'Josefin Sans',sans-serif",
+            fontSize: 11.5,
+            color: "#333",
+            padding: 5,
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            resize: "vertical",
+          }}
+        />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              onChange({ status: draftStatus, note: draftNote.trim() });
+              setOpen(false);
+            }}
+            style={{ cursor: "pointer", background: B.caribbean, color: "#fff", border: "none", borderRadius: 4, padding: "4px 12px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, fontWeight: 600 }}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            style={{ cursor: "pointer", background: "transparent", color: "#666", border: "none", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11 }}
+          >
+            Cancel
+          </button>
+          {override && (
+            <button
+              type="button"
+              onClick={() => {
+                onChange(null);
+                setOpen(false);
+              }}
+              style={{ cursor: "pointer", background: "transparent", color: B.tangelo, border: "none", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, textDecoration: "underline" }}
+            >
+              Reset to auto
+            </button>
+          )}
+        </div>
+        <div style={{ marginTop: 6, fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#999", lineHeight: 1.4 }}>
+          Auto-detected: <strong style={{ color: MK_STATUS[auto.status].fg }}>{MK_STATUS[auto.status].label}</strong>
+          {auto.note ? ` — ${auto.note}` : ""}
+        </div>
+      </td>
+    );
+  }
+
   return (
     <td style={{ padding: "8px 10px", background: s.bg, borderBottom: "1px solid #eef0f2", verticalAlign: "top" }}>
-      <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: s.fg, marginBottom: 2 }}>
-        {s.label}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: s.fg }}>{s.label}</span>
+        {override && (
+          <span
+            title="Manually corrected by your team (replaces the auto-detected result)"
+            style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 8.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#5b7a5b", background: "#eef4ee", border: "1px solid #cfe0cf", borderRadius: 3, padding: "0 4px" }}
+          >
+            edited
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={openEditor}
+          title="Correct this cell"
+          style={{ marginLeft: "auto", cursor: "pointer", background: "transparent", border: "none", color: "#9aa3ad", fontSize: 12, lineHeight: 1, padding: 2 }}
+        >
+          ✎
+        </button>
       </div>
-      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#333", lineHeight: 1.45 }}>{cell.note}</div>
+      <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#333", lineHeight: 1.45 }}>{effective.note}</div>
     </td>
   );
 }
@@ -5934,6 +6069,9 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
       {results.consistency.length > 0 && (
         <>
           <div style={sectionTitle}>ILS &amp; Google Consistency Check</div>
+          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: -4, marginBottom: 8, lineHeight: 1.45 }}>
+            Auto-detected across the three platforms. Something wrong or unverified? Click the <span style={{ color: "#666" }}>✎</span> on any cell to correct it — your change replaces the result on screen and in the printed client report, and sticks through future re-runs until you reset it.
+          </div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
@@ -5949,9 +6087,19 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
                   <td style={{ padding: "8px 10px", background: "#faf5ee", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#333", fontWeight: 600, width: 150 }}>
                     {row.label}
                   </td>
-                  <MkStatusCell cell={row.apartments} />
-                  <MkStatusCell cell={row.google} />
-                  <MkStatusCell cell={row.website} />
+                  {(["apartments", "google", "website"] as OverridePlatform[]).map((pf) => (
+                    <MkEditableCell
+                      key={pf}
+                      auto={row[pf]}
+                      override={cellOverride(property.auditOverrides, row.label, pf)}
+                      onChange={(next) =>
+                        onUpdateProperty({
+                          ...property,
+                          auditOverrides: withCellOverride(property.auditOverrides, row.label, pf, next),
+                        })
+                      }
+                    />
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -7847,7 +7995,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     </tr>
                   </thead>
                   <tbody>
-                    {mkt.consistency.map((row, i) => {
+                    {applyConsistencyOverrides(mkt.consistency, property.auditOverrides).map((row, i) => {
                       const cell = (c: { status: MarketingStatus; note: string }) => {
                         const s = MK_STATUS[c.status] || MK_STATUS.amber;
                         return (

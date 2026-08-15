@@ -21,6 +21,7 @@ import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml } fro
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
+import { overrideKey, cellOverride, applyConsistencyOverrides, withCellOverride } from "../lib/overrides";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -965,4 +966,54 @@ test("recs: recommendsReviewIncentive fires on the paid programs, not the free t
   assert.equal(recommendsReviewIncentive("Respond to all six unanswered reviews within 24 hours."), false);
   assert.equal(recommendsReviewIncentive("Text a one-tap Google review link to residents whose work order just closed."), false);
   assert.equal(recommendsReviewIncentive("Add framed QR review codes at the front desk and mail room."), false);
+});
+
+// --- Manual audit-cell overrides (team corrections) ---------------------------
+
+test("overrides: overrideKey normalizes the label and is stable across spacing/case", () => {
+  assert.equal(overrideKey("Virtual tour", "website"), overrideKey("  virtual   TOUR ", "website"));
+  // Different platform -> different key (a website correction never touches Google).
+  assert.notEqual(overrideKey("Virtual tour", "website"), overrideKey("Virtual tour", "google"));
+});
+
+test("overrides: applyConsistencyOverrides replaces ONLY the overridden cell, leaves others as auto", () => {
+  const rows = [
+    {
+      label: "Virtual tour",
+      apartments: { status: "na" as const, note: "Not advertising on Apartments.com." },
+      google: { status: "na" as const, note: "Not a Google feature" },
+      website: { status: "amber" as const, note: "Couldn't confirm a virtual tour from the capture." },
+    },
+  ];
+  const overrides = withCellOverride(undefined, "Virtual tour", "website", {
+    status: "red",
+    note: "Confirmed no virtual tour on the site.",
+  });
+  const applied = applyConsistencyOverrides(rows, overrides);
+  // Website cell is the team's correction…
+  assert.equal(applied[0].website.status, "red");
+  assert.equal(applied[0].website.note, "Confirmed no virtual tour on the site.");
+  // …the other two columns are untouched.
+  assert.equal(applied[0].google.status, "na");
+  assert.equal(applied[0].apartments.note, "Not advertising on Apartments.com.");
+  // Non-mutating: the source row is unchanged.
+  assert.equal(rows[0].website.status, "amber");
+});
+
+test("overrides: withCellOverride sets, trims the note, and clears back to auto on null", () => {
+  let map = withCellOverride(undefined, "Office hours listed", "google", { status: "green", note: "  Mon-Fri 9-5  " });
+  assert.equal(cellOverride(map, "Office hours listed", "google")?.status, "green");
+  assert.equal(cellOverride(map, "office HOURS listed", "google")?.note, "Mon-Fri 9-5"); // trimmed + label-insensitive
+  // Reset to auto removes the key entirely.
+  map = withCellOverride(map, "Office hours listed", "google", null);
+  assert.equal(cellOverride(map, "Office hours listed", "google"), null);
+  assert.deepEqual(map, {});
+});
+
+test("overrides: applyConsistencyOverrides is a no-op when there are no overrides", () => {
+  const rows = [
+    { label: "Photos quality", apartments: { status: "green" as const, note: "ok" }, google: { status: "green" as const, note: "ok" }, website: { status: "green" as const, note: "ok" } },
+  ];
+  assert.equal(applyConsistencyOverrides(rows, undefined), rows); // same reference back
+  assert.equal(applyConsistencyOverrides(rows, {}), rows);
 });
