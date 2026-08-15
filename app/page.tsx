@@ -8727,6 +8727,7 @@ export default function MarketingHub() {
     resetActiveToDemo,
     exportRoster,
     importProperty,
+    syncState,
   } = useRoster();
   const [tab, setTab] = useState("marketing");
   // Deployed commit SHA, read at runtime from /api/version so the footer badge
@@ -8802,6 +8803,47 @@ export default function MarketingHub() {
       >
         build {(buildSha || "dev").slice(0, 7)}
       </div>
+      {/* Cross-device sync status — tells the team their data is saved to the
+          shared store. "Local only" means the database isn't provisioned yet. */}
+      {(() => {
+        const map: Record<string, { label: string; color: string; bg: string }> = {
+          off: { label: "Local only", color: "#9aa3ab", bg: "rgba(255,255,255,0.7)" },
+          saving: { label: "Saving…", color: "#9a7200", bg: "#fff6e2" },
+          synced: { label: "Synced", color: "#15803d", bg: "#e6f3ea" },
+          error: { label: "Sync error", color: "#b14a2a", bg: "#fce4e4" },
+        };
+        const s = map[syncState] || map.off;
+        return (
+          <div
+            data-print-hide="true"
+            title={
+              syncState === "off"
+                ? "Data is saved on this device only. Provision the shared database to sync across devices."
+                : syncState === "error"
+                ? "Could not reach the shared store on the last save. Your changes are saved locally and will retry."
+                : "Property data is synced to the shared team store across devices."
+            }
+            style={{
+              position: "fixed",
+              bottom: 24,
+              right: 8,
+              zIndex: 100,
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 10,
+              color: s.color,
+              background: s.bg,
+              padding: "2px 7px",
+              borderRadius: 4,
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.color, display: "inline-block" }} />
+            {s.label}
+          </div>
+        );
+      })()}
       <div className="top-bar" style={{ background: B.oxford, padding: "0 32px", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 20, letterSpacing: "0.14em", color: "white" }}>CRES</div>

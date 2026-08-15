@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ChecklistStatus = "missing" | "partial" | "complete";
 
@@ -597,6 +597,81 @@ function saveRoster(r: Roster) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cross-device sync (shared Postgres via /api/roster)
+//
+// The roster is mirrored to a shared server store so every device on the team
+// sees the same properties. Sync is per-property: only the records that changed
+// are pushed, so two people editing different properties never clobber. Which
+// property you're VIEWING (activeId) stays per-device and is never synced.
+// localStorage remains the fast local cache + offline fallback.
+// ---------------------------------------------------------------------------
+
+/**
+ * Given the previous and next property arrays, decide which records to push and
+ * which to delete. Relies on the hook's immutable-update convention: an
+ * unchanged property keeps the SAME object reference, so a reference change (or
+ * a brand-new id) means "upsert" and a dropped id means "delete". Pure —
+ * unit-tested.
+ */
+export function diffRosterProperties(
+  prev: Property[],
+  next: Property[]
+): { upsertIds: string[]; deleteIds: string[] } {
+  const prevById = new Map(prev.map((p) => [p.id, p]));
+  const nextIds = new Set(next.map((p) => p.id));
+  const upsertIds: string[] = [];
+  for (const p of next) {
+    const before = prevById.get(p.id);
+    if (!before || before !== p) upsertIds.push(p.id);
+  }
+  const deleteIds: string[] = [];
+  for (const p of prev) if (!nextIds.has(p.id)) deleteIds.push(p.id);
+  return { upsertIds, deleteIds };
+}
+
+type ServerRosterResponse = { enabled: boolean; properties: Property[] };
+
+async function serverGet(): Promise<ServerRosterResponse> {
+  try {
+    const r = await fetch("/api/roster", { method: "GET", cache: "no-store" });
+    if (!r.ok) return { enabled: false, properties: [] };
+    const j = (await r.json()) as Partial<ServerRosterResponse>;
+    return {
+      enabled: !!j.enabled,
+      properties: Array.isArray(j.properties) ? (j.properties as Property[]) : [],
+    };
+  } catch {
+    return { enabled: false, properties: [] };
+  }
+}
+
+async function serverUpsert(properties: Property[]): Promise<boolean> {
+  if (!properties.length) return true;
+  try {
+    const r = await fetch("/api/roster", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ properties }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function serverDelete(id: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/roster?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Sync status surfaced to the UI so the team can trust their data is saved. */
+export type SyncState = "off" | "saving" | "synced" | "error";
+
 export function buildSystemPrompt(p: Property): string {
   const amenities = p.amenities.length ? p.amenities.join(", ") : "(none specified)";
   return `You are a marketing AI assistant for CRES Property Management. The property is ${p.name}, a ${p.units}-unit luxury multifamily at ${p.address}. Units: studios to 3BR, $${p.priceMin.toLocaleString()}–$${p.priceMax.toLocaleString()}/mo. Amenities: ${amenities}. Location: ${p.nearBy}. Built ${p.yearBuilt}. Manager: ${p.managerName}. Be professional, specific, and compelling. No em dashes or hyphens as punctuation in flowing text.`;
@@ -611,16 +686,128 @@ export function useRoster() {
   const initial = makeInitialRoster();
   const [roster, setRoster] = useState<Roster>(initial);
   const [hydrated, setHydrated] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>("off");
 
-  useEffect(() => {
-    setRoster(loadRoster());
-    setHydrated(true);
+  // Latest roster, readable synchronously from callbacks/effects without a
+  // stale closure — the sync diff and the batch-enrichment loop both need it.
+  const rosterRef = useRef<Roster>(initial);
+  const serverEnabledRef = useRef(false);
+  // Pending server work, coalesced into one debounced flush.
+  const dirtyRef = useRef<Set<string>>(new Set());
+  const delRef = useRef<Set<string>>(new Set());
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = useCallback(async () => {
+    const ids = Array.from(dirtyRef.current);
+    dirtyRef.current = new Set();
+    const dels = Array.from(delRef.current);
+    delRef.current = new Set();
+    const props = ids
+      .map((id) => rosterRef.current.properties.find((p) => p.id === id))
+      .filter((p): p is Property => !!p);
+    const results = await Promise.all([serverUpsert(props), ...dels.map((id) => serverDelete(id))]);
+    const ok = results.every(Boolean);
+    // Only settle when nothing new queued while this flush was in flight.
+    if (dirtyRef.current.size === 0 && delRef.current.size === 0) {
+      setSyncState(ok ? "synced" : "error");
+    }
   }, []);
 
-  const persist = useCallback((next: Roster) => {
+  const scheduleSync = useCallback(
+    (prev: Roster, next: Roster) => {
+      if (!serverEnabledRef.current) return;
+      const { upsertIds, deleteIds } = diffRosterProperties(prev.properties, next.properties);
+      if (!upsertIds.length && !deleteIds.length) return;
+      for (const id of upsertIds) {
+        dirtyRef.current.add(id);
+        delRef.current.delete(id);
+      }
+      for (const id of deleteIds) {
+        delRef.current.add(id);
+        dirtyRef.current.delete(id);
+      }
+      setSyncState("saving");
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(flush, 700);
+    },
+    [flush]
+  );
+
+  // Persist a new roster: local state + localStorage cache + server sync.
+  const commit = useCallback(
+    (next: Roster) => {
+      const prev = rosterRef.current;
+      rosterRef.current = next;
+      setRoster(next);
+      saveRoster(next);
+      scheduleSync(prev, next);
+    },
+    [scheduleSync]
+  );
+
+  // Adopt state that CAME FROM the server (or the initial local load): update
+  // local state + cache WITHOUT echoing it back to the server.
+  const commitLocal = useCallback((next: Roster) => {
+    rosterRef.current = next;
     setRoster(next);
     saveRoster(next);
   }, []);
+
+  const persist = commit;
+
+  // Mount: render the local cache immediately, then reconcile with the server.
+  // If the server has data it is the source of truth (adopt it, keeping THIS
+  // device's active selection). If the server is empty, seed it from local. No
+  // DATABASE_URL -> serverGet reports disabled and we stay local-only.
+  useEffect(() => {
+    const local = loadRoster();
+    commitLocal(local);
+    setHydrated(true);
+    (async () => {
+      const { enabled, properties } = await serverGet();
+      serverEnabledRef.current = enabled;
+      if (!enabled) {
+        setSyncState("off");
+        return;
+      }
+      if (properties.length > 0) {
+        const activeId = properties.some((p) => p.id === local.activeId)
+          ? local.activeId
+          : properties[0].id;
+        commitLocal({ properties, activeId });
+        setSyncState("synced");
+      } else {
+        const ok = await serverUpsert(local.properties);
+        setSyncState(ok ? "synced" : "error");
+      }
+    })();
+  }, [commitLocal]);
+
+  // Re-pull when the tab regains focus so a device sees teammates' changes.
+  // Server wins, except for ids whose local edit is still pending (in flight).
+  useEffect(() => {
+    const onFocus = async () => {
+      if (!serverEnabledRef.current) return;
+      const { enabled, properties } = await serverGet();
+      if (!enabled) return;
+      const pending = new Set([...dirtyRef.current, ...delRef.current]);
+      const cur = rosterRef.current;
+      const merged = properties.filter((p) => !pending.has(p.id));
+      for (const id of pending) {
+        const localP = cur.properties.find((p) => p.id === id);
+        if (localP) merged.push(localP);
+      }
+      if (!merged.length) return; // never blank the roster on a bad read
+      const activeId = merged.some((p) => p.id === cur.activeId) ? cur.activeId : merged[0].id;
+      commitLocal({ properties: merged, activeId });
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [commitLocal]);
 
   const activeProperty =
     roster.properties.find((p) => p.id === roster.activeId) || roster.properties[0];
@@ -649,25 +836,24 @@ export function useRoster() {
    * and audit-time auto-capture. Patches are shallow-merged — existing
    * fields not present in the patch are preserved.
    *
-   * Uses the FUNCTIONAL setState form so it reads the latest roster each
-   * call. This is critical for the batch-enrichment loop: a version that
-   * closed over `roster` would compute every update from the same stale
-   * snapshot, so each save clobbered the previous one and only the last
-   * property in the batch actually persisted.
+   * Reads the latest roster from rosterRef (never a stale closure), so the
+   * batch-enrichment loop's rapid successive patches each build on the prior
+   * one instead of clobbering from a shared stale snapshot. Routes through
+   * commit() so the change also syncs to the shared server store.
    */
-  const updatePropertyById = useCallback((id: string, patch: Partial<Property>) => {
-    setRoster((prev) => {
+  const updatePropertyById = useCallback(
+    (id: string, patch: Partial<Property>) => {
+      const prev = rosterRef.current;
       const target = prev.properties.find((p) => p.id === id);
-      if (!target) return prev;
+      if (!target) return;
       const merged: Property = { ...target, ...patch, id: target.id };
-      const next: Roster = {
+      commit({
         ...prev,
         properties: prev.properties.map((x) => (x.id === id ? merged : x)),
-      };
-      saveRoster(next);
-      return next;
-    });
-  }, []);
+      });
+    },
+    [commit]
+  );
 
   const addProperty = useCallback(
     (seed?: Partial<Omit<Property, "id">>) => {
@@ -821,6 +1007,7 @@ export function useRoster() {
     exportRoster,
     importProperty,
     hydrated,
+    syncState,
   };
 }
 

@@ -22,6 +22,7 @@ import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
 import { overrideKey, cellOverride, applyConsistencyOverrides, withCellOverride } from "../lib/overrides";
+import { diffRosterProperties } from "../lib/property";
 
 /**
  * Regression tests for the detectors that historically kept relapsing. Each case
@@ -1016,4 +1017,27 @@ test("overrides: applyConsistencyOverrides is a no-op when there are no override
   ];
   assert.equal(applyConsistencyOverrides(rows, undefined), rows); // same reference back
   assert.equal(applyConsistencyOverrides(rows, {}), rows);
+});
+
+// --- Cross-device roster sync diff --------------------------------------------
+
+test("sync: diffRosterProperties flags only changed/new refs to upsert and dropped ids to delete", () => {
+  const a = { id: "a" } as any;
+  const b = { id: "b" } as any;
+  const c = { id: "c" } as any;
+  const prev = [a, b];
+  // a kept by reference (unchanged), b replaced by a new object (edited), c is new.
+  const bEdited = { id: "b" } as any;
+  const next = [a, bEdited, c];
+  const { upsertIds, deleteIds } = diffRosterProperties(prev, next);
+  assert.deepEqual(upsertIds.sort(), ["b", "c"]); // a is untouched -> not pushed
+  assert.deepEqual(deleteIds, []);
+});
+
+test("sync: diffRosterProperties detects deletions (removed ids)", () => {
+  const a = { id: "a" } as any;
+  const b = { id: "b" } as any;
+  const { upsertIds, deleteIds } = diffRosterProperties([a, b], [a]); // b removed
+  assert.deepEqual(upsertIds, []); // a unchanged
+  assert.deepEqual(deleteIds, ["b"]);
 });
