@@ -1,4 +1,5 @@
-import type { MarketingConsistencyRow, MarketingSourceCell } from "./property";
+import type { MarketingConsistencyRow, MarketingSourceCell, RecommendationCard } from "./property";
+import { allFindingCards } from "./coverage";
 
 /**
  * Manual team corrections to the Marketing Audit's ILS & Google Consistency
@@ -74,4 +75,80 @@ export function withCellOverride(
     delete map[key];
   }
   return map;
+}
+
+// ---------------------------------------------------------------------------
+// Override lifecycle: confirmed issues -> recommendations, and cure recognition
+// ---------------------------------------------------------------------------
+
+const REACTIVATION_MARKER = /reactivate the apartments\.com listing/i;
+const REC_PRIORITY_RANK: Record<string, number> = {
+  FOUNDATIONAL: 0,
+  "QUICK WIN": 1,
+  "MAP PACK": 2,
+  "AI VISIBILITY": 3,
+  CONTENT: 4,
+  STRATEGIC: 5,
+  "LONG-TAIL": 6,
+};
+
+/**
+ * The recommendations to actually SHOW, given the team's overrides. Marketing
+ * recs are a deterministic function of the consistency table (lib/coverage
+ * turns every RED cell into a fix card), so we recompute them from the
+ * OVERRIDDEN table: a cell the team marked "Issue" gains its fix card, and a
+ * cell they marked "Good" drops the auto-generated one. The Apartments.com
+ * reactivation card (not derived from a red cell) is preserved from the stored
+ * set. With no overrides the stored recs are returned untouched, so this can
+ * never diverge from what the audit run produced.
+ */
+export function effectiveMarketingRecommendations(
+  storedRecs: RecommendationCard[],
+  rawConsistency: MarketingConsistencyRow[],
+  overrides: Record<string, MarketingSourceCell> | undefined
+): RecommendationCard[] {
+  if (!overrides || Object.keys(overrides).length === 0) return storedRecs;
+  const eff = applyConsistencyOverrides(rawConsistency, overrides);
+  const reactivation = (storedRecs || []).filter((c) => REACTIVATION_MARKER.test(c?.title || ""));
+  const aptIsDark = reactivation.length > 0;
+  const tableCards = allFindingCards(eff, { aptIsDark }) as RecommendationCard[];
+  return [...reactivation, ...tableCards].sort(
+    (a, b) => (REC_PRIORITY_RANK[a.priority] ?? 9) - (REC_PRIORITY_RANK[b.priority] ?? 9)
+  );
+}
+
+/**
+ * On a fresh audit run, drop any "Issue" (red) override whose cell the detector
+ * now POSITIVELY reports as Good (green) — the flagged problem is genuinely
+ * fixed, so the manual flag has served its purpose and is cleared (the cell
+ * reverts to the live Good result). Overrides the detector still can't confirm
+ * (auto stays amber/na/red) are LEFT in place, so a flaky check never silently
+ * erases a real finding. Returns the trimmed override map plus the resolved
+ * cells for the "resolved since you flagged it" note. Pure.
+ */
+export function resolveCuredOverrides(
+  overrides: Record<string, MarketingSourceCell> | undefined,
+  freshConsistency: MarketingConsistencyRow[]
+): {
+  next: Record<string, MarketingSourceCell>;
+  resolved: { label: string; platform: OverridePlatform }[];
+} {
+  const resolved: { label: string; platform: OverridePlatform }[] = [];
+  if (!overrides || Object.keys(overrides).length === 0) return { next: overrides || {}, resolved };
+  const next = { ...overrides };
+  const norm = (s: string) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  for (const [key, cell] of Object.entries(overrides)) {
+    if (cell?.status !== "red") continue;
+    const sep = key.lastIndexOf("::");
+    if (sep < 0) continue;
+    const normLabel = key.slice(0, sep);
+    const platform = key.slice(sep + 2) as OverridePlatform;
+    if (!OVERRIDE_PLATFORMS.includes(platform)) continue;
+    const row = (freshConsistency || []).find((r) => norm(r.label) === normLabel);
+    if (row && row[platform]?.status === "green") {
+      delete next[key];
+      resolved.push({ label: row.label, platform });
+    }
+  }
+  return { next, resolved };
 }

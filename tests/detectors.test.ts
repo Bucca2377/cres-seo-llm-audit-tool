@@ -21,7 +21,7 @@ import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml } fro
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
-import { overrideKey, cellOverride, applyConsistencyOverrides, withCellOverride } from "../lib/overrides";
+import { overrideKey, cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides } from "../lib/overrides";
 import { diffRosterProperties } from "../lib/property";
 
 /**
@@ -1040,4 +1040,53 @@ test("sync: diffRosterProperties detects deletions (removed ids)", () => {
   const { upsertIds, deleteIds } = diffRosterProperties([a, b], [a]); // b removed
   assert.deepEqual(upsertIds, []); // a unchanged
   assert.deepEqual(deleteIds, ["b"]);
+});
+
+// --- Override lifecycle: recs from confirmed issues + cure recognition --------
+
+const na = { status: "na" as const, note: "" };
+const vtRow = (website: any) => ({ label: "Virtual tour", apartments: na, google: na, website });
+
+test("override-recs: a cell marked Issue GAINS its fix card", () => {
+  const consistency = [vtRow({ status: "amber" as const, note: "Couldn't confirm a virtual tour." })];
+  const stored: any[] = []; // no issues auto-detected -> no cards
+  const overrides = withCellOverride(undefined, "Virtual tour", "website", {
+    status: "red",
+    note: "Confirmed no virtual tour.",
+  });
+  const eff = effectiveMarketingRecommendations(stored as any, consistency, overrides);
+  assert.equal(eff.some((c) => /virtual tour/i.test(c.title)), true);
+});
+
+test("override-recs: a cell marked Good DROPS the auto fix card", () => {
+  const consistency = [vtRow({ status: "red" as const, note: "No virtual tour." })];
+  // Auto-detected red -> stored recs include the virtual-tour fix card.
+  const stored = effectiveMarketingRecommendations([] as any, consistency, { "x::x": { status: "red", note: "" } })
+    .filter((c) => /virtual tour/i.test(c.title));
+  assert.equal(stored.length >= 1, true); // sanity: the card exists when red
+  const overrides = withCellOverride(undefined, "Virtual tour", "website", { status: "green", note: "Tour is live." });
+  const eff = effectiveMarketingRecommendations(stored as any, consistency, overrides);
+  assert.equal(eff.some((c) => /virtual tour/i.test(c.title)), false); // suppressed
+});
+
+test("override-recs: with no overrides the stored recs pass through untouched", () => {
+  const stored = [{ priority: "CONTENT", title: "keep me", what: "", why: "", effort: "", success: "", source: "" }] as any;
+  assert.equal(effectiveMarketingRecommendations(stored, [], undefined), stored); // same reference
+  assert.equal(effectiveMarketingRecommendations(stored, [], {}), stored);
+});
+
+test("cure: a flagged Issue that the run now detects as Good is cleared + reported", () => {
+  const overrides = withCellOverride(undefined, "Virtual tour", "website", { status: "red", note: "No tour." });
+  const fresh = [vtRow({ status: "green" as const, note: "Virtual tour available on the site." })];
+  const { next, resolved } = resolveCuredOverrides(overrides, fresh);
+  assert.deepEqual(resolved, [{ label: "Virtual tour", platform: "website" }]);
+  assert.deepEqual(next, {}); // override cleared
+});
+
+test("cure: a flagged Issue the detector STILL can't confirm is left in place", () => {
+  const overrides = withCellOverride(undefined, "Virtual tour", "website", { status: "red", note: "No tour." });
+  const fresh = [vtRow({ status: "amber" as const, note: "Couldn't confirm." })]; // not positively good
+  const { next, resolved } = resolveCuredOverrides(overrides, fresh);
+  assert.deepEqual(resolved, []);
+  assert.equal(!!cellOverride(next, "Virtual tour", "website"), true); // still there
 });

@@ -491,6 +491,13 @@ export interface MarketingAuditResult {
   sources: { website?: string; apartments?: string; google?: string };
   /** Phone/tracking numbers found across website, GBP, and Apartments.com. */
   phones?: PhoneInventory;
+  /**
+   * Cells the team had manually flagged as an Issue that THIS run detected as
+   * genuinely fixed (the auto value became green): the override was auto-cleared
+   * and the cell now shows Good. Surfaced as a "resolved since you flagged it"
+   * note so the cure is visible and accountable.
+   */
+  overrideResolutions?: { label: string; platform: "apartments" | "google" | "website" }[];
   timestamp: string;
 }
 

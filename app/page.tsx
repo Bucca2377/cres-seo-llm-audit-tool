@@ -38,7 +38,7 @@ import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "@/lib/recs";
-import { cellOverride, applyConsistencyOverrides, withCellOverride, type OverridePlatform } from "@/lib/overrides";
+import { cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides, type OverridePlatform } from "@/lib/overrides";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
@@ -5672,6 +5672,15 @@ Return ONLY this JSON object, no prose before or after:
         (a, b) => (RECS_PRIORITY_RANK[a.priority] ?? 9) - (RECS_PRIORITY_RANK[b.priority] ?? 9)
       );
 
+      // Cure recognition: if the team had flagged a cell as an Issue and THIS
+      // run positively detects it as fixed (auto -> green), clear that override
+      // so the cell reverts to the live Good result, and note the resolution.
+      // Overrides the detector still can't confirm are left untouched.
+      const { next: nextOverrides, resolved: overrideResolutions } = resolveCuredOverrides(
+        current.auditOverrides,
+        consistency
+      );
+
       const result: MarketingAuditResult = {
         criticalIssues: parsed.criticalIssues || [],
         consistency,
@@ -5679,6 +5688,7 @@ Return ONLY this JSON object, no prose before or after:
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
         phones,
+        overrideResolutions: overrideResolutions.length ? overrideResolutions : undefined,
         timestamp: new Date().toISOString(),
       };
 
@@ -5686,6 +5696,7 @@ Return ONLY this JSON object, no prose before or after:
         ...current,
         marketingAudit: result,
         marketingAuditPrev: prevSnapshot ?? property.marketingAuditPrev,
+        auditOverrides: nextOverrides,
       };
       onUpdateProperty(current);
       setResults(result);
@@ -6118,12 +6129,29 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
         />
       )}
 
-      {/* Recommendations — same card format as the SEO/LLM tabs */}
+      {/* Resolved-since-you-flagged-it note: cells the team marked as an Issue
+          that the latest run detected as fixed (override auto-cleared to Good). */}
+      {results.overrideResolutions && results.overrideResolutions.length > 0 && (
+        <div style={{ background: "#e6f3ea", border: "1px solid #cfe0cf", borderRadius: 6, padding: "10px 14px", margin: "14px 0", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#2f5d43", lineHeight: 1.5 }}>
+          <strong>Resolved since you flagged them.</strong> The latest run detects these as fixed, so your manual Issue flag was cleared and each now shows Good:
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {results.overrideResolutions.map((r, i) => (
+              <li key={i}>
+                {r.label} — {r.platform === "apartments" ? "Apartments.com" : r.platform === "google" ? "Google" : "Website"}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Recommendations — same card format as the SEO/LLM tabs. Uses the
+          override-aware set: a cell the team marked "Issue" gains its fix card,
+          a cell marked "Good" drops the auto-generated one. */}
       {isStructuredRecs(results.recommendations) && (
         <>
           <div style={sectionTitle}>Recommendations</div>
           <RecommendationsBlock
-            recs={results.recommendations}
+            recs={effectiveMarketingRecommendations(results.recommendations, results.consistency, property.auditOverrides)}
             setAsideList={property.setAsideRecs}
             audit="marketing"
             onSetAside={(card, reason) => onUpdateProperty(withSetAside(property, card, reason, "marketing"))}
@@ -7819,7 +7847,11 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
   // -- Recommendations: prefer the new structured cards; fall back to
   // legacy text + categorizer for older persisted audits.
   const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
-  const structuredMktRecs = isStructuredRecs(mkt?.recommendations) ? (mkt!.recommendations as RecommendationCard[]) : null;
+  // Override-aware: the printed marketing recs reflect the team's cell corrections
+  // (a "Issue" override gains its fix card; a "Good" override drops the auto one).
+  const structuredMktRecs = isStructuredRecs(mkt?.recommendations)
+    ? effectiveMarketingRecommendations(mkt!.recommendations as RecommendationCard[], mkt!.consistency, property.auditOverrides)
+    : null;
 
   // Recommendations the client has set aside are dropped from the active
   // printed lists and instead summarized in a "Considered & Set Aside" recap.
