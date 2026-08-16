@@ -8746,6 +8746,93 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
   );
 }
 
+/**
+ * In-app usage guide (the "? Guide" button in the top bar). Team-facing: how to
+ * run audits, correct a cell with the ✎ editor, print deliverables, and read the
+ * sync status. The full guide — including the Railway/Postgres maintainer setup —
+ * lives in the repo's ONBOARDING.md; this keeps the day-to-day usage one click
+ * away inside the app itself.
+ */
+function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  const h2: React.CSSProperties = {
+    fontFamily: "'Barlow Condensed',sans-serif",
+    fontWeight: 700,
+    fontSize: 14,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: B.caribbean,
+    margin: "22px 0 8px",
+  };
+  const p: React.CSSProperties = {
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 13.5,
+    color: "#1c1c1c",
+    lineHeight: 1.6,
+    margin: "0 0 8px",
+  };
+  const li: React.CSSProperties = { ...p, margin: "0 0 5px" };
+  return (
+    <div
+      data-print-hide="true"
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(6,35,71,0.55)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: "#fff", borderRadius: 14, maxWidth: 720, width: "100%", boxShadow: "0 12px 48px rgba(0,0,0,0.28)", overflow: "hidden" }}
+      >
+        <div style={{ background: B.oxford, padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.08em", textTransform: "uppercase", color: "#fff" }}>
+            How to use this tool
+          </div>
+          <button onClick={onClose} title="Close" style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: 16, width: 28, height: 28, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>
+            ×
+          </button>
+        </div>
+        <div style={{ padding: "8px 24px 26px" }}>
+          <p style={{ ...p, marginTop: 14, color: "#555" }}>
+            This tool audits a property&apos;s <strong>website, Apartments.com listing, and Google Business Profile</strong> for leasing readiness and cross-platform consistency, plus SEO rank tracking and a review audit. It produces client-ready, color-coded findings and a printable report.
+          </p>
+
+          <div style={h2}>Running an audit</div>
+          <ol style={{ paddingLeft: 18, margin: 0 }}>
+            <li style={li}>Pick a property from the switcher (top left), or add a new one and fill in its website, Apartments.com URL, and Google listing.</li>
+            <li style={li}>Choose a tab and run it: <strong>Marketing Audit</strong> (website + Apartments.com + Google consistency, phone dial test), <strong>SEO &amp; Website Optimization</strong> (tracked searches, Map Pack rank, Core Web Vitals), or <strong>Review Audit</strong> (rating, volume/recency trends, response gaps).</li>
+            <li style={li}>Each run takes ~60–90 seconds. Re-run any time to refresh.</li>
+          </ol>
+
+          <div style={h2}>Correcting a result — the ✎ pencil</div>
+          <p style={p}>The Marketing consistency grid is auto-detected. When a cell is wrong or shows an unverified &ldquo;Check,&rdquo; click the <strong>✎</strong> on that cell to correct it:</p>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li style={li}>Pick a status (<strong>Good / Check / Issue / N/A</strong>) and write the note.</li>
+            <li style={li}>Marking a cell <strong>Issue</strong> automatically <strong>adds a matching recommendation</strong>; marking it <strong>Good</strong> <strong>removes</strong> the auto-generated one.</li>
+            <li style={li}>Your correction shows an <strong>&ldquo;edited&rdquo;</strong> marker, replaces the result <strong>on screen and in the printed report</strong>, and <strong>sticks through future re-runs</strong>.</li>
+            <li style={li}>If a later run <strong>positively detects the problem as fixed</strong>, your flag auto-clears back to <strong>Good</strong> under &ldquo;Resolved since you flagged them.&rdquo; If the detector still can&apos;t confirm, your flag stays put.</li>
+          </ul>
+
+          <div style={h2}>Client deliverables</div>
+          <p style={p}>Use the <strong>Print</strong> menu (top right) to produce the client report — Marketing, SEO, or all together. The report reflects your ✎ corrections. Choose &ldquo;Save as PDF&rdquo; as the print destination.</p>
+
+          <div style={h2}>Is my work saved?</div>
+          <p style={p}>Property data, audits, and your ✎ corrections save to a <strong>shared team store</strong> and sync across devices. The chip at the bottom-right shows the status:</p>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li style={li}><strong>Synced</strong> — saved to the shared store; everyone sees it.</li>
+            <li style={li}><strong>Saving…</strong> — a change is being pushed.</li>
+            <li style={li}><strong>Local only</strong> — the shared database isn&apos;t connected; data is on this device.</li>
+            <li style={li}><strong>Sync error</strong> — couldn&apos;t reach the store last save; changes are cached and will retry.</li>
+          </ul>
+          <p style={{ ...p, marginTop: 8 }}>You can also <strong>Export</strong> the full roster from <strong>Edit → </strong> settings at any time as a backup.</p>
+
+          <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#888" }}>
+            Questions? Brendan Van Deventer · brendan@cre-strategies.com
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MarketingHub() {
   const {
     property,
@@ -8777,6 +8864,7 @@ export default function MarketingHub() {
     };
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   // Which report to print: the combined Marketing/SEO/LLM doc, or the
   // standalone Review Audit. Set just before window.print() so only the
   // targeted .printable-report is in the DOM.
@@ -9130,6 +9218,9 @@ export default function MarketingHub() {
               </>
             )}
           </div>
+          <button onClick={() => setHelpOpen(true)} title="How to use this tool" style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            <span>?</span> Guide
+          </button>
           <button onClick={() => setSettingsOpen(true)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, padding: "4px 14px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>⚙</span> Edit
           </button>
@@ -9186,6 +9277,8 @@ export default function MarketingHub() {
         onEnrich={(p, opts) => enrichPropertyFromSerp(p, opts?.overwrite)}
         onClose={() => setSettingsOpen(false)}
       />
+
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }
