@@ -474,6 +474,35 @@ test("hours: an authoritative outlier (Google) is a RED conflict", () => {
   assert.equal(v.apartments.status, "green");
 });
 
+test("hours: two authoritative sources conflict with no majority -> BOTH red (the Sona case)", () => {
+  // Only Google + the website carry hours (Apartments.com dark). Google says Sat
+  // closed, the website says Sat 10-5. No majority to name a winner, but BOTH are
+  // prospect-facing authoritative sources, so the mismatch is a confirmed
+  // conflict -> RED on both, not amber "verify".
+  const website = { ...WEEK_9_5, saturday: "10 AM-5 PM" };
+  const google = { ...WEEK_9_5, saturday: "Closed" };
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: website, authoritative: true },
+    { key: "google", label: "Google", hours: google, authoritative: true },
+  ])!;
+  assert.equal(v.website.status, "red");
+  assert.equal(v.google.status, "red");
+  assert.match(v.google.note, /misleads prospects/i);
+});
+
+test("hours: a two-way tie where one side is a reader-derived ILS stays amber for that side", () => {
+  // Website (authoritative) vs Apartments.com (reader-derived) disagree on Sat, no
+  // majority. The authoritative website is RED; the lower-confidence ILS read is AMBER.
+  const website = { ...WEEK_9_5, saturday: "10 AM-5 PM" };
+  const apartments = { ...WEEK_9_5, saturday: "Closed" };
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: website, authoritative: true },
+    { key: "apartments", label: "Apartments.com", hours: apartments, authoritative: false },
+  ])!;
+  assert.equal(v.website.status, "red");
+  assert.equal(v.apartments.status, "amber");
+});
+
 test("hours: parses Apartments.com weekly schedule from raw HTML (incl. closed Monday)", () => {
   // The real Apartments.com markup — hours live in daysHoursContainer spans behind
   // "View All Hours", which the model reader misses (it only sees "open today").
@@ -530,15 +559,17 @@ test("hours: raw-HTML apts hours reconcile clean with website+Google (no false c
   assert.equal(v.apartments.status, "green"); // now that apts is read correctly, all agree
 });
 
-test("hours: two sources that simply disagree (no majority) -> amber verify, null when <2", () => {
+test("hours: two authoritative sources disagree (no majority) -> BOTH red, null when <2", () => {
   const tie = reconcileOfficeHours([
     { key: "website", label: "the website", hours: { ...WEEK_9_5 }, authoritative: true },
     { key: "google", label: "Google", hours: { ...WEEK_9_5, monday: "Closed" }, authoritative: true },
   ])!;
-  assert.equal(tie.website.status, "amber");
-  assert.equal(tie.google.status, "amber");
-  // The note must SHOW each side's actual hours for the differing day, not just say
-  // "they differ" — so the user can resolve it without opening both listings.
+  // Both are prospect-facing authoritative sources presenting conflicting hours,
+  // so the mismatch is a confirmed operational conflict -> RED (not amber verify).
+  assert.equal(tie.website.status, "red");
+  assert.equal(tie.google.status, "red");
+  // The note must still SHOW each side's actual hours for the differing day, not
+  // just say "they differ" — so the user can resolve it without opening both.
   assert.match(tie.website.note, /Mon 9 AM.5 PM/i); // this cell's own value
   assert.match(tie.website.note, /Google shows Mon closed/i); // and the other side's
   assert.match(tie.google.note, /Mon closed/i);

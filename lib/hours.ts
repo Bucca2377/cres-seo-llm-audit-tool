@@ -489,11 +489,22 @@ export function reconcileOfficeHours(platforms: HoursPlatform[]): Record<string,
         })
         .filter(Boolean)
         .join("; ");
+      // A genuine both-listed hours conflict with no majority to name a "winner"
+      // (e.g. Google says Sat closed, the website says Sat 10–5). When THIS
+      // platform is an authoritative, prospect-facing source (website/Google),
+      // the mismatch is a CONFIRMED operational conflict that misleads prospects
+      // -> RED, exactly like the outlier case. Not knowing which side is right
+      // doesn't lessen the conflict. A lower-confidence ILS read stays AMBER.
+      const status: "red" | "amber" = p.authoritative ? "red" : "amber";
+      const tail =
+        status === "red"
+          ? "This conflict misleads prospects — decide the correct hours and align them."
+          : "Verify which is correct and align them.";
       result[p.key] = {
-        status: "amber",
+        status,
         note: otherTxt
-          ? `Lists ${mineTxt}, while ${otherTxt}. Verify which is correct and align them.`
-          : `Hours for ${ties.map((d) => DAY_ABBR[d]).join(", ")} differ between listings. Verify which is correct and align them.`,
+          ? `Lists ${mineTxt}, while ${otherTxt}. ${tail}`
+          : `Hours for ${ties.map((d) => DAY_ABBR[d]).join(", ")} differ between listings. ${tail}`,
       };
     } else {
       result[p.key] = { status: "green", note: formatWeek(p.rawDay, p.canonDay) || "Hours consistent across listings." };
