@@ -4096,7 +4096,17 @@ Recommendation rules (STRICT):
                 </tr>
               </thead>
               <tbody>
-                {results.queries.map((q, i) => {
+                {results.queries
+                  .map((q, i) => ({ q, i }))
+                  // Branded/navigational queries (your own name) sort to the TOP,
+                  // grouped together — otherwise a branded variant that entered via
+                  // the autocomplete picks lands mid-table. Stable within each group.
+                  .sort((a, b) => {
+                    const ba = isBrandedQuery(a.q, property);
+                    const bb = isBrandedQuery(b.q, property);
+                    return ba === bb ? a.i - b.i : ba ? -1 : 1;
+                  })
+                  .map(({ q, i }, pos) => {
                   const r = results.ranks[i];
                   const branded = isBrandedQuery(q, property);
                   const mpNow = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
@@ -4107,7 +4117,7 @@ Recommendation rules (STRICT):
                   const mpMv = movementFor(property.seoRankSnapshots, q, "mapPackRank", mpSmooth ? mpSmooth.median : mpNow);
                   const orgMv = movementFor(property.seoRankSnapshots, q, "organicRank", r.organic_rank);
                   return (
-                    <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
+                    <tr key={i} style={{ background: pos % 2 === 0 ? "white" : "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "10px 12px", color: "#333" }}>
                         {q}
                         {branded && (
@@ -8345,7 +8355,16 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                 </tr>
               </thead>
               <tbody>
-                {seo.queries.map((q, i) => {
+                {seo.queries
+                  .map((q, i) => ({ q, i }))
+                  // Branded/navigational queries sort to the TOP, grouped together
+                  // (matches the on-screen table); stable within each group.
+                  .sort((a, b) => {
+                    const ba = isBrandedQuery(a.q, property);
+                    const bb = isBrandedQuery(b.q, property);
+                    return ba === bb ? a.i - b.i : ba ? -1 : 1;
+                  })
+                  .map(({ q, i }) => {
                   const r = seo.ranks[i];
                   const mpNow = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
                   // Smooth the Map Pack position across recent checks so a
@@ -8391,7 +8410,14 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     : "#b14a2a";
                   return (
                     <tr key={i} className="pb-avoid">
-                      <td style={{ ...findingsTd, fontWeight: 500 }}>{q}</td>
+                      <td style={{ ...findingsTd, fontWeight: 500 }}>
+                        {q}
+                        {isBrandedQuery(q, property) && (
+                          <span style={{ marginLeft: 6, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 7.5, letterSpacing: "0.06em", textTransform: "uppercase", color: "#8a919a", whiteSpace: "nowrap" }}>
+                            Branded
+                          </span>
+                        )}
+                      </td>
                       <td
                         style={{
                           ...findingsTd,
