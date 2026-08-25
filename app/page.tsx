@@ -56,7 +56,7 @@ import PropertySettings from "./property-settings";
  * v4 = neighborhood taken from the PROPERTY NAME when it states one (fixes wrong
  * nearby-area guesses, e.g. "Applewood" for a property named "...at Sloan's Lake").
  */
-const SEO_QUERY_SET_VERSION = 6;
+const SEO_QUERY_SET_VERSION = 7;
 
 /* -- BRAND ---------------------------------------------------------- */
 const B = {
@@ -3211,9 +3211,22 @@ Return ONLY a JSON array of 9 strings.`;
           const s = q.toLowerCase();
           return /\bnear\b/.test(s) || anchorTokens.some((t) => s.includes(t));
         };
+        // The neighborhood is taken from the property NAME (so "Edge 26 at Sloan's
+        // Lake" -> Sloan's Lake). But a name can carry a BRAND word that isn't a real
+        // place: "Village at Snowfield" -> "Snowfield", which is nowhere — so tracking
+        // "townhomes for rent in Snowfield" just tracks a term only this property
+        // matches (a phantom #1 that tells you nothing, and reads as branded). Only
+        // track a name-derived neighborhood when REAL search demand corroborates it —
+        // it shows up in Google Autocomplete (a real neighborhood like Sloan's Lake
+        // does; a brand word like Snowfield doesn't). Skip the gate only when
+        // autocomplete returned nothing at all (can't corroborate -> don't wrongly drop).
+        const nbhd = (anchors.neighborhood || "").trim();
+        const nbhdLc = nbhd.toLowerCase();
+        const nbhdCorroborated =
+          suggestionPool.length === 0 || suggestionPool.some((s) => s.toLowerCase().includes(nbhdLc));
         const targetedFromAnchors: string[] = [];
-        if (anchors.neighborhood && anchors.neighborhood.trim().toLowerCase() !== addressCity.toLowerCase())
-          targetedFromAnchors.push(`${unitWord} for rent in ${anchors.neighborhood.trim()}`);
+        if (nbhd && nbhdLc !== cityLc && nbhdCorroborated)
+          targetedFromAnchors.push(`${unitWord} for rent in ${nbhd}`);
         for (const emp of (anchors.employers || []).slice(0, 2)) {
           const e = (emp || "").trim();
           if (e) targetedFromAnchors.push(`${unitWord} near ${e}`);
