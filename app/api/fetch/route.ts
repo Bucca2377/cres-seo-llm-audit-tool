@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { specialFromHtml } from "@/lib/detectors";
-import { detectLeasingPlatform, virtualTourFromHtml } from "@/lib/website-features";
+import { detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml } from "@/lib/website-features";
 import { officeHoursFromHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
@@ -301,6 +301,7 @@ export async function POST(req: NextRequest) {
         // is NOT wired to consume them yet.
         const officeHoursHtml = officeHoursFromHtml(rawHtml);
         const virtualTour = virtualTourFromHtml(rawHtml);
+        const onlineApplication = onlineApplicationFromHtml(rawHtml);
         let links: { href: string; text: string }[] = [];
         if (wantLinks) {
           links = await page.evaluate(() =>
@@ -366,7 +367,7 @@ export async function POST(req: NextRequest) {
             wordCount: words,
           };
         });
-        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo, platform, officeHoursHtml, virtualTour };
+        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo, platform, officeHoursHtml, virtualTour, onlineApplication };
       } finally {
         await ctx.close();
       }
@@ -391,6 +392,7 @@ export async function POST(req: NextRequest) {
       platform?: string | null;
       officeHoursHtml?: Record<string, string> | null;
       virtualTour?: boolean;
+      onlineApplication?: boolean;
     } = {
       status: null,
       text: "",
@@ -414,6 +416,7 @@ export async function POST(req: NextRequest) {
     // NOT wired to consume these yet.
     let officeHoursHtml: Record<string, string> | null = home.officeHoursHtml ?? null;
     let virtualTour = !!home.virtualTour;
+    let onlineApplication = !!home.onlineApplication;
 
     if (body.follow && maxPages > 1) {
       let origin = "";
@@ -458,6 +461,7 @@ export async function POST(req: NextRequest) {
           collectImages(r.images);
           if (!officeHoursHtml && r.officeHoursHtml) officeHoursHtml = r.officeHoursHtml;
           if (r.virtualTour) virtualTour = true;
+          if (r.onlineApplication) onlineApplication = true;
         } catch {
           pages.push({ url: c, status: null, text: "" });
         }
@@ -465,7 +469,7 @@ export async function POST(req: NextRequest) {
     }
 
     const images = Array.from(imageSet);
-    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, _meta: { source: "playwright", pages: pages.length, images: images.length } });
+    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, onlineApplication, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Render failed", pages },

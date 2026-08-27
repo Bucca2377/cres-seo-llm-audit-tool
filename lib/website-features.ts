@@ -86,6 +86,29 @@ export function virtualTourFromHtml(html: string): boolean {
   return VIRTUAL_TOUR_HOSTS.test(h) || VIRTUAL_TOUR_PHRASES.test(h);
 }
 
+/** Apply / online-application PHRASES. Tight enough that "conditions apply" or
+ *  "restrictions apply" can't fire it — only a real apply CALL-TO-ACTION does. */
+const APPLY_PHRASES =
+  /apply\s+(?:now|online|today)|online\s+application|application\s+portal|start\s+(?:your\s+)?application|lease\s+(?:now|online)/i;
+/** Apply LINKS: an href whose path is an application action or points at a
+ *  resident-portal application flow. Catches the "Apply Now" button even when
+ *  the crawler's visible-text extraction dropped it (it lives in a JS panel). */
+const APPLY_HREF =
+  /href=["'][^"']*(?:\/apply(?:[-/?"']|now|online|today)|applynow|apply-online|\/application\b|applicant|prospectportal|securecafe|onlineleasing)/i;
+
+/**
+ * Detect an ONLINE APPLICATION / Apply path from a website's RAW rendered HTML
+ * (the DOM), not the crawler's visible text. Apartment sites surface "Apply Now"
+ * in the nav/header/footer and on each floor-plan/availability card — often in a
+ * JS-expanded panel whose text the crawl misses, though the anchor + its portal
+ * href sit in the DOM. Returns true on a real apply phrase OR an apply-action
+ * link; a bare "conditions apply" in prose does NOT trip it.
+ */
+export function onlineApplicationFromHtml(html: string): boolean {
+  const h = html || "";
+  return APPLY_PHRASES.test(h) || APPLY_HREF.test(h);
+}
+
 export function detectWebsiteFeatures(siteText: string): WebsiteFeatureSignals {
   const t = siteText || "";
   return {

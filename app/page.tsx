@@ -4744,6 +4744,7 @@ function MarketingAuditTab({
       // The crawl's VISIBLE text misses footers/JSON-LD/widget markup; these don't.
       let officeHoursHtml: Record<string, string> | null = null;
       let websiteVtFromHtml = false;
+      let websiteApplyFromHtml = false;
       try {
         const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 5 });
         const sitePages = siteRes.pages || [];
@@ -4756,6 +4757,8 @@ function MarketingAuditTab({
           (siteRes as { officeHoursHtml?: Record<string, string> | null }).officeHoursHtml ?? null;
         websiteVtFromHtml =
           (siteRes as { virtualTour?: boolean | null }).virtualTour === true;
+        websiteApplyFromHtml =
+          (siteRes as { onlineApplication?: boolean | null }).onlineApplication === true;
         // "Blocked" = nothing usable came back (empty, or every page 403/thin) —
         // e.g. an aggressive Cloudflare challenge our headless browser can't pass.
         // In that case we tell Claude to fetch the site with its OWN web_fetch,
@@ -5084,7 +5087,7 @@ function MarketingAuditTab({
       if (websiteFeatures.preferredEmployer) featurePresent.push("a Preferred Employer Program page");
       if (websiteFeatures.virtualTour || websiteVtFromHtml || aptHasVirtualTour) featurePresent.push("a virtual tour / 3D tour");
       if (websiteFeatures.tourScheduling || leasingPlatform) featurePresent.push("self-serve tour scheduling");
-      if (websiteFeatures.onlineApplication || leasingPlatform) featurePresent.push("an online application");
+      if (websiteFeatures.onlineApplication || websiteApplyFromHtml || leasingPlatform) featurePresent.push("an online application");
       const vtPresent = websiteFeatures.virtualTour || websiteVtFromHtml || aptHasVirtualTour;
       const websiteFeatureBlock =
         featurePresent.length || leasingPlatform
@@ -5412,7 +5415,7 @@ Return ONLY this JSON object, no prose before or after:
         );
         setWeb(
           /online application/i,
-          feats.onlineApplication || !!leasingPlatform,
+          feats.onlineApplication || websiteApplyFromHtml || !!leasingPlatform,
           leasingPlatform ? `Online application via ${leasingPlatform}.` : "Online application / Apply is present on the site.",
           "Couldn’t confirm an online application from the capture — verify live."
         );

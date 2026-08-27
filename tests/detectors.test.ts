@@ -17,7 +17,7 @@ import {
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml } from "../lib/hours";
-import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml } from "../lib/website-features";
+import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
@@ -696,6 +696,23 @@ test("website-features: virtualTourFromHtml stays false on a bare corporate page
     "<html><body><h1>About Our Company</h1><p>Take a guided tour of our services and explore 360 degrees of innovation. Take a peek inside.</p></body></html>";
   assert.equal(virtualTourFromHtml(corporate), false);
   assert.equal(virtualTourFromHtml(""), false);
+});
+
+test("website-features: onlineApplicationFromHtml catches an Apply Now link the crawl text missed (the Hallmark Park case)", () => {
+  // The floor-plan availability cards carry "Apply Now" anchors to an application
+  // flow; the crawler's visible-text extraction dropped them, but the DOM has the
+  // anchor + its href — so we detect it from the raw HTML.
+  const applyLink = '<div class="unit"><a href="/floorplans/apply-now/?unit=411">Apply Now</a></div>';
+  assert.equal(onlineApplicationFromHtml(applyLink), true);
+  // Portal-href form (RentCafe/Entrata/ResMan applicant flows).
+  assert.equal(onlineApplicationFromHtml('<a href="https://hallmark.securecafe.com/onlineleasing/apply">Apply</a>'), true);
+  // Plain phrase in the nav.
+  assert.equal(onlineApplicationFromHtml("<nav>Home · Floor Plans · Apply Online</nav>"), true);
+});
+
+test("website-features: onlineApplicationFromHtml does NOT fire on 'conditions apply' prose", () => {
+  assert.equal(onlineApplicationFromHtml("<p>Restrictions apply. Terms and conditions apply to all offers.</p>"), false);
+  assert.equal(onlineApplicationFromHtml(""), false);
 });
 
 // ----- Google review rank (SEO audit: property vs local Map Pack ratings) ----
