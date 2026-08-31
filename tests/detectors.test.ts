@@ -21,7 +21,7 @@ import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml, onli
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
-import { overrideKey, cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides } from "../lib/overrides";
+import { overrideKey, cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides, overridesExcludingPlatform } from "../lib/overrides";
 import { diffRosterProperties } from "../lib/property";
 
 /**
@@ -1137,4 +1137,16 @@ test("cure: a flagged Issue the detector STILL can't confirm is left in place", 
   const { next, resolved } = resolveCuredOverrides(overrides, fresh);
   assert.deepEqual(resolved, []);
   assert.equal(!!cellOverride(next, "Virtual tour", "website"), true); // still there
+});
+
+test("overrides: overridesExcludingPlatform drops one column, keeps the others", () => {
+  let o = withCellOverride(undefined, "Office hours listed", "google", { status: "red", note: "conflict" });
+  o = withCellOverride(o, "Currently advertising / active", "apartments", { status: "na", note: "stale edit" });
+  o = withCellOverride(o, "Pricing / availability", "apartments", { status: "na", note: "stale edit" });
+  const noApts = overridesExcludingPlatform(o, "apartments");
+  // Apartments cells removed…
+  assert.equal(cellOverride(noApts, "Currently advertising / active", "apartments"), null);
+  assert.equal(cellOverride(noApts, "Pricing / availability", "apartments"), null);
+  // …the Google edit survives.
+  assert.equal(cellOverride(noApts, "Office hours listed", "google")?.status, "red");
 });

@@ -191,8 +191,14 @@ export async function POST(req: NextRequest) {
     });
   }
   const pages: { url: string; status: number | null; text: string; seo?: PageSeoData }[] = [];
-  const imageSet = new Set<string>();
+  // Images collected separately by source: a GALLERY/PHOTOS page best represents the
+  // property, so its images are graded FIRST — otherwise a floor-plans/amenities
+  // start page fills the cap with diagrams and the photo grade says "no interior
+  // photography" when a full professional gallery exists.
+  const galleryImages: string[] = [];
+  const otherImages: string[] = [];
   const MAX_IMAGES = 12;
+  const GALLERY_IMG_RE = /gallery|photos?/i;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   try {
     // Each page gets a FRESH context. The target sites flag rapid sequential
@@ -373,10 +379,11 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    const collectImages = (imgs: string[] | undefined) => {
+    const collectImages = (imgs: string[] | undefined, isGallery: boolean) => {
+      const target = isGallery ? galleryImages : otherImages;
       for (const u of imgs || []) {
-        if (imageSet.size >= MAX_IMAGES) break;
-        imageSet.add(u);
+        if (target.length >= MAX_IMAGES) break;
+        if (!galleryImages.includes(u) && !otherImages.includes(u)) target.push(u);
       }
     };
 
@@ -409,7 +416,7 @@ export async function POST(req: NextRequest) {
       }
     }
     pages.push({ url: start, status: home.status, text: home.text, seo: home.seo });
-    collectImages(home.images);
+    collectImages(home.images, GALLERY_IMG_RE.test(start));
     // Deterministic rendered-DOM reads, aggregated across pages: office hours from
     // the FIRST page that yields a map (homepage first), virtual tour true if ANY
     // rendered page shows it. Returned alongside the pages; the marketing audit is
@@ -446,19 +453,27 @@ export async function POST(req: NextRequest) {
       // render hours only on their Contact sub-page; without this, a site with many
       // floor-plan/gallery nav links can push Contact past the page budget and we
       // miss the hours (the recurring "couldn't read hours" false flag).
+      // Priority: HOURS pages first (contact/hours — the office-hours source), then
+      // GALLERY/PHOTOS/floor-plan/virtual-tour pages (their images + features drive
+      // the photo grade, pricing, and VT check), then everything else. Otherwise a
+      // site with many nav links can push the gallery past the page budget and the
+      // photo grade never sees the real photography.
       const HOURS_PAGE_RE = /contact|hours|visit|connect|about/i;
-      matched.sort((a, b) => {
-        const ar = HOURS_PAGE_RE.test(a.href) || HOURS_PAGE_RE.test(a.text) ? 0 : 1;
-        const br = HOURS_PAGE_RE.test(b.href) || HOURS_PAGE_RE.test(b.text) ? 0 : 1;
-        return ar - br;
-      });
+      const GALLERY_PAGE_RE = /gallery|photos?|floor.?plans?|virtual.?tour/i;
+      const rank = (m: { href: string; text: string }) =>
+        HOURS_PAGE_RE.test(m.href) || HOURS_PAGE_RE.test(m.text)
+          ? 0
+          : GALLERY_PAGE_RE.test(m.href) || GALLERY_PAGE_RE.test(m.text)
+          ? 1
+          : 2;
+      matched.sort((a, b) => rank(a) - rank(b));
       const candidates = matched.slice(0, maxPages - 1).map((m) => m.href);
       for (const c of candidates) {
         await sleep(1500); // space out navigations so the site doesn't 403 the session
         try {
           const r = await render(c, false);
           pages.push({ url: c, status: r.status, text: r.text, seo: r.seo });
-          collectImages(r.images);
+          collectImages(r.images, GALLERY_IMG_RE.test(c));
           if (!officeHoursHtml && r.officeHoursHtml) officeHoursHtml = r.officeHoursHtml;
           if (r.virtualTour) virtualTour = true;
           if (r.onlineApplication) onlineApplication = true;
@@ -468,7 +483,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const images = Array.from(imageSet);
+    // Gallery/photos-page images first (best represent the property), then the rest.
+    const images = [...galleryImages, ...otherImages].slice(0, MAX_IMAGES);
     return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, onlineApplication, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(

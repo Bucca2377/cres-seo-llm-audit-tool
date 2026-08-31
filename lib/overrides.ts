@@ -152,3 +152,19 @@ export function resolveCuredOverrides(
   }
   return { next, resolved };
 }
+
+/**
+ * Return the override map WITHOUT any cell on the given platform column. Used so
+ * a property marked "no Apartments.com listing" shows the deterministic N/A for
+ * that whole column, ignoring stale per-cell edits made before the flag was set.
+ */
+export function overridesExcludingPlatform(
+  overrides: Record<string, MarketingSourceCell> | undefined,
+  platform: OverridePlatform
+): Record<string, MarketingSourceCell> {
+  if (!overrides) return {};
+  const suffix = `::${platform}`;
+  const out: Record<string, MarketingSourceCell> = {};
+  for (const [k, v] of Object.entries(overrides)) if (!k.endsWith(suffix)) out[k] = v;
+  return out;
+}

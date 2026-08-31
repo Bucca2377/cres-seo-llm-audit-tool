@@ -38,7 +38,7 @@ import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "@/lib/recs";
-import { cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides, type OverridePlatform } from "@/lib/overrides";
+import { cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides, overridesExcludingPlatform, type OverridePlatform } from "@/lib/overrides";
 import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
@@ -5803,7 +5803,7 @@ Return ONLY this JSON object, no prose before or after:
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        `Clear all saved audit history for "${property.name}"?\n\nThis wipes the Marketing, SEO, Review, and AI-rank results and their trend snapshots. The property's URLs and settings are kept, so the next run starts as a clean first run. This cannot be undone.`
+        `Clear all saved audit history for "${property.name}"?\n\nThis wipes the Marketing, SEO, Review, and AI-rank results, their trend snapshots, AND your manual cell corrections (the ✎ edits). The property's URLs and settings are kept, so the next run starts as a clean first run. This cannot be undone.`
       )
     ) {
       return;
@@ -5813,6 +5813,7 @@ Return ONLY this JSON object, no prose before or after:
       "marketingAudit", "marketingAuditPrev", "seoAudit", "seoRankSnapshots",
       "reviewAudit", "reviewSnapshots", "llmRank", "checklistStatuses",
       "checklistEvidence", "llmAuditRecommendations", "llmAuditTimestamp",
+      "auditOverrides",
     ] as const) {
       delete (cleaned as unknown as Record<string, unknown>)[f];
     }
@@ -6140,6 +6141,12 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
     color: "white",
     background: B.oxford,
   };
+  // Overrides used for DISPLAY: when the property is marked "no Apartments.com
+  // listing", the whole Apartments.com column shows the deterministic N/A, so any
+  // stale per-cell edits made before that flag was set are ignored.
+  const displayOverrides = property.noApartmentsListing
+    ? overridesExcludingPlatform(property.auditOverrides, "apartments")
+    : property.auditOverrides;
   return (
     <div>
       {/* ILS & Google Consistency */}
@@ -6168,7 +6175,7 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
                     <MkEditableCell
                       key={pf}
                       auto={row[pf]}
-                      override={cellOverride(property.auditOverrides, row.label, pf)}
+                      override={cellOverride(displayOverrides, row.label, pf)}
                       onChange={(next) =>
                         onUpdateProperty({
                           ...property,
@@ -6217,7 +6224,7 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
         <>
           <div style={sectionTitle}>Recommendations</div>
           <RecommendationsBlock
-            recs={effectiveMarketingRecommendations(results.recommendations, results.consistency, property.auditOverrides)}
+            recs={effectiveMarketingRecommendations(results.recommendations, results.consistency, displayOverrides)}
             setAsideList={property.setAsideRecs}
             audit="marketing"
             onSetAside={(card, reason) => onUpdateProperty(withSetAside(property, card, reason, "marketing"))}
@@ -7915,8 +7922,13 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
   const structuredSeoRecs = isStructuredRecs(seo?.recommendations) ? seo!.recommendations as RecommendationCard[] : null;
   // Override-aware: the printed marketing recs reflect the team's cell corrections
   // (a "Issue" override gains its fix card; a "Good" override drops the auto one).
+  // When the property is marked "no Apartments.com listing", stale Apartments.com
+  // cell edits are ignored so that whole column prints as the deterministic N/A.
+  const displayOverrides = property.noApartmentsListing
+    ? overridesExcludingPlatform(property.auditOverrides, "apartments")
+    : property.auditOverrides;
   const structuredMktRecs = isStructuredRecs(mkt?.recommendations)
-    ? effectiveMarketingRecommendations(mkt!.recommendations as RecommendationCard[], mkt!.consistency, property.auditOverrides)
+    ? effectiveMarketingRecommendations(mkt!.recommendations as RecommendationCard[], mkt!.consistency, displayOverrides)
     : null;
 
   // Recommendations the client has set aside are dropped from the active
@@ -8093,7 +8105,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     </tr>
                   </thead>
                   <tbody>
-                    {applyConsistencyOverrides(mkt.consistency, property.auditOverrides).map((row, i) => {
+                    {applyConsistencyOverrides(mkt.consistency, displayOverrides).map((row, i) => {
                       const cell = (c: { status: MarketingStatus; note: string }) => {
                         const s = MK_STATUS[c.status] || MK_STATUS.amber;
                         return (
