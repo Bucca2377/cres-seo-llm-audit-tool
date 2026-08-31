@@ -2120,12 +2120,24 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
         return { name: s.name, domain: s.domain, present: !!hit, url: hit?.url, network: net.network, standalone: net.standalone };
       })
     );
+    // Team marked the property as intentionally NOT on Apartments.com -> the whole
+    // CoStar network is Not Applicable: never a false ✓, never a "claim it" gap,
+    // and excluded from the presence count. Skips the seed + probe below too.
+    if (property.noApartmentsListing) {
+      for (const s of sources) {
+        if (s.network === "Apartments.com (CoStar)") {
+          s.present = false;
+          s.na = true;
+          s.url = undefined;
+        }
+      }
+    }
     // We audit the property's Apartments.com listing directly (its URL is
     // configured), so Apartments.com is a CONFIRMED citation — seed it present
     // even when the single brand search (directional, and flaky for aggregators)
     // didn't surface it this run. Prevents the absurd "we have the listing URL but
     // it shows not-detected".
-    if (property.apartmentsUrl) {
+    if (property.apartmentsUrl && !property.noApartmentsListing) {
       const apt = sources.find((s) => s.domain === "apartments.com");
       if (apt && !apt.present) {
         apt.present = true;
@@ -2161,6 +2173,8 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
     // audit (citations is the last step); stops at the first sibling that confirms.
     const loc = extractLocation(property.address);
     for (const net of CITATION_NETWORKS) {
+      // Property is marked not-on-Apartments.com -> don't probe that network.
+      if (property.noApartmentsListing && net.network === "Apartments.com (CoStar)") continue;
       const netSources = net.sites
         .map((s) => sources.find((x) => x.domain === s.domain))
         .filter((x): x is NonNullable<typeof x> => !!x);
@@ -2209,10 +2223,12 @@ function citationNetworkRows(citations: CitationResult | undefined) {
       .map((s) => sources.find((x) => x.domain === s.domain))
       .filter(Boolean) as CitationResult["sources"];
     const foundSites = siteResults.filter((s) => s.present);
+    const na = siteResults.some((s) => s.na);
     return {
       network: net.network,
       standalone: net.standalone,
-      present: foundSites.length > 0,
+      present: foundSites.length > 0 && !na,
+      na,
       foundSites,
       // Carried from the citation data itself (see checkCitations) so the "listed,
       // not advertising" caveat doesn't depend on a separate audit's state.
@@ -2534,8 +2550,11 @@ function citationsPromptSummary(c: CitationResult | undefined): string {
   if (!c) return "LOCAL CITATIONS: not checked this run.";
   const rows = citationNetworkRows(c);
   const present = rows.filter((r) => r.present).map((r) => r.network);
-  const missing = rows.filter((r) => !r.present).map((r) => r.network);
-  return `LOCAL CITATIONS / DIRECTORY PRESENCE (directional read from ONE brand search — networks, not individual sibling sites):\n- Appears on: ${present.join(", ") || "none detected"}.\n- Not detected on: ${missing.join(", ") || "none"} (worth claiming for local-SEO trust + consistent name/address/phone; verify before asserting it's missing).`;
+  // N/A networks (e.g. a property intentionally not on Apartments.com) are NOT a
+  // gap — exclude them so the model never recommends claiming/listing there.
+  const missing = rows.filter((r) => !r.present && !r.na).map((r) => r.network);
+  const na = rows.filter((r) => r.na).map((r) => r.network);
+  return `LOCAL CITATIONS / DIRECTORY PRESENCE (directional read from ONE brand search — networks, not individual sibling sites):\n- Appears on: ${present.join(", ") || "none detected"}.\n- Not detected on: ${missing.join(", ") || "none"} (worth claiming for local-SEO trust + consistent name/address/phone; verify before asserting it's missing).${na.length ? `\n- Not applicable (do NOT recommend claiming/listing): ${na.join(", ")} — the property intentionally does not list there.` : ""}`;
 }
 
 /** On-screen local-citations / directory presence panel (SEO tab). */
@@ -2551,6 +2570,8 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
   // Count the caveat as present — a directory LISTING does exist on Apartments.com
   // (that's the citation); the "not actively advertising" flag is a separate
   // dimension shown on the chip, not a reason to drop it from the count.
+  const naCount = rows.filter((r) => r.na).length;
+  const denom = rows.length - naCount; // N/A networks aren't part of the score
   const presentCount = rows.filter((r) => r.present).length;
   return (
     <div style={{ background: "white", border: "1px solid #e6e9ec", borderRadius: 8, padding: "14px 20px" }}>
@@ -2561,13 +2582,16 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
         </span>
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333", marginBottom: 12 }}>
-        Appears on <strong>{presentCount}</strong> of {rows.length} directory networks.
+        Appears on <strong>{presentCount}</strong> of {denom} directory networks.
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {rows.map((r) => {
           const caveat = isAptCaveat(r);
-          const active = r.present && !caveat;
-          const label = caveat
+          const na = !!r.na;
+          const active = r.present && !caveat && !na;
+          const label = na
+            ? `${r.network} — not listed here (N/A)`
+            : caveat
             ? `${r.network} — listed, not actively advertising`
             : active && r.foundSites.length > 1
             ? `${r.network} (${r.foundSites.length} sites)`
@@ -2583,12 +2607,12 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
                 borderRadius: 20,
                 fontFamily: "'Josefin Sans',sans-serif",
                 fontSize: 12,
-                border: `1px solid ${active ? "#bfe3cd" : "#e6d9c6"}`,
-                background: active ? "#f0faf4" : "#fdf6ee",
-                color: active ? "#15803d" : "#9a6a2a",
+                border: `1px solid ${na ? "#e2e5e8" : active ? "#bfe3cd" : "#e6d9c6"}`,
+                background: na ? "#f4f6f8" : active ? "#f0faf4" : "#fdf6ee",
+                color: na ? "#9aa3ad" : active ? "#15803d" : "#9a6a2a",
               }}
             >
-              <span style={{ fontWeight: 700 }}>{caveat ? "◐" : active ? "✓" : "○"}</span> {label}
+              <span style={{ fontWeight: 700 }}>{na ? "–" : caveat ? "◐" : active ? "✓" : "○"}</span> {label}
             </span>
           );
           return r.present && url ? (
@@ -4918,7 +4942,10 @@ function MarketingAuditTab({
 
       // Is the Apartments.com listing DARK (deterministically detected shell)? If so
       // it can't carry a concession, take an activation recommendation, etc.
-      const aptIsDark = !!(aptRead && aptRead.ok && aptRead.advertising === false);
+      // A property the team marked as NOT on Apartments.com is not "dark" (no
+      // shell listing to reactivate) — it's simply not applicable, so no
+      // reactivation card and no Apartments.com recommendations.
+      const aptIsDark = !current.noApartmentsListing && !!(aptRead && aptRead.ok && aptRead.advertising === false);
 
       // GROUND TRUTH for the concession — a deterministic finding the model must
       // respect (it otherwise misses the special and recommends launching one).
@@ -5678,6 +5705,18 @@ Return ONLY this JSON object, no prose before or after:
         // e.g. a leasing-widget tracking number that isn't a live line). Only when at
         // least one other number connected, so a dial-wide outage can't wipe the list.
         if (phones?.dialTested) phones = { ...phones, numbers: dropDeadDialedNumbers(phones.numbers) };
+      }
+
+      // Property marked NOT on Apartments.com -> force the whole Apartments.com
+      // column to N/A (deterministic, wins over the model + every block above), so
+      // it never reads as advertising/dark/missing and generates no Apartments.com
+      // recommendation. Runs last, right before recs are built from the table.
+      if (current.noApartmentsListing) {
+        for (const row of consistency) {
+          if (row?.apartments) {
+            row.apartments = { status: "na", note: "No Apartments.com listing (marked N/A for this property)." };
+          }
+        }
       }
 
       // DETERMINISTIC RECOMMENDATIONS. The marketing recs are generated ENTIRELY

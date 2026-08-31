@@ -149,6 +149,12 @@ export interface CitationSourceResult {
    * depend on a separate audit's data to render the "listed, not advertising" caveat.
    */
   notAdvertising?: boolean;
+  /**
+   * The team marked this network Not Applicable for the property (e.g. a
+   * property that intentionally does NOT list on Apartments.com). Excluded from
+   * the presence count and never shown as a false ✓ or a "claim it" gap.
+   */
+  na?: boolean;
 }
 
 /** Local-citation / directory presence check (from a brand search). */
@@ -218,6 +224,14 @@ export interface Property {
    * check the ILS listing (active vs shell, hours, photos, tour/apply tools).
    */
   apartmentsUrl?: string;
+  /**
+   * The property intentionally has NO Apartments.com listing. When true, the
+   * audit treats Apartments.com as Not Applicable everywhere — the Marketing
+   * Audit's Apartments.com column reads N/A, and the SEO directory-presence
+   * check excludes the Apartments.com (CoStar) network (no false ✓, not counted,
+   * not flagged as a gap to claim). Set by the team in property settings.
+   */
+  noApartmentsListing?: boolean;
   /**
    * Legacy "must-check" pinned queries. Superseded by {@link trackedQueries};
    * still read once to migrate old properties into the sticky tracked set.

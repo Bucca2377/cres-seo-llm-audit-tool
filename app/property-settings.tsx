@@ -514,6 +514,18 @@ export default function PropertySettings({
           "Used by the Marketing Audit to check the ILS listing (active vs shell, hours, photos, tour/apply tools)."
         )}
 
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "-6px 0 16px", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#444", cursor: "pointer", lineHeight: 1.4 }}>
+          <input
+            type="checkbox"
+            checked={!!draft.noApartmentsListing}
+            onChange={(e) => setDraft({ ...draft, noApartmentsListing: e.target.checked })}
+            style={{ cursor: "pointer", marginTop: 2 }}
+          />
+          <span>
+            This property has <strong>no Apartments.com listing</strong> — mark Apartments.com <strong>N/A</strong> everywhere (the Marketing Audit column and the SEO directory-presence check). Use when the property intentionally does not advertise there.
+          </span>
+        </label>
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           {field(
             "Units",
