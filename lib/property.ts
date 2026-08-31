@@ -703,21 +703,43 @@ export function useRoster() {
   const dirtyRef = useRef<Set<string>>(new Set());
   const delRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryRef = useRef(0);
 
   const flush = useCallback(async () => {
     const ids = Array.from(dirtyRef.current);
-    dirtyRef.current = new Set();
     const dels = Array.from(delRef.current);
+    if (!ids.length && !dels.length) return;
+    // Optimistically clear the queues; anything that FAILS below is RE-QUEUED so a
+    // write is never lost. A Railway redeploy (every code push triggers one) or a
+    // brief Postgres blip mid-save used to drop the change and leave the chip stuck
+    // on "Sync error" forever — now it retries with backoff and self-heals.
+    dirtyRef.current = new Set();
     delRef.current = new Set();
     const props = ids
       .map((id) => rosterRef.current.properties.find((p) => p.id === id))
       .filter((p): p is Property => !!p);
-    const results = await Promise.all([serverUpsert(props), ...dels.map((id) => serverDelete(id))]);
-    const ok = results.every(Boolean);
-    // Only settle when nothing new queued while this flush was in flight.
-    if (dirtyRef.current.size === 0 && delRef.current.size === 0) {
-      setSyncState(ok ? "synced" : "error");
+    const [upOk, ...delOks] = await Promise.all([
+      serverUpsert(props),
+      ...dels.map((id) => serverDelete(id)),
+    ]);
+    const upsertFailed = props.length > 0 && !upOk;
+    const failedDels = dels.filter((_, i) => !delOks[i]);
+    if (upsertFailed || failedDels.length) {
+      if (upsertFailed) for (const id of ids) dirtyRef.current.add(id);
+      for (const id of failedDels) delRef.current.add(id);
+      setSyncState("error");
+      // Backoff retry, capped — a persistent outage stops retrying but keeps the
+      // work queued, so the next edit (which resets the counter) tries again.
+      if (retryRef.current < 5) {
+        retryRef.current += 1;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(flush, Math.min(2000 * retryRef.current, 15000));
+      }
+      return;
     }
+    retryRef.current = 0;
+    // Only settle to "synced" when nothing new queued while this flush was in flight.
+    if (dirtyRef.current.size === 0 && delRef.current.size === 0) setSyncState("synced");
   }, []);
 
   const scheduleSync = useCallback(
@@ -733,6 +755,7 @@ export function useRoster() {
         delRef.current.add(id);
         dirtyRef.current.delete(id);
       }
+      retryRef.current = 0; // a fresh edit resets the backoff so it retries promptly
       setSyncState("saving");
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(flush, 700);
@@ -795,6 +818,12 @@ export function useRoster() {
   useEffect(() => {
     const onFocus = async () => {
       if (!serverEnabledRef.current) return;
+      // Returning to the tab retries any writes stuck from an earlier outage, so a
+      // "Sync error" that outlasted the backoff clears the moment you come back.
+      if (dirtyRef.current.size || delRef.current.size) {
+        retryRef.current = 0;
+        flush();
+      }
       const { enabled, properties } = await serverGet();
       if (!enabled) return;
       const pending = new Set([...dirtyRef.current, ...delRef.current]);
@@ -814,7 +843,7 @@ export function useRoster() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [commitLocal]);
+  }, [commitLocal, flush]);
 
   const activeProperty =
     roster.properties.find((p) => p.id === roster.activeId) || roster.properties[0];
