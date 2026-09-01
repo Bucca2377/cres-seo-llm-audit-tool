@@ -1341,6 +1341,15 @@ async function fetchGoogleRank(
           ? mapsData.local_results
           : [];
         const top20 = mapsResults.slice(0, 20);
+        // The `google` engine often returns NO 3-pack for a query (common for
+        // bedroom-specific searches like "2 bedroom apartments to rent in Salem"),
+        // leaving topMapPack empty even though a real Map Pack exists — which made
+        // "Who's Beating You" blank for a property sitting at #9-13. Since we DID
+        // fetch the maps results here, use their top 3 as the competitors when the
+        // google-engine pack was empty.
+        if (topMapPack.length === 0) {
+          topMapPack = mapsResults.slice(0, 3).map((b: any) => b.title || b.name).filter(Boolean);
+        }
         for (let idx = 0; idx < top20.length; idx++) {
           const biz = top20[idx];
           const m = matchPropertyToResult(property, {
