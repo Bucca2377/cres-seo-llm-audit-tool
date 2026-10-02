@@ -3429,9 +3429,14 @@ Return ONLY a JSON array of 9 strings.`;
         try {
           const crawl = await callFetch({ url: currentProperty.website, follow: true, maxPages: 6 });
           const faqUrl = (crawl.pages || []).map((p) => p.url).find((u) => /\/faqs?\b|frequently-asked/i.test(u || ""));
-          const crawlBlob = (crawl.pages || []).map((p) => `${p.url} ${(p.text || "").slice(0, 500)}`).join(" ");
+          // Scan the FULL page text (not just the first 500 chars) and match a bare
+          // "FAQ" too — an FAQ nav/footer LINK (singular, often below the fold) used
+          // to be missed, producing a false "no FAQ page" for sites that have one.
+          // Bias toward detecting it: a false "has FAQ" merely skips a create-FAQ rec,
+          // while a false "no FAQ" is a client-facing error (the Bellwood case).
+          const crawlBlob = (crawl.pages || []).map((p) => `${p.url} ${p.text || ""}`).join(" ");
           if (faqUrl) faqPagePath = shortUrl(faqUrl);
-          else if (/frequently\s+asked\s+questions|\bfaqs\b/i.test(crawlBlob)) faqPagePath = "an FAQ page";
+          else if (/frequently\s+asked\s+questions|\bfaqs?\b/i.test(crawlBlob)) faqPagePath = "an FAQ page";
           const pages: PageSeo[] = (crawl.pages || [])
             .filter((p) => p.seo)
             .map((p) => ({ url: p.url, status: p.status, ...(p.seo as Omit<PageSeo, "url" | "status">) }));
