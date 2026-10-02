@@ -4097,7 +4097,7 @@ Recommendation rules (STRICT):
                       if (summary.opportunityWinnable) {
                         if (r.expanded_map_pack_rank) return `In the expanded Map Pack (#${r.expanded_map_pack_rank}) — push into the top 3`;
                         if (r.organic_rank) return `Organic #${r.organic_rank} (P${r.organic_page}) — close; winnable to page 1`;
-                        if (r.map_pack_appeared) return "Appears in the Map Pack — push into the top 3";
+                        if (r.map_pack_appeared) return "A Map Pack shows for this search but you're not in it yet — the local target to break into";
                         return "Close — winnable with focused work";
                       }
                       return "Not ranking yet — longer-term target (broad term)";
@@ -8510,7 +8510,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                         if (seoSummary.opportunityWinnable) {
                           if (r.expanded_map_pack_rank) return `In the expanded Map Pack (#${r.expanded_map_pack_rank}) — push into the top 3`;
                           if (r.organic_rank) return `Organic #${r.organic_rank} (P${r.organic_page}) — close; winnable to page 1`;
-                          if (r.map_pack_appeared) return "Appears in the Map Pack — push into the top 3";
+                          if (r.map_pack_appeared) return "A Map Pack shows for this search but you're not in it yet — the local target to break into";
                           return "Close — winnable with focused work";
                         }
                         return "Not ranking yet — longer-term target (broad term)";
@@ -8674,6 +8674,10 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                 r.present && /^Apartments\.com/i.test(r.network) && (r.notAdvertising || aptListedNotAdvertising(mkt?.consistency));
               // Count the caveat as present — a listing exists (the citation); the
               // "not actively advertising" flag is shown in the row, not dropped.
+              // N/A networks (e.g. a property intentionally not on Apartments.com)
+              // are excluded from the denominator and shown as N/A, not "Verify".
+              const naCount = rows.filter((r) => r.na).length;
+              const denom = rows.length - naCount;
               const presentCount = rows.filter((r) => r.present).length;
               return (
                 <div className="pb-avoid" style={{ marginTop: 18 }}>
@@ -8681,7 +8685,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     Local Citations / Directory Presence
                   </div>
                   <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                    Appears on {presentCount} of {rows.length} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.{aptNotAdv ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
+                    Appears on {presentCount} of {denom} directory networks. Directional read from one brand search; a network shown as not detected is worth verifying/claiming, not a confirmed absence.{aptNotAdv ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
                   </p>
                   <table>
                     <thead>
@@ -8693,19 +8697,22 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     <tbody>
                       {rows.map((r, i) => {
                         const caveat = isAptCaveat(r);
-                        const active = r.present && !caveat;
+                        const na = !!r.na;
+                        const active = r.present && !caveat && !na;
                         return (
                           <tr key={i} className="pb-avoid">
                             <td style={findingsTd}>
                               {r.network}
-                              {caveat ? (
+                              {na ? (
+                                <span style={{ color: "#9aa3ad" }}> — not listed here (N/A)</span>
+                              ) : caveat ? (
                                 <span style={{ color: "#9a6a2a" }}> — listed, not actively advertising</span>
                               ) : active && r.foundSites.length > 0 ? (
                                 <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
                               ) : null}
                             </td>
-                            <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: active ? "#15803d" : "#9a6a2a" }}>
-                              {caveat ? "Not advertising" : active ? "Yes" : "Verify"}
+                            <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: na ? "#9aa3ad" : active ? "#15803d" : "#9a6a2a" }}>
+                              {na ? "N/A" : caveat ? "Not advertising" : active ? "Yes" : "Verify"}
                             </td>
                           </tr>
                         );
