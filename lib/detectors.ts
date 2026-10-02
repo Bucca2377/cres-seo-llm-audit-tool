@@ -336,3 +336,57 @@ export function extractFirstJsonObject(text: string): string | null {
   }
   return null; // never balanced -> truncated / malformed
 }
+
+// ---------------------------------------------------------------------------
+// SEO-recommendation guards (deterministic drops for audit-QA accuracy issues)
+// ---------------------------------------------------------------------------
+
+/**
+ * A recommendation that promises a Google "FAQ rich result / rich snippet".
+ * Google DISCONTINUED FAQ rich results in 2026, so these are outdated and dropped.
+ * Plain FAQ CONTENT recs (for AI-assistant visibility / on-page depth) are NOT
+ * matched — only the ones tying FAQ to a Google rich result/snippet.
+ */
+export function promisesFaqRichResult(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  return /\bfaq/.test(t) && /\brich\s+(?:result|results|snippet|snippets)\b/.test(t);
+}
+
+/**
+ * The bedroom counts a property actually offers, parsed from its free-text
+ * `bedroomTypes` field ("Studio, 1, 2" / "one, two, three bedroom" / "Studio - 2
+ * Bed"). That field is controlled, so bare digits in it ARE bed counts. Returns a
+ * Set of tokens: "studio" plus numeric strings "1".."5". Empty set = unknown.
+ */
+export function offeredBedroomCounts(bedroomTypes: string): Set<string> {
+  const t = (bedroomTypes || "").toLowerCase();
+  const out = new Set<string>();
+  if (!t.trim()) return out;
+  if (/studio|efficienc|\bzero\b|\b0\s*(?:bed|br|bd)\b/.test(t)) out.add("studio");
+  const words: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5" };
+  for (const [w, n] of Object.entries(words)) if (new RegExp(`\\b${w}\\b`).test(t)) out.add(n);
+  for (const d of t.match(/[1-5]/g) || []) out.add(d);
+  return out;
+}
+
+/**
+ * True when a recommendation's text proposes a floorplan the property does NOT
+ * offer (the "invented floorplan" error, e.g. adding 3-bedroom copy to a property
+ * with only studios–2BR). Matches ONLY explicit bed-count PHRASES ("studio",
+ * "three-bedroom", "3 bed", "3br") — never a bare digit in prose — so a sqft or
+ * price number can't trip it. Returns false when the offered set is unknown.
+ */
+export function recInventsFloorplan(text: string, offered: Set<string>): boolean {
+  if (!offered || offered.size === 0) return false;
+  const t = (text || "").toLowerCase();
+  const found = new Set<string>();
+  if (/\bstudio\b/.test(t)) found.add("studio");
+  const words: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5" };
+  for (const [w, n] of Object.entries(words)) if (new RegExp(`\\b${w}[-\\s]?bed`).test(t)) found.add(n);
+  for (const m of t.match(/\b[1-5][-\s]?(?:bed|br\b|bedroom)/g) || []) {
+    const d = m.match(/[1-5]/);
+    if (d) found.add(d[0]);
+  }
+  for (const c of found) if (!offered.has(c)) return true;
+  return false;
+}

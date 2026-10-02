@@ -13,6 +13,9 @@ import {
   recommendsReviewIncentive,
   dropDeadDialedNumbers,
   extractFirstJsonObject,
+  promisesFaqRichResult,
+  offeredBedroomCounts,
+  recInventsFloorplan,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
@@ -1015,6 +1018,35 @@ test("recs: recommendsReviewIncentive fires on the paid programs, not the free t
   assert.equal(recommendsReviewIncentive("Respond to all six unanswered reviews within 24 hours."), false);
   assert.equal(recommendsReviewIncentive("Text a one-tap Google review link to residents whose work order just closed."), false);
   assert.equal(recommendsReviewIncentive("Add framed QR review codes at the front desk and mail room."), false);
+});
+
+// --- SEO rec guards: outdated FAQ rich results + invented floorplans ----------
+
+test("rec-guard: promisesFaqRichResult catches the discontinued Google FAQ rich-result promise", () => {
+  assert.equal(promisesFaqRichResult("Add FAQPage schema to earn FAQ rich results in Google."), true);
+  assert.equal(promisesFaqRichResult("Publish an FAQ page to win rich snippets."), true);
+  // Plain FAQ-content recs (for AI visibility) are NOT dropped.
+  assert.equal(promisesFaqRichResult("Add an FAQ section answering common renter questions for AI assistants."), false);
+  assert.equal(promisesFaqRichResult("Write richer, longer homepage content."), false);
+});
+
+test("rec-guard: offeredBedroomCounts parses the free-text bedroomTypes field", () => {
+  assert.deepEqual([...offeredBedroomCounts("Studio, 1, 2")].sort(), ["1", "2", "studio"]);
+  assert.deepEqual([...offeredBedroomCounts("one, two, three bedroom")].sort(), ["1", "2", "3"]);
+  assert.deepEqual([...offeredBedroomCounts("Studio - 2 Bed")].sort(), ["2", "studio"]);
+  assert.equal(offeredBedroomCounts("").size, 0); // unknown
+});
+
+test("rec-guard: recInventsFloorplan drops a rec for a bedroom type the property lacks", () => {
+  const offered = offeredBedroomCounts("Studio, 1, 2"); // no 3-bed
+  assert.equal(recInventsFloorplan("Build a three-bedroom landing page targeting 3 bedroom apartments.", offered), true);
+  assert.equal(recInventsFloorplan("Add 3 bedroom copy to the homepage.", offered), true);
+  // A floorplan it DOES have is fine.
+  assert.equal(recInventsFloorplan("Weave '2 bedroom apartments' into the homepage H1.", offered), false);
+  // Bare numbers (sqft, price, counts) must NOT trip it.
+  assert.equal(recInventsFloorplan("Unit 213 is 554 sq ft at $1,350 with 3 photos.", offered), false);
+  // Unknown floorplans -> never filter.
+  assert.equal(recInventsFloorplan("Build a three-bedroom page.", offeredBedroomCounts("")), false);
 });
 
 // --- Manual audit-cell overrides (team corrections) ---------------------------

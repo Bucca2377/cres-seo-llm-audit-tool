@@ -33,7 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -2041,12 +2041,18 @@ async function callPageSpeed(url: string): Promise<PageSpeedResult | undefined> 
 /** Plain-text PageSpeed summary fed into the recommendations prompt. */
 function pageSpeedPromptSummary(ps: PageSpeedResult | undefined): string {
   if (!ps) return "PAGE SPEED / CORE WEB VITALS: not checked this run.";
-  const parts = ps.strategies.map((s) =>
-    s.score == null
-      ? `${s.strategy}: could not measure`
-      : `${s.strategy} performance score ${s.score}/100 (LCP ${s.lcp}, CLS ${s.cls}, TBT ${s.tbt})`
+  const parts = ps.strategies.map((s) => {
+    if (s.score == null) return `${s.strategy}: could not measure`;
+    const lab = `lab score ${s.score}/100 (lab LCP ${s.lcp}, CLS ${s.cls}, TBT ${s.tbt})`;
+    const field = s.field
+      ? `; REAL-USER FIELD DATA (28-day, the ACCURATE benchmark that the report table shows): LCP ${s.field.lcp}, CLS ${s.field.cls}, INP ${s.field.inp}, overall ${s.field.category}`
+      : "; no real-user field data for this site";
+    return `${s.strategy} — ${lab}${field}`;
+  });
+  return (
+    `PAGE SPEED / CORE WEB VITALS (Google PageSpeed Insights): ${parts.join(" | ")}. ` +
+    `When FIELD data is present, cite THOSE numbers — they match the report table and are the real benchmark; the lab LCP is a synthetic test that swings run-to-run and will NOT match the table. Cite lab numbers only when there is no field data, and call them a "lab test". Never cite a figure that is not listed here.`
   );
-  return `PAGE SPEED / CORE WEB VITALS (Google PageSpeed Insights): ${parts.join("; ")}.`;
 }
 
 /**
@@ -2460,8 +2466,8 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
   }
   const lines: string[] = [
     tech.source === "webfetch"
-      ? `Read ${i.total} page(s) via the web_fetch fallback (the site blocked the crawler). Meta/H1/word counts are reliable; schema detection is best-effort, so do NOT claim schema is missing on the strength of this alone.`
-      : `Crawled ${i.total} page(s) with a real browser.`,
+      ? `Read ${i.total} page(s) via the web_fetch fallback (the site blocked the crawler) — a SAMPLE, not necessarily every page. Meta/H1/word counts are reliable; schema detection is best-effort, so do NOT claim schema is missing on the strength of this alone.`
+      : `Crawled ${i.total} page(s) with a real browser — a SAMPLE (homepage + key nav pages), NOT the full site. Do NOT state or imply the site "has only ${i.total} pages".`,
   ];
   if (i.missingTitle.length) lines.push(`${i.missingTitle.length} page(s) have no <title>.`);
   if (i.missingMeta.length)
@@ -2481,7 +2487,7 @@ function technicalSeoPromptSummary(tech: TechnicalSeoResult | undefined): string
   const paths = tech.pages.map((p) => shortUrl(p.url)).filter(Boolean);
   if (paths.length)
     lines.push(
-      `Pages found on the site: ${paths.join(", ")}. Do NOT recommend CREATING a page that already exists here — if a relevant page exists (e.g. an FAQ page), recommend IMPROVING it (add schema, expand content) instead.`
+      `Pages we crawled this run (a SAMPLE, not the full site): ${paths.join(", ")}. Do NOT recommend CREATING a page that already exists here — if a relevant page exists (e.g. an FAQ page), recommend IMPROVING it (add schema, expand content) instead. A page NOT in this sample is NOT proof the site lacks it — if unsure, say "if the site has no X page" rather than asserting it's missing.`
     );
   return "TECHNICAL / ON-PAGE SEO (from a live crawl):\n" + lines.map((l) => `- ${l}`).join("\n");
 }
@@ -3513,6 +3519,10 @@ Return ONLY a JSON array of 9 strings.`;
 
       const recsPrompt = `SEO + AI visibility audit for ${currentProperty.name} at ${currentProperty.address}:
 
+GROUND TRUTH — verified facts about THIS property. NEVER contradict these, and never propose content/pages/queries for a floorplan or feature it does not have:
+- Floor plans actually offered: ${currentProperty.bedroomTypes?.trim() || "(not specified — do NOT assume any specific bedroom counts)"}. Do NOT add copy, a page, or a tracked query for a bedroom type NOT listed here (no "3 bedroom", no "studio", etc. unless it appears above).
+- Google listing: ${googleReviewCount != null ? `active and verified with ${googleReviewCount} review${googleReviewCount === 1 ? "" : "s"}${googleRating != null ? ` averaging ${googleRating} stars` : ""}` : "review count was not captured this run — do NOT claim the property has no listing or no reviews"}. NEVER say the property "has no Google listing", "is unverified", or "has few/no reviews" when a count is shown here.
+
 GOOGLE SEARCH RANK DATA:
 ${queryRankSummary}
 
@@ -3567,7 +3577,11 @@ Recommendation rules (STRICT):
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
 13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.
 14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on a whole directory NETWORK (e.g. the Zillow network, the RentPath network, or standalone Facebook), you MAY include ONE "FOUNDATIONAL" recommendation to claim/build a listing there with consistent name/address/phone — name the specific missing network(s). Frame it as "verify then claim" (the read is directional, from one search), and skip entirely if the major networks already appear.
-15. PAGE SPEED: if the mobile PageSpeed score above is below 50 (poor) or 50-89 (needs work), include ONE recommendation to improve it — cite the actual mobile score and the weakest Core Web Vital (e.g. 'mobile score 38/100, LCP 6.2s'), and give concrete fixes (compress/next-gen images, defer offscreen images, reduce render-blocking scripts, enable caching/CDN). Skip if mobile scores 90+.${setAsidePromptNote(currentProperty)}`;
+15. PAGE SPEED: if the mobile score needs work, include ONE recommendation to improve it — cite the EXACT numbers from the PAGE SPEED section above (use the real-user FIELD LCP when field data is present, since that is what the report table shows; label a lab figure a "lab test"). Never cite an LCP/score that isn't in that section, and never cite a lab number as if it were the real one. Skip if mobile is strong (90+ / field FAST).
+16. NEVER CONTRADICT THE DATA ABOVE. Every claim about rank, reviews, rating, or floorplans must match the GROUND TRUTH and the rank table verbatim. Do NOT describe a query as having Map Pack "traction" when the table shows the property NOT in the top 20, and do NOT call a query a "page 1 opportunity" when the table already shows it ranking on page 1 (say it already ranks #N and aim to improve/hold it). If the property already ranks well for something, say so — don't invent a gap.
+17. OUTDATED — NO FAQ RICH RESULTS: Do NOT recommend FAQ schema to earn "Google FAQ rich results / rich snippets" — Google discontinued FAQ rich results in 2026. FAQ / answer CONTENT is still useful for AI-assistant visibility and on-page depth; frame it ONLY that way, never as earning a Google rich result.
+18. NO FABRICATED PREDICTIONS: "success" must be a realistic, measurable target ("reach page 1 organic for <query> within 90 days", "add N Google reviews") — never an invented precise outcome you cannot support ("will rank #3", "+0.3 stars", "named by every AI assistant"). Attribute a ranking gap only to a concrete observed cause (the rank data, a tag the crawl confirmed missing), never speculation.
+19. The crawl read only a SAMPLE of pages. Do NOT state the site "has only N pages" or "is just N pages" — the total is unknown. Flag a missing page only as "if the site has no X page, add one".${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
       // 502 from the host), still save the ranks + comp-set instead of failing
@@ -3584,14 +3598,19 @@ Recommendation rules (STRICT):
         const rawText = rResp.content?.[0]?.text || "";
         recommendations = parseRecCards(rawText);
         if (Array.isArray(recommendations)) {
+          const offeredBeds = offeredBedroomCounts(currentProperty.bedroomTypes || "");
           recommendations = recommendations.filter((c) => {
-            const t = `${c.title || ""}. ${c.what || ""}`;
+            const t = `${c.title || ""}. ${c.what || ""} ${c.why || ""} ${c.success || ""}`;
             // HARD RULE: never recommend anything about the Google Business Profile
             // photo gallery (applies to every audit, not just marketing).
             if (recommendsGooglePhotos(t)) return false;
             // If the site already has an FAQ page, drop any rec to CREATE/PUBLISH a new
             // one. "Add schema to the existing FAQ" (verb "add") is NOT dropped.
             if (faqPagePath && /\b(creat\w*|publish\w*|build\w*|launch\w*|develop\w*|new)\b[\s\S]{0,50}(faq|frequently[-\s]?asked)/i.test(t)) return false;
+            // Google discontinued FAQ rich results (2026) — drop recs that promise them.
+            if (promisesFaqRichResult(t)) return false;
+            // Never propose content for a floorplan the property doesn't offer.
+            if (recInventsFloorplan(t, offeredBeds)) return false;
             return true;
           });
         }
