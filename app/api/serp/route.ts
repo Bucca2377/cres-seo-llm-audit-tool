@@ -95,9 +95,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (!r.ok || data?.error) {
+    const msg = String(data?.error || `SerpAPI error (status ${r.status})`);
+    // Quota exhaustion is NOT a property/data problem — flag it so the client can
+    // show an honest "market-data service out of searches" banner instead of a
+    // cryptic "Requires Client Verification" across every Google cell.
+    const quotaExhausted = /run out of searches|out of searches|no searches left|searches? (?:remaining|left).{0,8}\b0\b|exhaust/i.test(msg);
     return NextResponse.json(
-      { error: data?.error || `SerpAPI error (status ${r.status})` },
-      { status: r.status || 500 }
+      { error: msg, quotaExhausted },
+      { status: quotaExhausted ? 429 : r.status || 500 }
     );
   }
 

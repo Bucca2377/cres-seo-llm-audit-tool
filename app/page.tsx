@@ -8982,6 +8982,16 @@ export default function MarketingHub() {
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Set true when any SerpAPI call this session reports the account is out of
+  // monthly searches. Drives the banner so a quota outage reads as a tool limit,
+  // not a property finding (the whole Google column otherwise degrades to
+  // "Requires Client Verification" with no explanation).
+  const [serpQuotaOut, setSerpQuotaOut] = useState(false);
+  useEffect(() => {
+    const onQuota = () => setSerpQuotaOut(true);
+    window.addEventListener("cres-serp-quota", onQuota);
+    return () => window.removeEventListener("cres-serp-quota", onQuota);
+  }, []);
   // Which report to print: the combined Marketing/SEO/LLM doc, or the
   // standalone Review Audit. Set just before window.print() so only the
   // targeted .printable-report is in the DOM.
@@ -9345,6 +9355,39 @@ export default function MarketingHub() {
       </div>
 
       <div className="screen-content" style={{ padding: "24px 32px" }}>
+        {serpQuotaOut && (
+          <div
+            data-print-hide="true"
+            style={{
+              marginBottom: 18,
+              background: "#fdecea",
+              border: "1px solid #f3c6bd",
+              borderLeft: `4px solid ${B.tangelo}`,
+              borderRadius: 8,
+              padding: "12px 16px",
+              fontFamily: "'Josefin Sans',sans-serif",
+              fontSize: 13,
+              color: "#8a3a1f",
+              lineHeight: 1.5,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+            }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>⚠</span>
+            <div style={{ flex: 1 }}>
+              <strong>Google data unavailable: the market-data service (SerpAPI) is out of its monthly searches.</strong> That&apos;s why the Google columns read &ldquo;Requires Client Verification&rdquo; and rank / Map Pack / review checks come back empty. This is a tool quota limit, <strong>not</strong> a finding about the property. Top up or upgrade the plan at{" "}
+              <a href="https://serpapi.com/plan" target="_blank" rel="noreferrer" style={{ color: B.tangelo, fontWeight: 600 }}>serpapi.com/plan</a>, then re-run the audit.
+            </div>
+            <button
+              onClick={() => setSerpQuotaOut(false)}
+              title="Dismiss"
+              style={{ background: "transparent", border: "none", color: "#8a3a1f", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="tab-nav" style={{ display: "flex", gap: 0, marginBottom: 22, borderBottom: `2px solid #e0e0e0`, background: "white", borderRadius: "10px 10px 0 0", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
           {TABS.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: "13px 0", border: "none", borderBottom: tab === t.id ? `3px solid ${B.caribbean}` : "3px solid transparent", background: "transparent", color: tab === t.id ? B.caribbean : "#888", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, fontWeight: tab === t.id ? 400 : 300, cursor: "pointer", marginBottom: -2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all 0.14s" }}>

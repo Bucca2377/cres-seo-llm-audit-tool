@@ -1092,6 +1092,16 @@ export async function callSerp(opts: {
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({ error: "SerpAPI request failed" }));
+    // SerpAPI is out of monthly searches — broadcast so the UI can show a clear
+    // "market-data service out of searches" banner instead of letting every Google
+    // cell silently degrade to "Requires Client Verification".
+    if (
+      typeof window !== "undefined" &&
+      ((err as { quotaExhausted?: boolean }).quotaExhausted ||
+        /run out of searches|out of searches/i.test(String((err as { error?: string }).error || "")))
+    ) {
+      window.dispatchEvent(new CustomEvent("cres-serp-quota"));
+    }
     throw new Error(err.error || `SerpAPI failed (${r.status})`);
   }
   const data = await r.json();
