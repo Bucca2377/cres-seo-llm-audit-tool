@@ -4684,14 +4684,27 @@ function MarketingAuditTab({
       let gbpHadData = false; // true once SerpAPI returned a real Google profile
       let googlePhone = "";
       let officeHours: Record<string, string> | undefined;
+      // True only when SerpAPI resolved a SINGLE place (place_results) — so its
+      // weekly hours were actually readable. When the query returns a LIST instead,
+      // we still get rating/reviews/website (extractGBP scans local_results) but NOT
+      // hours, so an empty officeHours then is a capture gap, NOT proof Google lacks
+      // hours. Gates the "No office hours on Google" red below.
+      let googlePlaceResolved = false;
       try {
         const serpData = await callSerp({
+          // No `location` param: with it, SerpAPI's google_maps throws a "Missing
+          // z/m" error (forcing a no-location retry) and on some location strings
+          // returns a LIST instead of a single place — which drops hours/photos and
+          // made the audit falsely flag "no office hours on Google" when Google
+          // clearly has them. The query already carries the city and extractGBP
+          // matches by website domain, so a clean single-call place lookup is more
+          // reliable (returns place_results with hours) and one search cheaper.
           query: buildGbpSearchQuery(current),
           engine: "google_maps",
-          location: extractLocation(current.address),
         });
         const gbp = extractGBP(serpData, current);
         const place = serpData?.place_results;
+        googlePlaceResolved = !!place;
         googlePhone = (place?.phone || "").toString();
         // GBP hours (day -> "9 AM–5 PM"), used to auto-flag whether the dial
         // test landed during office hours. SerpAPI returns an array of {day: hours}.
@@ -5384,13 +5397,15 @@ Return ONLY this JSON object, no prose before or after:
       }
       // GOOGLE HAS NO OFFICE HOURS = confirmed gap. Runs INDEPENDENTLY of the
       // reconciliation above (which only runs when >=2 platforms have parseable
-      // hours, so it can be skipped). The Google profile is live (gbpHadData) but
-      // SerpAPI returned no hours — SerpAPI returns GBP hours when they exist, so the
-      // listing genuinely has none (the profile shows "Add business hours"). That's a
-      // FACT and a real lead gap, not a soft "verify". Mark it a red ISSUE with the
-      // fix; allFindingCards then emits an "add office hours to Google" recommendation
-      // from this red cell.
-      if (gbpHadData && (!officeHours || Object.keys(officeHours).length === 0)) {
+      // hours, so it can be skipped). Requires that we actually RESOLVED the single
+      // place (googlePlaceResolved) — SerpAPI returns GBP hours on place_results
+      // when they exist, so a resolved place with no hours genuinely has none (the
+      // profile shows "Add business hours"): a FACT and a real lead gap, not a soft
+      // "verify". But if the query only returned a LIST, hours were never readable,
+      // so we must NOT assert absence — that produced a false "no hours on Google"
+      // when the profile clearly had them. allFindingCards emits the "add office
+      // hours to Google" recommendation from this red cell.
+      if (gbpHadData && googlePlaceResolved && (!officeHours || Object.keys(officeHours).length === 0)) {
         const hoursRow = consistency.find((r) => /\bhours?\b/i.test(r?.label || ""));
         if (hoursRow && hoursRow.google?.status !== "green") {
           const haveElsewhere =
