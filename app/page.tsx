@@ -6140,11 +6140,15 @@ function PhoneInventoryPanel({
     const green = { color: "#15803d", fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
     const amber = { color: "#9a7200", fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
     const red = { color: B.tangelo, fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
+    // Neutral: the line CONNECTED (the pass condition — it dials a real line), we
+    // just can't classify the answerer. Grey, not amber: a working line is NOT a
+    // finding.
+    const neutral = { color: "#5b6670", fontWeight: 600, fontSize: 11.5 } as React.CSSProperties;
     // Labels are HEDGED: Twilio's answering-machine detection is probabilistic and
     // cannot reliably tell voicemail from an auto-attendant/IVR, or a failed route
     // from a dead number. Verify any flagged line with a manual call.
     if (s === "failed") return <span style={red}>✗ Didn&apos;t connect (dead number or routing issue)</span>;
-    if (s === "unknown") return <span style={amber}>? Inconclusive</span>;
+    if (s === "unknown") return <span style={neutral}>? Inconclusive</span>;
     if (s === "connected") {
       if (n.answeredBy === "human") return <span style={green}>✓ Answered — sounded like a live person{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "voicemail") return <span style={amber}>⚠ Likely voicemail or an automated system{secs != null ? ` (${secs}s)` : ""}</span>;
@@ -6152,8 +6156,9 @@ function PhoneInventoryPanel({
       // No answering-machine verdict — say plainly what the line did.
       if (n.dialNote === "no-answer") return <span style={amber}>◦ Rang{secs != null ? ` ~${secs}s` : ""}, no answer</span>;
       if (n.dialNote === "busy") return <span style={amber}>◦ Line busy</span>;
-      // Answered, but detection couldn't tell a person from voicemail/IVR.
-      return <span style={amber}>◦ Answered — couldn&apos;t tell live vs automated</span>;
+      // Connected and something answered (the pass) — we just couldn't classify it.
+      // Neutral, not a warning: the line works.
+      return <span style={neutral}>✓ Connected — answered (live vs automated unclear)</span>;
     }
     return <span style={{ color: "#c3c9cf", fontSize: 11 }}>not tested</span>;
   };
@@ -6193,7 +6198,7 @@ function PhoneInventoryPanel({
         if (openAt === false)
           return box("#f0faf4", "#bfe3cd", "#15803d", `Dial-tested ${when} — OUTSIDE the property's office hours, so a no-answer or voicemail is expected, not a finding.`);
         if (openAt === true)
-          return box("#fdf6ee", "#f0e2cd", "#9a6a2a", `Dial-tested ${when} — DURING the property's office hours, so a no-answer or voicemail here is a real lead-leak signal.`);
+          return box("#fdf6ee", "#f0e2cd", "#9a6a2a", `Dial-tested ${when} — DURING the property's office hours: a line that does NOT answer is a real lead leak, and a "voicemail / automated" result is worth a manual check (answer-type detection is approximate). A line that connects is fine.`);
         return box("#fdf6ee", "#f0e2cd", "#9a7200", `Dial-tested ${when} (property's local time). A no-answer / voicemail only signals a problem if it landed during posted office hours (see the Office hours row above) — after-hours is expected.`);
       })()}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -8281,14 +8286,14 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                             let label = "—";
                             let color = "#9a7200";
                             if (n.dialStatus === "failed") { label = "Didn't connect (dead number or routing)"; color = "#b14a2a"; }
-                            else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#9a7200"; }
+                            else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#5b6670"; }
                             else if (n.dialStatus === "connected") {
                               if (n.answeredBy === "human") { label = `Answered — sounded live${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
                               else if (n.answeredBy === "voicemail") { label = `Likely voicemail or automated${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
                               else if (n.answeredBy === "fax") { label = "Likely a fax line"; color = "#9a7200"; }
                               else if (n.dialNote === "no-answer") { label = `Rang${secs != null ? ` ~${secs}s` : ""}, no answer`; color = "#9a7200"; }
                               else if (n.dialNote === "busy") { label = "Line busy"; color = "#9a7200"; }
-                              else { label = "Answered — live vs automated unclear"; color = "#9a7200"; }
+                              else { label = "Connected — answered (live vs automated unclear)"; color = "#5b6670"; }
                             }
                             return (
                               <td style={{ ...findingsTd, textAlign: "center", width: 150, fontWeight: 700, color }}>{label}</td>
@@ -8312,7 +8317,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                   if (openAt === true)
                     return (
                       <p style={{ ...base, background: "#fdf6ee", border: "1px solid #f0e2cd", color: "#9a6a2a" }}>
-                        <strong>Dial-tested {when} — DURING the property&rsquo;s office hours.</strong> A &ldquo;no answer&rdquo; or &ldquo;voicemail&rdquo; above is a real lead-leak signal.
+                        <strong>Dial-tested {when} — DURING the property&rsquo;s office hours.</strong> A line that does not answer is a real lead leak; a &ldquo;voicemail / automated&rdquo; result is worth a manual check (answer-type detection is approximate). A line that connects is fine.
                       </p>
                     );
                   return (
