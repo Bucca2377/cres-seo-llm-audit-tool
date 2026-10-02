@@ -999,8 +999,13 @@ function hasApartmentToken(name: string): boolean {
  */
 function buildGbpSearchQuery(property: Property): string {
   const city = extractCity(property.address);
-  const suffix = hasApartmentToken(property.name) ? "" : " apartments";
-  return `${property.name}${suffix}${city ? " " + city : ""}`.trim();
+  // Normalize "&" -> "and": SerpAPI's google_maps returns a LIST (no place_results,
+  // so no hours/photos/phone) for an ampersand query like "Coronado & Valencia …",
+  // but resolves the SINGLE place for "Coronado and Valencia …". That list response
+  // made the audit falsely flag "no office hours on Google" for a listing that has them.
+  const name = (property.name || "").replace(/\s*&\s*/g, " and ").replace(/\s+/g, " ").trim();
+  const suffix = hasApartmentToken(name) ? "" : " apartments";
+  return `${name}${suffix}${city ? " " + city : ""}`.trim();
 }
 
 /**
@@ -4715,6 +4720,36 @@ function MarketingAuditTab({
             if (day) map[day.toLowerCase()] = String(row[day]);
           }
           if (Object.keys(map).length) officeHours = map;
+        }
+        // SAFETY NET: if the query still resolved to a LIST (no place_results) but we
+        // matched the property, re-query by the EXACT matched Google title (which
+        // Google normalizes, e.g. "Coronado and Valencia") to resolve the single
+        // place and read its weekly hours + phone. Without this, a list response
+        // leaves hours empty and the audit falsely reports "no office hours on
+        // Google". Only fires when needed (rare after the "&"->"and" normalization).
+        if (!officeHours && gbp && !place && gbp.name) {
+          try {
+            const cityQ = extractCity(current.address);
+            const followUp = await callSerp({
+              query: `${gbp.name}${cityQ ? " " + cityQ : ""}`.trim(),
+              engine: "google_maps",
+            });
+            const fplace = followUp?.place_results as { hours?: unknown; phone?: string } | undefined;
+            if (fplace) {
+              googlePlaceResolved = true;
+              if (Array.isArray(fplace.hours)) {
+                const map: Record<string, string> = {};
+                for (const row of fplace.hours as Record<string, string>[]) {
+                  const day = Object.keys(row || {})[0];
+                  if (day) map[day.toLowerCase()] = String(row[day]);
+                }
+                if (Object.keys(map).length) officeHours = map;
+              }
+              if (!googlePhone) googlePhone = (fplace.phone || "").toString();
+            }
+          } catch {
+            /* best-effort — leave hours to the reconciliation / conservative red gate */
+          }
         }
         // Google profile photo URLs for the vision pass. Use the direct Google
         // CDN thumbnails (not the serpapi proxy) and downsize to ~512px to keep
