@@ -644,6 +644,24 @@ function nameMatches(haystack: string, needle: string): boolean {
   return false;
 }
 
+/**
+ * True when a search result (title + URL) plausibly matches the property by its
+ * STREET ADDRESS — needed for directory pages (Zillow especially) that are keyed
+ * by address, so their title/slug is the address, not the property name, and a
+ * name-only match misses them (the Henry Heights case). Requires BOTH the street
+ * NUMBER and a distinctive street-NAME token to appear, so it can't false-match a
+ * random listing that merely shares a house number.
+ */
+function addressMatchesResult(haystack: string, address: string): boolean {
+  const h = (haystack || "").toLowerCase();
+  const num = (String(address || "").match(/^\s*(\d+)/) || [])[1];
+  if (!num || !new RegExp(`\\b${num}\\b`).test(h)) return false;
+  const STREET_TYPES = /^(st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive|way|ct|court|cir|circle|pkwy|parkway|pl|place|ter|terrace|hwy|highway|n|s|e|w|ne|nw|se|sw)$/;
+  const street = (String(address || "").split(",")[0] || "").toLowerCase().replace(/^\s*\d+\s*/, "");
+  const tokens = street.split(/\s+/).filter((t) => t.length > 2 && !STREET_TYPES.test(t));
+  return tokens.some((t) => h.includes(t));
+}
+
 interface GBPGroundTruth {
   source: "knowledge_graph" | "local_results" | "place_results";
   name: string;
@@ -2192,6 +2210,11 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
     // can only UPGRADE a false negative — never invent presence. Runs once per
     // audit (citations is the last step); stops at the first sibling that confirms.
     const loc = extractLocation(property.address);
+    // Include the STREET ADDRESS in the probe query: directory listings (Zillow in
+    // particular) are indexed by address, not the property name, so a name-only
+    // probe misses them (the Henry Heights false "missing Zillow").
+    const street = (property.address || "").split(",")[0].trim();
+    const probeQuery = `${property.name} ${street}${city ? " " + city : ""}`.replace(/\s+/g, " ").trim();
     for (const net of CITATION_NETWORKS) {
       // Property is marked not-on-Apartments.com -> don't probe that network.
       if (property.noApartmentsListing && net.network === "Apartments.com (CoStar)") continue;
@@ -2202,7 +2225,7 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
       for (const site of net.sites) {
         let probe: { organic_results?: unknown } | undefined;
         try {
-          probe = await callSerp({ query: `${q} site:${site.domain}`, engine: "google", location: loc });
+          probe = await callSerp({ query: `${probeQuery} site:${site.domain}`, engine: "google", location: loc });
         } catch {
           continue; // best-effort per site
         }
@@ -2213,7 +2236,10 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
           const onDomain = h === site.domain || h.endsWith("." + site.domain);
           if (!onDomain) return false;
           const title = (o as { title?: string }).title || "";
-          return nameMatches(`${title} ${link}`, property.name);
+          const hay = `${title} ${link}`;
+          // Accept on a NAME match OR a street-ADDRESS match (Zillow-style pages are
+          // titled by address, not the property name) — only UPGRADES a false negative.
+          return nameMatches(hay, property.name) || addressMatchesResult(hay, property.address);
         }) as { link?: string } | undefined;
         if (hit) {
           const src = sources.find((s) => s.domain === site.domain);
@@ -2574,7 +2600,11 @@ function citationsPromptSummary(c: CitationResult | undefined): string {
   // gap — exclude them so the model never recommends claiming/listing there.
   const missing = rows.filter((r) => !r.present && !r.na).map((r) => r.network);
   const na = rows.filter((r) => r.na).map((r) => r.network);
-  return `LOCAL CITATIONS / DIRECTORY PRESENCE (directional read from ONE brand search — networks, not individual sibling sites):\n- Appears on: ${present.join(", ") || "none detected"}.\n- Not detected on: ${missing.join(", ") || "none"} (worth claiming for local-SEO trust + consistent name/address/phone; verify before asserting it's missing).${na.length ? `\n- Not applicable (do NOT recommend claiming/listing): ${na.join(", ")} — the property intentionally does not list there.` : ""}`;
+  // Apartments.com present but NOT actively advertising = a "dark" shell listing
+  // that CANNOT be edited/updated unless reactivated (a paid action). Recs must
+  // not tell the client to "update/add X to the Apartments.com listing".
+  const aptDark = rows.some((r) => /^Apartments\.com/i.test(r.network) && r.present && r.notAdvertising);
+  return `LOCAL CITATIONS / DIRECTORY PRESENCE (directional read from ONE brand search — networks, not individual sibling sites):\n- Appears on: ${present.join(", ") || "none detected"}.\n- Not detected on: ${missing.join(", ") || "none"} (verify before asserting it's missing — this read often misses address-keyed listings like Zillow).${na.length ? `\n- Not applicable (do NOT recommend claiming/listing): ${na.join(", ")} — the property intentionally does not list there.` : ""}${aptDark ? `\n- Apartments.com: a listing EXISTS but the property is NOT actively advertising (a dark shell). The listing CANNOT be edited/updated unless the paid listing is reactivated. Do NOT recommend "updating / adding X to the Apartments.com listing"; the only actionable step is to reactivate it (or confirm it is intentionally off).` : ""}`;
 }
 
 /** On-screen local-citations / directory presence panel (SEO tab). */
@@ -3581,12 +3611,13 @@ Recommendation rules (STRICT):
    - LONG-TAIL: niche query optimization with lower competition
 12. AI VISIBILITY: if the AI-assistant visibility above shows the property is NOT named (or ranks below the competitors listed), include at least ONE recommendation with priority "AI VISIBILITY" to fix that — cite what Claude surfaced instead, and give concrete steps (schema markup, FAQ/answer content, getting listed in local "best of" roundups, strengthening the Apartments.com + Google presence AI pulls from). If the property IS named prominently, you may skip this.
 13. TECHNICAL / ON-PAGE: if the technical section above flags missing meta descriptions, missing/duplicate H1s, no JSON-LD schema, or thin content, include at least ONE "FOUNDATIONAL" recommendation to fix the on-page basics — name the specific pages from the crawl and the exact fix (e.g. 'write a 150-char meta description for /floor-plans and add a single H1'). Skip only if the crawl found no technical issues.
-14. LOCAL CITATIONS: if the citation section shows the property is NOT detected on a whole directory NETWORK (e.g. the Zillow network, the RentPath network, or standalone Facebook), you MAY include ONE "FOUNDATIONAL" recommendation to claim/build a listing there with consistent name/address/phone — name the specific missing network(s). Frame it as "verify then claim" (the read is directional, from one search), and skip entirely if the major networks already appear.
+14. LOCAL CITATIONS: the directory-presence read is a SINGLE directional search and OFTEN MISSES listings that actually exist (especially address-keyed ones like Zillow). So NEVER assert a listing is "missing", and never tell the client to "create" one outright. At most, include ONE "FOUNDATIONAL" rec framed strictly as VERIFY-THEN-CLAIM: "Confirm whether ${currentProperty.name} has a listing on <network>; if it does not, claim one with consistent name/address/phone." Name only networks the citation section marks not-detected, and skip entirely if the major networks already appear.
 15. PAGE SPEED: if the mobile score needs work, include ONE recommendation to improve it — cite the EXACT numbers from the PAGE SPEED section above (use the real-user FIELD LCP when field data is present, since that is what the report table shows; label a lab figure a "lab test"). Never cite an LCP/score that isn't in that section, and never cite a lab number as if it were the real one. Skip if mobile is strong (90+ / field FAST).
 16. NEVER CONTRADICT THE DATA ABOVE. Every claim about rank, reviews, rating, or floorplans must match the GROUND TRUTH and the rank table verbatim. Do NOT describe a query as having Map Pack "traction" when the table shows the property NOT in the top 20, and do NOT call a query a "page 1 opportunity" when the table already shows it ranking on page 1 (say it already ranks #N and aim to improve/hold it). If the property already ranks well for something, say so — don't invent a gap.
 17. OUTDATED — NO FAQ RICH RESULTS: Do NOT recommend FAQ schema to earn "Google FAQ rich results / rich snippets" — Google discontinued FAQ rich results in 2026. FAQ / answer CONTENT is still useful for AI-assistant visibility and on-page depth; frame it ONLY that way, never as earning a Google rich result.
 18. NO FABRICATED PREDICTIONS: "success" must be a realistic, measurable target ("reach page 1 organic for <query> within 90 days", "add N Google reviews") — never an invented precise outcome you cannot support ("will rank #3", "+0.3 stars", "named by every AI assistant"). Attribute a ranking gap only to a concrete observed cause (the rank data, a tag the crawl confirmed missing), never speculation.
-19. The crawl read only a SAMPLE of pages. Do NOT state the site "has only N pages" or "is just N pages" — the total is unknown. Flag a missing page only as "if the site has no X page, add one".${setAsidePromptNote(currentProperty)}`;
+19. The crawl read only a SAMPLE of pages. Do NOT state the site "has only N pages" or "is just N pages" — the total is unknown. Flag a missing page only as "if the site has no X page, add one".
+20. APARTMENTS.COM — LISTING PRESENCE ≠ ADVERTISING: if the citation section says Apartments.com is a dark shell (listed but NOT actively advertising), the listing CANNOT be edited. Do NOT recommend "updating / adding pricing / photos / the special to the Apartments.com listing" — that is impossible without reactivating. The only valid Apartments.com rec there is to reactivate the paid listing (or confirm it is intentionally off). Never recommend creating a brand-new Apartments.com listing when one already exists.${setAsidePromptNote(currentProperty)}`;
 
       // Recommendations are non-fatal: if this call blips (e.g. a transient
       // 502 from the host), still save the ranks + comp-set instead of failing
@@ -6109,17 +6140,20 @@ function PhoneInventoryPanel({
     const green = { color: "#15803d", fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
     const amber = { color: "#9a7200", fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
     const red = { color: B.tangelo, fontWeight: 700, fontSize: 11.5 } as React.CSSProperties;
-    if (s === "failed") return <span style={red}>✗ No connection (dead / invalid)</span>;
+    // Labels are HEDGED: Twilio's answering-machine detection is probabilistic and
+    // cannot reliably tell voicemail from an auto-attendant/IVR, or a failed route
+    // from a dead number. Verify any flagged line with a manual call.
+    if (s === "failed") return <span style={red}>✗ Didn&apos;t connect (dead number or routing issue)</span>;
     if (s === "unknown") return <span style={amber}>? Inconclusive</span>;
     if (s === "connected") {
-      if (n.answeredBy === "human") return <span style={green}>✓ Answered by a person{secs != null ? ` (${secs}s to answer)` : ""}</span>;
-      if (n.answeredBy === "voicemail") return <span style={amber}>⚠ Went to voicemail{secs != null ? ` (${secs}s)` : ""}</span>;
-      if (n.answeredBy === "fax") return <span style={amber}>⚠ Fax line</span>;
+      if (n.answeredBy === "human") return <span style={green}>✓ Answered — sounded like a live person{secs != null ? ` (${secs}s)` : ""}</span>;
+      if (n.answeredBy === "voicemail") return <span style={amber}>⚠ Likely voicemail or an automated system{secs != null ? ` (${secs}s)` : ""}</span>;
+      if (n.answeredBy === "fax") return <span style={amber}>⚠ Likely a fax line</span>;
       // No answering-machine verdict — say plainly what the line did.
       if (n.dialNote === "no-answer") return <span style={amber}>◦ Rang{secs != null ? ` ~${secs}s` : ""}, no answer</span>;
       if (n.dialNote === "busy") return <span style={amber}>◦ Line busy</span>;
       // Answered, but detection couldn't tell a person from voicemail/IVR.
-      return <span style={amber}>◦ Answered — couldn&apos;t tell person vs voicemail</span>;
+      return <span style={amber}>◦ Answered — couldn&apos;t tell live vs automated</span>;
     }
     return <span style={{ color: "#c3c9cf", fontSize: 11 }}>not tested</span>;
   };
@@ -6128,7 +6162,7 @@ function PhoneInventoryPanel({
     <>
       <div style={sectionTitle}>Phone / Tracking Numbers</div>
       <p style={{ ...para, marginBottom: 10 }}>
-        Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.
+        Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property. How the call was answered (live person vs. voicemail or an automated system) is detected automatically and is approximate &mdash; spot-check any flagged line with a manual call.
       </p>
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 10 }}>
         <tbody>
@@ -8232,7 +8266,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                   Phone / Tracking Numbers
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.
+                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property. How a call was answered (live person vs. voicemail/automated) is detected automatically and is approximate &mdash; spot-check any flagged line.
                 </p>
                 <table>
                   <tbody>
@@ -8246,15 +8280,15 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                             const secs = typeof n.ringSeconds === "number" ? n.ringSeconds : null;
                             let label = "—";
                             let color = "#9a7200";
-                            if (n.dialStatus === "failed") { label = "No connection"; color = "#b14a2a"; }
+                            if (n.dialStatus === "failed") { label = "Didn't connect (dead number or routing)"; color = "#b14a2a"; }
                             else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#9a7200"; }
                             else if (n.dialStatus === "connected") {
-                              if (n.answeredBy === "human") { label = `Answered by a person${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
-                              else if (n.answeredBy === "voicemail") { label = `Went to voicemail${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
-                              else if (n.answeredBy === "fax") { label = "Fax line"; color = "#9a7200"; }
+                              if (n.answeredBy === "human") { label = `Answered — sounded live${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
+                              else if (n.answeredBy === "voicemail") { label = `Likely voicemail or automated${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
+                              else if (n.answeredBy === "fax") { label = "Likely a fax line"; color = "#9a7200"; }
                               else if (n.dialNote === "no-answer") { label = `Rang${secs != null ? ` ~${secs}s` : ""}, no answer`; color = "#9a7200"; }
                               else if (n.dialNote === "busy") { label = "Line busy"; color = "#9a7200"; }
-                              else { label = "Answered (person vs voicemail unclear)"; color = "#9a7200"; }
+                              else { label = "Answered — live vs automated unclear"; color = "#9a7200"; }
                             }
                             return (
                               <td style={{ ...findingsTd, textAlign: "center", width: 150, fontWeight: 700, color }}>{label}</td>
