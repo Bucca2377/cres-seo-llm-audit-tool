@@ -7869,7 +7869,21 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
 
   const now = new Date();
   const monthYear = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const auditDateBase = llmTs ? new Date(llmTs) : seo ? new Date(seo.timestamp) : now;
+  // Audit Date = the MOST RECENT audit actually included in THIS report, not the
+  // first-available timestamp. Preferring llmTs made the cover read a stale AI-rank
+  // date (June) even after the Marketing + SEO audits were re-run today. Scope the
+  // candidates to the report mode so an SEO-only print doesn't date off a marketing run.
+  const auditTimes = (
+    mode === "seo"
+      ? [seo?.timestamp, llmTs]
+      : mode === "marketing"
+      ? [mkt?.timestamp]
+      : [mkt?.timestamp, seo?.timestamp, llmTs]
+  )
+    .filter((t): t is string => !!t)
+    .map((t) => new Date(t).getTime())
+    .filter((n) => !Number.isNaN(n));
+  const auditDateBase = auditTimes.length ? new Date(Math.max(...auditTimes)) : now;
   const auditDate = auditDateBase.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
