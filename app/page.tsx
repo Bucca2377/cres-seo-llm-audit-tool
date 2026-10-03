@@ -2806,7 +2806,7 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
         })}
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
-        Google PageSpeed Insights · measured {new Date(ps.checkedAt).toLocaleString()} (cached between audits — it re-measures about every 2 weeks, or after &ldquo;Reset SEO history&rdquo;, since a synthetic lab score swings run-to-run). 90+ is good, 50–89 needs work, under 50 is poor. Mobile is what Google ranks on. The &ldquo;Real users&rdquo; line (when shown) is Google&rsquo;s 28-day field data and is the accurate benchmark.
+        Google PageSpeed Insights · measured {new Date(ps.checkedAt).toLocaleString()}. The big verdict uses Google&rsquo;s <strong>28-day real-user field data</strong> when the site has enough traffic for it (stable — it barely moves between audits and is the accurate benchmark). A lower-traffic site with no field data falls back to a <strong>synthetic lab score</strong> (90+ good, 50–89 needs work, under 50 poor) that swings run-to-run, so we cache it ~2 weeks and only re-pull it when it&rsquo;s missing or after &ldquo;Reset SEO history&rdquo;. Mobile is what Google ranks on.
       </p>
     </div>
   );
@@ -8792,7 +8792,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                   </tbody>
                 </table>
                 <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 4 }}>
-                  Shows Google&apos;s 28-day real-user field data where available (the accurate benchmark); otherwise a synthetic lab test. &ldquo;Good&rdquo; / 90+ is strong, &ldquo;Needs work&rdquo; / 50–89 is middling, &ldquo;Poor&rdquo; / under 50 is weak. Mobile is Google&apos;s ranking signal.
+                  The verdict uses Google&apos;s 28-day real-user field data where available (stable &mdash; the accurate benchmark); a lower-traffic site with no field data falls back to a synthetic lab score (90+ strong, 50&ndash;89 middling, under 50 weak) that varies between measurements. Mobile is Google&apos;s ranking signal.
                 </p>
               </div>
             )}
