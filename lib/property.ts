@@ -493,6 +493,12 @@ export interface PhoneInventory {
    * whether the dial-test landed during or outside office hours.
    */
   officeHours?: Record<string, string>;
+  /**
+   * How many distinct WEBSITE numbers were found before capping the row. A
+   * call-tracking / dynamic-number-insertion site exposes many; we show a few
+   * representative ones. When this exceeds the shown count, the panel notes it.
+   */
+  websiteTrackingFound?: number;
 }
 
 export interface MarketingAuditResult {

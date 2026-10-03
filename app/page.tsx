@@ -5780,8 +5780,23 @@ Return ONLY this JSON object, no prose before or after:
         phoneEntries.length = 0;
         phoneEntries.push(...pruned);
       }
+      // CAP the Website row: a call-tracking / dynamic-number-insertion site (common
+      // on RealPage/Funnel) exposes MANY tracking numbers — often a different one per
+      // page/visit, none matching the Google listing — so the prune above can't
+      // collapse them and the report becomes a wall of ephemeral numbers. Keep a few
+      // representative ones (each is still dial-tested; they all forward to the
+      // property) and record how many were found so the panel can note it.
+      const MAX_WEBSITE_NUMBERS = 3;
+      const webAfter = phoneEntries.filter((e) => e.source === "Website");
+      const websiteFound = webAfter.length;
+      if (webAfter.length > MAX_WEBSITE_NUMBERS) {
+        const keepWeb = webAfter.slice(0, MAX_WEBSITE_NUMBERS);
+        const rest = phoneEntries.filter((e) => e.source !== "Website");
+        phoneEntries.length = 0;
+        phoneEntries.push(...keepWeb, ...rest);
+      }
       let phones: PhoneInventory | undefined = phoneEntries.length
-        ? { numbers: phoneEntries, collectedAt: new Date().toISOString(), officeHours }
+        ? { numbers: phoneEntries, collectedAt: new Date().toISOString(), officeHours, websiteTrackingFound: websiteFound }
         : undefined;
 
       // Dial-test the numbers as part of the audit (best-effort). If Twilio is
@@ -6166,9 +6181,16 @@ function PhoneInventoryPanel({
   return (
     <>
       <div style={sectionTitle}>Phone / Tracking Numbers</div>
-      <p style={{ ...para, marginBottom: 10 }}>
-        Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property. How the call was answered (live person vs. voicemail or an automated system) is detected automatically and is approximate &mdash; spot-check any flagged line with a manual call.
-      </p>
+      {(() => {
+        const shownWeb = phones.numbers.filter((n) => n.source === "Website").length;
+        const found = phones.websiteTrackingFound ?? shownWeb;
+        const capped = found > shownWeb;
+        return (
+          <p style={{ ...para, marginBottom: 10 }}>
+            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.{capped ? ` This site uses call-tracking that rotates ${found} different website numbers; we show ${shownWeb} representative ones — each forwards to the property.` : ""} How the call was answered (live person vs. voicemail or an automated system) is detected automatically and is approximate &mdash; spot-check any flagged line with a manual call.
+          </p>
+        );
+      })()}
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 10 }}>
         <tbody>
           {(["Website", "Google", "Apartments.com"] as const).flatMap((src) => {
@@ -8271,7 +8293,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                   Phone / Tracking Numbers
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property. How a call was answered (live person vs. voicemail/automated) is detected automatically and is approximate &mdash; spot-check any flagged line.
+                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.{(() => { const shownWeb = mkt.phones!.numbers.filter((n) => n.source === "Website").length; const found = mkt.phones!.websiteTrackingFound ?? shownWeb; return found > shownWeb ? ` This site uses call-tracking that rotates ${found} website numbers; we show ${shownWeb} representative ones.` : ""; })()} How a call was answered (live person vs. voicemail/automated) is detected automatically and is approximate &mdash; spot-check any flagged line.
                 </p>
                 <table>
                   <tbody>
