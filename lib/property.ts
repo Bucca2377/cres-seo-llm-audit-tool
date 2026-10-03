@@ -122,6 +122,12 @@ export interface PageSpeedStrategyResult {
   field?: PageSpeedField | null; // CrUX real-user data — stable; null when the site has no CrUX data
   samples?: number; // how many lab runs the reported score is the median of
   scoreRange?: { min: number; max: number } | null; // spread across those samples (run-to-run noise)
+  /**
+   * Lighthouse "opportunities" — concrete, actionable fixes with estimated time
+   * savings (e.g. "Properly size images"). Stable and useful, so when a site has
+   * no real-user field data we show THESE instead of a bouncing composite score.
+   */
+  opportunities?: { title: string; savingsMs: number | null }[];
   error?: string;
 }
 

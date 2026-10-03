@@ -28,15 +28,22 @@ type CruxExperience = {
   overall_category?: string;
   metrics?: Record<string, { percentile?: number; category?: string }>;
 };
+type PsiAudit = {
+  title?: string;
+  displayValue?: string;
+  score?: number | null;
+  details?: { type?: string; overallSavingsMs?: number };
+};
 type PsiRaw = {
   error?: { message?: string };
   lighthouseResult?: {
     categories?: { performance?: { score?: number } };
-    audits?: Record<string, { displayValue?: string }>;
+    audits?: Record<string, PsiAudit>;
   };
   loadingExperience?: CruxExperience;
   originLoadingExperience?: CruxExperience;
 };
+type PsiOpportunity = { title: string; savingsMs: number | null };
 type PsiSample = {
   score: number;
   lcp: string;
@@ -52,6 +59,7 @@ type PsiSample = {
     inp: string;
     fcp: string;
   } | null;
+  opportunities: PsiOpportunity[];
 };
 
 // A single Lighthouse lab run is synthetic and noisy (network jitter, CPU
@@ -95,6 +103,22 @@ function runOnce(url: string, strategy: string, key: string): Promise<PsiSample 
             };
           })()
         : null;
+      // Lighthouse "opportunities" — concrete, actionable fixes with estimated
+      // savings (oversized images, render-blocking scripts, no compression/caching).
+      // Far more stable + useful than the composite lab score for a site with no
+      // real-user field data. Keep the ones worth >150ms, biggest savings first.
+      const OPP_MIN_MS = 150;
+      const opportunities: PsiOpportunity[] = Object.values(audits)
+        .filter(
+          (a) =>
+            a?.details?.type === "opportunity" &&
+            typeof a.details.overallSavingsMs === "number" &&
+            a.details.overallSavingsMs >= OPP_MIN_MS &&
+            !!a.title
+        )
+        .map((a) => ({ title: a.title as string, savingsMs: Math.round(a.details!.overallSavingsMs as number) }))
+        .sort((x, y) => (y.savingsMs ?? 0) - (x.savingsMs ?? 0))
+        .slice(0, 5);
       return {
         score: Math.round(rawScore * 100),
         lcp: dv("largest-contentful-paint"),
@@ -103,6 +127,7 @@ function runOnce(url: string, strategy: string, key: string): Promise<PsiSample 
         tbt: dv("total-blocking-time"),
         speedIndex: dv("speed-index"),
         field,
+        opportunities,
       };
     })
     .catch(() => null);
@@ -150,6 +175,7 @@ export async function POST(req: NextRequest) {
     tbt: median.tbt,
     speedIndex: median.speedIndex,
     field,
+    opportunities: median.opportunities,
     samples: results.length,
     scoreRange: scores.length > 1 ? { min: scores[0], max: scores[scores.length - 1] } : null,
   });

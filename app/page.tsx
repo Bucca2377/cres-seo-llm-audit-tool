@@ -2065,7 +2065,10 @@ function pageSpeedPromptSummary(ps: PageSpeedResult | undefined): string {
     const field = s.field
       ? `; REAL-USER FIELD DATA (28-day, the ACCURATE benchmark that the report table shows): LCP ${s.field.lcp}, CLS ${s.field.cls}, INP ${s.field.inp}, overall ${s.field.category}`
       : "; no real-user field data for this site";
-    return `${s.strategy} — ${lab}${field}`;
+    const opps = s.opportunities && s.opportunities.length
+      ? `; top fixes: ${s.opportunities.slice(0, 4).map((o) => o.title).join(", ")}`
+      : "";
+    return `${s.strategy} — ${lab}${field}${opps}`;
   });
   return (
     `PAGE SPEED / CORE WEB VITALS (Google PageSpeed Insights): ${parts.join(" | ")}. ` +
@@ -2682,11 +2685,6 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
 }
 
 /** Color a Lighthouse performance score (Google's thresholds). */
-function pageSpeedColor(s: number | null): string {
-  if (s == null) return "#9aa3ad";
-  return s >= 90 ? "#15803d" : s >= 50 ? "#9a7200" : B.tangelo;
-}
-
 /**
  * CrUX field verdict → {label, color}. This is the REAL-USER result, so it's what
  * we headline when present. PSI reports overall_category as FAST/AVERAGE/SLOW (older)
@@ -2698,6 +2696,22 @@ function fieldVerdict(category: string): { label: string; color: string } {
   if (c === "SLOW" || c === "POOR") return { label: "Poor", color: B.tangelo };
   if (c === "AVERAGE" || c === "NEEDS_IMPROVEMENT") return { label: "Needs work", color: "#9a7200" };
   return { label: "Measured", color: "#555" };
+}
+
+/** Lab-score → plain band (no real-user data case). A band flips far less than the
+ *  raw 0-100 number, and we pair it with the concrete fixes, so the section reads
+ *  as "what to improve" instead of a figure that bounces run-to-run. */
+function labBand(score: number | null): { label: string; color: string } {
+  if (score == null) return { label: "—", color: "#9aa3ad" };
+  if (score >= 90) return { label: "Good", color: "#15803d" };
+  if (score >= 50) return { label: "Needs work", color: "#9a7200" };
+  return { label: "Poor", color: B.tangelo };
+}
+
+/** Compact "~1.2 s" / "~450 ms" for an opportunity's estimated savings. */
+function fmtSavings(ms: number | null): string {
+  if (ms == null) return "";
+  return ms >= 1000 ? `~${(ms / 1000).toFixed(1)}s` : `~${Math.round(ms)}ms`;
 }
 
 /** On-screen PageSpeed / Core Web Vitals panel (SEO tab). */
@@ -2748,9 +2762,15 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
                   </span>
                 </span>
               ) : (
-                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 30, lineHeight: 1, color: pageSpeedColor(s.score) }}>
-                  {s.score == null ? "—" : s.score}
-                  {s.score != null && <span style={{ fontSize: 13, color: "#aaa" }}> /100</span>}
+                // No real-user data: headline a BAND (stable), not the bouncing
+                // 0-100 number — the actual fixes are listed below.
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 26, lineHeight: 1, color: labBand(s.score).color }}>
+                    {labBand(s.score).label}
+                  </span>
+                  <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10, color: "#9aa3ad", marginTop: 2 }}>
+                    lab estimate · no real-user data yet
+                  </span>
                 </span>
               )}
             </div>
@@ -2796,6 +2816,22 @@ function PageSpeedPanel({ ps }: { ps: PageSpeedResult | undefined }) {
                       <span key={k} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#555" }}>
                         <strong style={{ color: "#333" }}>{k}</strong> {v}
                       </span>
+                    ))}
+                  </div>
+                )}
+                {/* What to fix — concrete, actionable Lighthouse opportunities. For a
+                    site with no real-user data these are the stable, useful signal
+                    (vs. the bouncing composite score). */}
+                {!s.field && s.opportunities && s.opportunities.length > 0 && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #f0f0f0" }}>
+                    <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 10.5, color: "#9a7200", fontWeight: 600, marginBottom: 3 }}>
+                      What to fix (biggest wins first)
+                    </div>
+                    {s.opportunities.map((o, oi) => (
+                      <div key={oi} style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, color: "#444", lineHeight: 1.5 }}>
+                        • {o.title}
+                        {o.savingsMs != null ? <span style={{ color: "#9aa3ad" }}> ({fmtSavings(o.savingsMs)})</span> : null}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -8776,12 +8812,12 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                         present; fall back to the synthetic lab only when there's none. This
                         keeps a throttled 22s lab LCP off a client report when real users see 2s. */}
                     {seo.pageSpeed.strategies.map((s, i) => {
-                      const v = s.field ? fieldVerdict(s.field.category) : null;
+                      const v = s.field ? fieldVerdict(s.field.category) : labBand(s.score);
                       return (
                         <tr key={i} className="pb-avoid">
-                          <td style={{ ...findingsTd, textTransform: "capitalize" }}>{s.strategy}</td>
-                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: v ? v.color : s.score == null ? "#888" : s.score >= 90 ? "#15803d" : s.score >= 50 ? "#9a7200" : "#b14a2a" }}>
-                            {v ? v.label : s.score == null ? "—" : `${s.score}/100`}
+                          <td style={{ ...findingsTd, textTransform: "capitalize" }}>{s.strategy}{s.field ? "" : <span style={{ color: "#9aa3ad", fontWeight: 400 }}> (lab estimate)</span>}</td>
+                          <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: v.color }}>
+                            {v.label}
                           </td>
                           <td style={{ ...findingsTd, textAlign: "center" }}>{s.field ? s.field.lcp : s.lcp}</td>
                           <td style={{ ...findingsTd, textAlign: "center" }}>{s.field ? s.field.cls : s.cls}</td>
@@ -8791,8 +8827,27 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     })}
                   </tbody>
                 </table>
-                <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 4 }}>
-                  The verdict uses Google&apos;s 28-day real-user field data where available (stable &mdash; the accurate benchmark); a lower-traffic site with no field data falls back to a synthetic lab score (90+ strong, 50&ndash;89 middling, under 50 weak) that varies between measurements. Mobile is Google&apos;s ranking signal.
+                {(() => {
+                  // No real-user data -> show the concrete fixes (stable + actionable)
+                  // instead of leaning on the bouncing composite lab score.
+                  const oppStrat = seo.pageSpeed!.strategies.find((s) => !s.field && s.opportunities && s.opportunities.length > 0);
+                  if (!oppStrat) return null;
+                  return (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9a6a2a", marginBottom: 3 }}>
+                        What to fix (biggest wins first)
+                      </div>
+                      {oppStrat.opportunities!.map((o, oi) => (
+                        <div key={oi} style={{ ...bodyP, fontSize: 10.5, color: "#444", margin: 0 }}>
+                          • {o.title}
+                          {o.savingsMs != null ? <span style={{ color: "#888" }}> ({fmtSavings(o.savingsMs)})</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <p style={{ ...bodyP, fontSize: 10, color: "#888", marginTop: 6 }}>
+                  The verdict uses Google&apos;s 28-day real-user field data where available (stable &mdash; the accurate benchmark). A lower-traffic site with no field data shows a synthetic lab estimate (a band, since the exact score varies between runs) plus the concrete fixes above. Mobile is Google&apos;s ranking signal.
                 </p>
               </div>
             )}
