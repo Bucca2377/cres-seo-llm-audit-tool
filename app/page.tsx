@@ -1027,6 +1027,48 @@ function buildGbpSearchQuery(property: Property): string {
 }
 
 /**
+ * Find the property's Google listing, falling back to more specific queries when
+ * the default one resolves to the wrong place. The default "{name} apartments
+ * {city}" can resolve to the CITY itself when the name is a street and the city
+ * is a small suburb: "Gulf Drive apartments Vinita Park" returned the town of
+ * Vinita Park, so the review audit got no listing and no reviews. Adding the
+ * state + ZIP pins it ("… Vinita Park MO 63130" → Gulf Drive Townhomes).
+ *
+ * Only a response whose listing passes extractGBP is accepted; extra searches
+ * run only when the default misses (at most 2). Callers must read place_results
+ * only when gbp matched, never from a rejected response.
+ */
+async function resolveGbpSerp(
+  property: Property,
+  opts: { location?: string } = {}
+): Promise<{ data: any; gbp: GBPGroundTruth | null }> {
+  const base = buildGbpSearchQuery(property);
+  const city = extractCity(property.address);
+  const state = parseStateCode(property.address);
+  const zip = zipOf(property.address);
+  const stem = city && base.endsWith(city) ? base.slice(0, -city.length).trim() : base;
+  const candidates = [
+    base,
+    [stem, city, state, zip].filter(Boolean).join(" "),
+    zip ? `${stem} ${zip}` : "",
+  ].filter((q, i, a) => q && a.indexOf(q) === i);
+
+  let first: { data: any; gbp: GBPGroundTruth | null } | null = null;
+  for (const query of candidates) {
+    try {
+      const data = await callSerp({ query, engine: "google_maps", ...(opts.location ? { location: opts.location } : {}) });
+      const gbp = extractGBP(data, property);
+      if (gbp) return { data, gbp };
+      if (!first) first = { data, gbp: null };
+    } catch (e) {
+      // Quota/network errors on the default query should surface as before.
+      if (!first) throw e;
+    }
+  }
+  return first || { data: null, gbp: null };
+}
+
+/**
  * Run a single-shot SerpAPI search for a property, extract GBP, and return
  * the recommended enrichment patch (website + gbpUrl). Used by the batch
  * enrichment flow. Returns null on failure or if no GBP found.
@@ -1036,16 +1078,10 @@ async function enrichPropertyFromSerp(
   overwrite?: boolean
 ): Promise<{ patch: Partial<Pick<Property, "website" | "gbpUrl" | "apartmentsUrl">>; gbp: GBPGroundTruth | null } | null> {
   try {
-    const query = buildGbpSearchQuery(property);
     // google_maps engine — see the audit pre-flight note: it returns the
     // real listing data (rating, review count, data_id) that the default
     // google engine's knowledge_graph omits for apartment communities.
-    const data = await callSerp({
-      query,
-      engine: "google_maps",
-      location: extractLocation(property.address),
-    });
-    const gbp = extractGBP(data, property);
+    const { gbp } = await resolveGbpSerp(property, { location: extractLocation(property.address) });
 
     // Apartments.com listing URL — a separate google (organic) search, since
     // the google_maps engine returns places, not organic ILS links. Only run
@@ -1150,6 +1186,7 @@ function diagnose(
  *
  * Returns true if:
  *   - Same leading street number (very strong signal), OR
+ *   - Same 5-digit ZIP, OR
  *   - Same parsed "City, ST" location, OR
  *   - Same city alone (fallback for SerpAPI results that omit state)
  *
@@ -1174,11 +1211,23 @@ function parseStateCode(address: string): string {
   return tok ? tok.toUpperCase() : "";
 }
 
+/** 5-digit ZIP that follows the state code ("…, MO 63130[-1234][, USA]"). */
+function zipOf(address: string): string {
+  return (String(address || "").match(/\b[A-Za-z]{2}\s+(\d{5})(?:-\d{4})?\b/) || [])[1] || "";
+}
+
 function addressShallowMatch(propertyAddress: string, candidateAddress: string): boolean {
   if (!candidateAddress) return true; // can't verify, don't reject
   const propStreetNum = (propertyAddress.match(/\b(\d{2,6})\b/) || [])[1];
   const candStreetNum = (candidateAddress.match(/\b(\d{2,6})\b/) || [])[1];
   if (propStreetNum && candStreetNum && propStreetNum === candStreetNum) return true;
+
+  // Same 5-digit ZIP. Google often files a suburban property under the metro
+  // mailing city (Gulf Drive: "Vinita Park" on our record, "St. Louis" on Google)
+  // and a different house number on the same block, so city + number both miss.
+  const propZip = zipOf(propertyAddress);
+  const candZip = zipOf(candidateAddress);
+  if (propZip && candZip && propZip === candZip) return true;
 
   const propLoc = extractLocation(propertyAddress).toLowerCase();
   const candLoc = extractLocation(candidateAddress).toLowerCase();
@@ -3046,13 +3095,11 @@ function SEOAudit({
       let googleReviewCount: number | null = null;
       let googleCity = "";
       try {
-        const gbpSerp = await callSerp({
-          query: buildGbpSearchQuery(currentProperty),
-          engine: "google_maps",
+        const { data: gbpSerp, gbp: gbpInfo } = await resolveGbpSerp(currentProperty, {
           location: extractLocation(currentProperty.address),
         });
-        const gbpInfo = extractGBP(gbpSerp, currentProperty);
-        const gbpPlace = gbpSerp?.place_results as { gps_coordinates?: { latitude?: number; longitude?: number }; rating?: number; reviews?: number; address?: string } | undefined;
+        // Only the matched listing's coordinates/rating — never a rejected place.
+        const gbpPlace = (gbpInfo?.source === "place_results" ? gbpSerp?.place_results : undefined) as { gps_coordinates?: { latitude?: number; longitude?: number }; rating?: number; reviews?: number; address?: string } | undefined;
         const gps = gbpPlace?.gps_coordinates;
         if (gps && typeof gps.latitude === "number" && typeof gps.longitude === "number") {
           origin = { lat: gps.latitude, lng: gps.longitude };
@@ -4787,19 +4834,17 @@ function MarketingAuditTab({
       // hours. Gates the "No office hours on Google" red below.
       let googlePlaceResolved = false;
       try {
-        const serpData = await callSerp({
-          // No `location` param: with it, SerpAPI's google_maps throws a "Missing
-          // z/m" error (forcing a no-location retry) and on some location strings
-          // returns a LIST instead of a single place — which drops hours/photos and
-          // made the audit falsely flag "no office hours on Google" when Google
-          // clearly has them. The query already carries the city and extractGBP
-          // matches by website domain, so a clean single-call place lookup is more
-          // reliable (returns place_results with hours) and one search cheaper.
-          query: buildGbpSearchQuery(current),
-          engine: "google_maps",
-        });
-        const gbp = extractGBP(serpData, current);
-        const place = serpData?.place_results;
+        // No `location` param: with it, SerpAPI's google_maps throws a "Missing
+        // z/m" error (forcing a no-location retry) and on some location strings
+        // returns a LIST instead of a single place — which drops hours/photos and
+        // made the audit falsely flag "no office hours on Google" when Google
+        // clearly has them. The query already carries the city and extractGBP
+        // matches by website domain, so a clean single-call place lookup is more
+        // reliable (returns place_results with hours) and one search cheaper.
+        const { data: serpData, gbp } = await resolveGbpSerp(current);
+        // Read place_results only when it IS the matched listing — a rejected
+        // response can be a different place entirely (e.g. the city itself).
+        const place = gbp?.source === "place_results" ? serpData?.place_results : undefined;
         googlePlaceResolved = !!place;
         googlePhone = (place?.phone || "").toString();
         // GBP hours (day -> "9 AM–5 PM"), used to auto-flag whether the dial
@@ -6568,21 +6613,18 @@ function ReviewAuditTab({
     try {
       // 1. Google listing → rating, total reviews, data_id.
       setProgress("Finding the Google listing…");
-      const serpData = await callSerp({
-        query: buildGbpSearchQuery(current),
-        engine: "google_maps",
-        location: extractLocation(current.address),
-      });
-      const gbp = extractGBP(serpData, current);
-      const place = serpData?.place_results;
-      const dataId = gbp?.dataId || place?.data_id || "";
-      const currentRating = gbp?.rating ?? (typeof place?.rating === "number" ? place.rating : null);
+      // Only trust a listing that matched the property. Falling back to a raw
+      // place_results here once pulled reviews from the wrong place (Gulf Drive
+      // resolved to the town of Vinita Park → no rating, zero reviews).
+      const { gbp } = await resolveGbpSerp(current, { location: extractLocation(current.address) });
+      const dataId = gbp?.dataId || "";
+      const currentRating = gbp?.rating ?? null;
       // COST GATE: a property already rated ABOVE 4.25 does not need PAID review
       // incentives — recommending the daily $25 / monthly $150-$250 programs there
       // just wastes money. Suppress those recs (and the "$25 incentive" sentiment
       // note) in the prompt AND deterministically filter any the model emits anyway.
       const suppressIncentives = currentRating != null && currentRating > 4.25;
-      const totalReviews = gbp?.reviewCount ?? (typeof place?.reviews === "number" ? place.reviews : null);
+      const totalReviews = gbp?.reviewCount ?? null;
       if (!dataId) {
         throw new Error("Couldn't find this property's Google listing. Set the Google Business Profile URL in Property Settings, then retry.");
       }
