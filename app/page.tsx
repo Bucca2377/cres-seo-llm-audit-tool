@@ -4487,7 +4487,7 @@ Recommendation rules (STRICT):
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: B.caribbean }}>✦</span>
               <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: B.caribbean }}>
-                Recommendations (ranked by ROI)
+                CRES Recommendations
               </span>
             </div>
             <RecommendationsBlock
@@ -6447,7 +6447,7 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
           a cell marked "Good" drops the auto-generated one. */}
       {isStructuredRecs(results.recommendations) && (
         <>
-          <div style={sectionTitle}>Recommendations</div>
+          <div style={sectionTitle}>CRES Recommendations</div>
           <RecommendationsBlock
             recs={effectiveMarketingRecommendations(results.recommendations, results.consistency, displayOverrides)}
             setAsideList={property.setAsideRecs}
@@ -8955,7 +8955,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
             legacy text lines are the fallback for older persisted audits. */}
         {(printBands.length > 0 || allRecs.length > 0) && (
           <section className="pb-before">
-            <PrintSectionHeader>Recommendations</PrintSectionHeader>
+            <PrintSectionHeader>CRES Recommendations</PrintSectionHeader>
 
             {/* Preferred path: structured cards grouped by priority band */}
             {printBands.length > 0 && printBands.map((band, i) => (
