@@ -390,3 +390,110 @@ export function recInventsFloorplan(text: string, offered: Set<string>): boolean
   for (const c of found) if (!offered.has(c)) return true;
   return false;
 }
+
+const MONTHS: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+/**
+ * True when a concession's stated deadline ("move in by September 25th",
+ * "m/i by 9/25", "apply by Sept. 25") is already in the past, i.e. the text is
+ * STALE. Farmhouse's audit reported "m/i by September 25th" weeks after the
+ * listing changed to a November offer: the web_fetch read served an old copy.
+ * A date with no year is read as this year, unless that is more than ~6 months
+ * ago, in which case it means next year ("by January 15" read in November).
+ * No recognizable deadline -> false (can't tell, keep the text).
+ */
+export function concessionDeadlinePassed(text: string, now: Date = new Date()): boolean {
+  const t = (text || "").toLowerCase();
+  let month = -1;
+  let day = -1;
+  let year: number | null = null;
+  const named = t.match(/\bby\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?/);
+  const numeric = t.match(/\bby\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (named) {
+    month = MONTHS[named[1]];
+    day = parseInt(named[2], 10);
+    if (named[3]) year = parseInt(named[3], 10);
+  } else if (numeric) {
+    month = parseInt(numeric[1], 10) - 1;
+    day = parseInt(numeric[2], 10);
+    if (numeric[3]) year = parseInt(numeric[3].length === 2 ? "20" + numeric[3] : numeric[3], 10);
+  }
+  if (month < 0 || month > 11 || day < 1 || day > 31) return false;
+  const endOfDay = (y: number) => new Date(y, month, day, 23, 59, 59);
+  if (year != null) return endOfDay(year).getTime() < now.getTime();
+  const thisYear = endOfDay(now.getFullYear());
+  if (thisYear.getTime() >= now.getTime()) return false;
+  const SIX_MONTHS_MS = 183 * 24 * 3600 * 1000;
+  return now.getTime() - thisYear.getTime() <= SIX_MONTHS_MS;
+}
+
+/**
+ * Apartments.com media counts ("36 Photos", "6 Virtual Tours", "1 Video") read
+ * from the listing's fetched page content. The gallery shows them as three
+ * separate buttons, and the model reader tends to copy only the first one
+ * ("36 Photos"), which turned 6 real tours into "no virtual tour" (Farmhouse).
+ * Returns null when the page content doesn't carry the photo button.
+ */
+export function aptMediaCountsFromContent(content: string): { photos: number; virtualTours: number | null; videos: number | null } | null {
+  const c = content || "";
+  const photos = c.match(/(\d+)\s*photos?\b/i);
+  if (!photos || photos.index == null) return null;
+  // Tours/videos sit right next to the photo button. Read only that window so a
+  // "Similar Rentals Nearby" card further down can't lend its own tour count.
+  const win = c.slice(photos.index, photos.index + 400);
+  const vt = win.match(/(\d+)\s*virtual\s*tours?\b/i);
+  const vid = win.match(/(\d+)\s*videos?\b/i);
+  return {
+    photos: parseInt(photos[1], 10),
+    // Not seen next to the photo button = UNKNOWN, not zero: a miss here must
+    // never become a false "no virtual tour" finding.
+    virtualTours: vt ? parseInt(vt[1], 10) : null,
+    videos: vid ? parseInt(vid[1], 10) : null,
+  };
+}
+
+/**
+ * Review-solicitation tactics a property can already have in place. The team
+ * ticks these per property (Property.reviewTacticsInPlace) so the audits stop
+ * recommending what the site already does. Farmhouse's management pointed out
+ * every property has an office QR plaque, direct Google review links, and
+ * maintenance door hangers with the QR, yet the report recommended them.
+ */
+export const REVIEW_TACTICS: { id: string; label: string; match: (t: string) => boolean }[] = [
+  {
+    id: "qr_office",
+    label: "QR code review plaque in the leasing office",
+    match: (t) => /\bqr\b/.test(t) && /\b(plaque|sign|signage|front desk|leasing office|office|desk|lobby|clubhouse)\b/.test(t),
+  },
+  {
+    id: "direct_link",
+    label: "Direct Google review link shared with residents",
+    match: (t) => /\b(direct|one[-\s]?tap|short)\s+(google\s+)?review\s+links?\b/.test(t),
+  },
+  {
+    id: "door_hangers",
+    label: "Maintenance door hangers with a review QR code",
+    match: (t) => /\bdoor[-\s]?hangers?\b/.test(t),
+  },
+];
+
+/**
+ * True when a recommendation TITLE proposes setting up a tactic the property
+ * already has (a setup verb plus the tactic). Using an existing tactic better
+ * ("text the review link within 24 hours of a closed work order") is kept.
+ */
+export function recSetsUpInPlaceTactic(title: string, inPlace: string[] | undefined): boolean {
+  if (!inPlace || inPlace.length === 0) return false;
+  const t = (title || "").toLowerCase();
+  if (!/\b(add|adds|adding|create|generate|set\s*up|install|print|place|post|display|launch|introduce|implement|order|design|make|deploy|roll\s*out|start)\b/.test(t)) return false;
+  return REVIEW_TACTICS.some((tac) => inPlace.includes(tac.id) && tac.match(t));
+}
+
+/** Prompt block naming the tactics already in place ("" when none ticked). */
+export function reviewTacticsPromptBlock(inPlace: string[] | undefined): string {
+  const labels = REVIEW_TACTICS.filter((t) => (inPlace || []).includes(t.id)).map((t) => t.label);
+  if (!labels.length) return "";
+  return `REVIEW TACTICS ALREADY IN PLACE at this property (confirmed by the property team): ${labels.join("; ")}. Do NOT recommend setting up, adding, printing or installing any of these. You MAY recommend using them more effectively (timing, follow-up, staff habits) or tactics beyond them.`;
+}

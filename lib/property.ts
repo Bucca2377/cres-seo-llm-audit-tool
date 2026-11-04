@@ -239,6 +239,22 @@ export interface Property {
    */
   noApartmentsListing?: boolean;
   /**
+   * Directory networks the team CONFIRMED the property is listed on, keyed by
+   * network name (e.g. "Rent. (RentPath)") -> listing URL ("" when none given).
+   * The citation check reads Google search results, which miss listings Google
+   * hasn't indexed (Farmhouse is on Rent.com through its Zillow package, but no
+   * Rent.com page surfaces on Google). Applied when rendering, so it takes effect
+   * without a re-run. Set from the SEO tab's directory panel.
+   */
+  confirmedCitations?: Record<string, string>;
+  /**
+   * Review-solicitation tactics the property already runs (ids from
+   * REVIEW_TACTICS in lib/detectors: qr_office, direct_link, door_hangers).
+   * The SEO and Review audits never recommend setting these up. Set in
+   * property settings.
+   */
+  reviewTacticsInPlace?: string[];
+  /**
    * Legacy "must-check" pinned queries. Superseded by {@link trackedQueries};
    * still read once to migrate old properties into the sticky tracked set.
    */
@@ -1143,6 +1159,8 @@ export async function callFetch(opts: {
   officeHoursHtml?: Record<string, string> | null;
   /** True when any rendered page shows a self-guided virtual tour (host embed or tour phrase). */
   virtualTour?: boolean;
+  /** FAQ page URL found among ALL home-page links (hidden nav dropdowns included). */
+  faqUrl?: string | null;
   error?: string;
 }> {
   const r = await fetch("/api/fetch", {

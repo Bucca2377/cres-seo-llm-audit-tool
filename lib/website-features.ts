@@ -125,3 +125,26 @@ export function detectWebsiteFeatures(siteText: string): WebsiteFeatureSignals {
     gallery: /\bphoto\s*gallery\b|\bgallery\b/i.test(t),
   };
 }
+
+/**
+ * The site's FAQ page URL, read from EVERY link on the page (hidden dropdown
+ * items included), or null. FAQ links often live in a collapsed nav dropdown,
+ * which the visible-text crawl never sees, so the audit falsely said "no FAQ
+ * page" for Farmhouse (farmhouseapts.com/faqs/ is under a menu dropdown).
+ */
+export function faqLinkFromLinks(links: { href: string; text: string }[], origin?: string): string | null {
+  for (const l of links || []) {
+    const href = l?.href || "";
+    if (origin) {
+      try {
+        if (new URL(href).origin !== origin) continue;
+      } catch {
+        continue;
+      }
+    }
+    if (/\/faqs?(?:[/?#]|$)|frequently-asked/i.test(href) || /^\s*(?:faqs?|frequently asked questions)\s*$/i.test(l?.text || "")) {
+      return href;
+    }
+  }
+  return null;
+}

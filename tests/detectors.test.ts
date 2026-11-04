@@ -16,11 +16,15 @@ import {
   promisesFaqRichResult,
   offeredBedroomCounts,
   recInventsFloorplan,
+  concessionDeadlinePassed,
+  aptMediaCountsFromContent,
+  recSetsUpInPlaceTactic,
+  reviewTacticsPromptBlock,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
 import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml } from "../lib/hours";
-import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml } from "../lib/website-features";
+import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml, faqLinkFromLinks } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isOffProfileQuery } from "../lib/seo-queries";
@@ -1181,4 +1185,59 @@ test("overrides: overridesExcludingPlatform drops one column, keeps the others",
   assert.equal(cellOverride(noApts, "Pricing / availability", "apartments"), null);
   // …the Google edit survives.
   assert.equal(cellOverride(noApts, "Office hours listed", "google")?.status, "red");
+});
+
+test("website-features: faqLinkFromLinks finds an FAQ link hidden in a nav dropdown (the Farmhouse case)", () => {
+  const origin = "https://farmhouseapts.com";
+  const links = [
+    { href: "https://farmhouseapts.com/floorplans/", text: "Floor Plans" },
+    { href: "https://farmhouseapts.com/faqs/", text: "" }, // hidden dropdown item: no visible text
+  ];
+  assert.equal(faqLinkFromLinks(links, origin), "https://farmhouseapts.com/faqs/");
+  assert.equal(faqLinkFromLinks([{ href: "https://x.com/about", text: "FAQ" }], "https://x.com"), "https://x.com/about");
+  // Off-site FAQ links (e.g. a vendor's help center) don't count, nor do look-alike paths.
+  assert.equal(faqLinkFromLinks([{ href: "https://vendor.com/faq", text: "FAQ" }], origin), null);
+  assert.equal(faqLinkFromLinks([{ href: "https://farmhouseapts.com/faqsimile", text: "" }], origin), null);
+});
+
+test("detectors: concessionDeadlinePassed flags an expired special (the Farmhouse stale read)", () => {
+  const nov4 = new Date(2026, 10, 4);
+  assert.equal(concessionDeadlinePassed("6 weeks free m/i by September 25th", nov4), true);
+  assert.equal(concessionDeadlinePassed("Move in by 9/25 and get a month free", nov4), true);
+  assert.equal(concessionDeadlinePassed("Receive up to SIX WEEKS FREE when moved in by November 30th", nov4), false);
+  // Same day still counts as live.
+  assert.equal(concessionDeadlinePassed("Apply by Nov. 4", nov4), false);
+  // A month that already passed this year by more than ~6 months means next year.
+  assert.equal(concessionDeadlinePassed("Lease by January 15th for $500 off", nov4), false);
+  assert.equal(concessionDeadlinePassed("Move in by 9/25/2027", nov4), false);
+  // No deadline -> can't tell -> keep it.
+  assert.equal(concessionDeadlinePassed("1 month free on select homes", nov4), false);
+});
+
+test("detectors: aptMediaCountsFromContent reads all three media buttons (Farmhouse: 6 tours)", () => {
+  assert.deepEqual(aptMediaCountsFromContent("Farmhouse 36 Photos | 6 Virtual Tours | 1 Video Farmhouse Apartments"), {
+    photos: 36, virtualTours: 6, videos: 1,
+  });
+  // No tour button next to the photos = unknown, never a confirmed zero.
+  const noTour = aptMediaCountsFromContent("16 Photos");
+  assert.equal(noTour?.photos, 16);
+  assert.equal(noTour?.virtualTours, null);
+  // A nearby listing's tour count far down the page doesn't count.
+  const far = aptMediaCountsFromContent("16 Photos" + " x".repeat(400) + " Similar Rentals 3 Virtual Tours");
+  assert.equal(far?.virtualTours, null);
+  assert.equal(aptMediaCountsFromContent("no gallery here"), null);
+});
+
+test("detectors: recSetsUpInPlaceTactic drops recs to set up review tactics the property already has (Farmhouse)", () => {
+  const all = ["qr_office", "direct_link", "door_hangers"];
+  assert.equal(recSetsUpInPlaceTactic("Add a framed review QR code at the leasing office front desk", all), true);
+  assert.equal(recSetsUpInPlaceTactic("Print maintenance door hangers with a review QR", all), true);
+  assert.equal(recSetsUpInPlaceTactic("Create a direct Google review link", all), true);
+  // Using an existing tactic better is kept.
+  assert.equal(recSetsUpInPlaceTactic("Text the review link within 24 hours of a closed work order", all), false);
+  // Not ticked -> nothing dropped.
+  assert.equal(recSetsUpInPlaceTactic("Print maintenance door hangers with a review QR", ["qr_office"]), false);
+  assert.equal(recSetsUpInPlaceTactic("Add a framed review QR code at the front desk", undefined), false);
+  assert.equal(reviewTacticsPromptBlock([]), "");
+  assert.match(reviewTacticsPromptBlock(["door_hangers"]), /door hangers/i);
 });

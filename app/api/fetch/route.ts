@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { specialFromHtml } from "@/lib/detectors";
-import { detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml } from "@/lib/website-features";
+import { detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml, faqLinkFromLinks } from "@/lib/website-features";
 import { officeHoursFromHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
@@ -424,6 +424,13 @@ export async function POST(req: NextRequest) {
     let officeHoursHtml: Record<string, string> | null = home.officeHoursHtml ?? null;
     let virtualTour = !!home.virtualTour;
     let onlineApplication = !!home.onlineApplication;
+    // FAQ page from ALL home-page links, hidden dropdown items included.
+    let faqUrl: string | null = null;
+    try {
+      faqUrl = faqLinkFromLinks(home.links, new URL(start).origin);
+    } catch {
+      /* ignore */
+    }
 
     if (body.follow && maxPages > 1) {
       let origin = "";
@@ -485,7 +492,7 @@ export async function POST(req: NextRequest) {
 
     // Gallery/photos-page images first (best represent the property), then the rest.
     const images = [...galleryImages, ...otherImages].slice(0, MAX_IMAGES);
-    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, onlineApplication, _meta: { source: "playwright", pages: pages.length, images: images.length } });
+    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, onlineApplication, faqUrl, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Render failed", pages },

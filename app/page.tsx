@@ -33,7 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -2314,19 +2314,28 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
  * "present" if ANY sibling surfaced. Returns the found sites (with links) and
  * whether the network counts as a gap worth claiming.
  */
-function citationNetworkRows(citations: CitationResult | undefined) {
+function citationNetworkRows(citations: CitationResult | undefined, confirmed?: Record<string, string>) {
   const sources = citations?.sources ?? [];
   return CITATION_NETWORKS.map((net) => {
     const siteResults = net.sites
       .map((s) => sources.find((x) => x.domain === s.domain))
       .filter(Boolean) as CitationResult["sources"];
-    const foundSites = siteResults.filter((s) => s.present);
+    let foundSites = siteResults.filter((s) => s.present);
     const na = siteResults.some((s) => s.na);
+    // Team-confirmed listing (Property.confirmedCitations) for a network the
+    // Google search didn't surface: count it as present, linked when a URL was given.
+    const teamUrl = confirmed?.[net.network];
+    const teamConfirmed = !na && foundSites.length === 0 && teamUrl !== undefined;
+    if (teamConfirmed) {
+      const site = net.sites[0];
+      foundSites = [{ name: site.name, domain: site.domain, present: true, url: teamUrl || undefined, network: net.network, standalone: net.standalone }];
+    }
     return {
       network: net.network,
       standalone: net.standalone,
       present: foundSites.length > 0 && !na,
       na,
+      teamConfirmed,
       foundSites,
       // Carried from the citation data itself (see checkCitations) so the "listed,
       // not advertising" caveat doesn't depend on a separate audit's state.
@@ -2644,9 +2653,9 @@ function smoothedMapPack(
 }
 
 /** Plain-text citation summary fed into the recommendations prompt. */
-function citationsPromptSummary(c: CitationResult | undefined): string {
+function citationsPromptSummary(c: CitationResult | undefined, confirmed?: Record<string, string>): string {
   if (!c) return "LOCAL CITATIONS: not checked this run.";
-  const rows = citationNetworkRows(c);
+  const rows = citationNetworkRows(c, confirmed);
   const present = rows.filter((r) => r.present).map((r) => r.network);
   // N/A networks (e.g. a property intentionally not on Apartments.com) are NOT a
   // gap — exclude them so the model never recommends claiming/listing there.
@@ -2660,9 +2669,39 @@ function citationsPromptSummary(c: CitationResult | undefined): string {
 }
 
 /** On-screen local-citations / directory presence panel (SEO tab). */
-function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: CitationResult | undefined; aptNotAdvertising?: boolean }) {
+function CitationsPanel({
+  citations,
+  aptNotAdvertising = false,
+  confirmed,
+  onConfirm,
+}: {
+  citations: CitationResult | undefined;
+  aptNotAdvertising?: boolean;
+  confirmed?: Record<string, string>;
+  /** Save (url string, "" for none) or clear (null) a team confirmation for a network. */
+  onConfirm?: (network: string, url: string | null) => void;
+}) {
   if (!citations || citations.sources.length === 0) return null;
-  const rows = citationNetworkRows(citations);
+  const rows = citationNetworkRows(citations, confirmed);
+  const confirmListed = (network: string) => {
+    const url = window.prompt(
+      `Confirm ${network} lists this property. Paste the listing URL (optional), then OK:`,
+      ""
+    );
+    if (url === null) return; // cancelled
+    onConfirm?.(network, url.trim());
+  };
+  const smallBtn: React.CSSProperties = {
+    marginLeft: 4,
+    padding: "2px 8px",
+    borderRadius: 12,
+    border: "1px solid #d7dde3",
+    background: "white",
+    color: B.caribbean,
+    fontFamily: "'Josefin Sans',sans-serif",
+    fontSize: 11,
+    cursor: "pointer",
+  };
   // Apartments.com surfaces a listing (a real NAP citation) even when the
   // property isn't advertising there. When the marketing audit determined "not
   // advertising", render it as a caveat — not an active green citation — so this
@@ -2695,6 +2734,8 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
             ? `${r.network} — not listed here (N/A)`
             : caveat
             ? `${r.network} — listed, not actively advertising`
+            : r.teamConfirmed
+            ? `${r.network} · confirmed by team`
             : active && r.foundSites.length > 1
             ? `${r.network} (${r.foundSites.length} sites)`
             : r.network;
@@ -2717,17 +2758,32 @@ function CitationsPanel({ citations, aptNotAdvertising = false }: { citations: C
               <span style={{ fontWeight: 700 }}>{na ? "–" : caveat ? "◐" : active ? "✓" : "○"}</span> {label}
             </span>
           );
-          return r.present && url ? (
-            <a key={r.network} href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+          const linked = r.present && url ? (
+            <a href={url} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
               {chip}
             </a>
           ) : (
-            <span key={r.network}>{chip}</span>
+            chip
+          );
+          return (
+            <span key={r.network} style={{ display: "inline-flex", alignItems: "center" }}>
+              {linked}
+              {onConfirm && !na && !r.present && (
+                <button type="button" style={smallBtn} title="The search didn't find this listing. Mark it listed if the property is on this network." onClick={() => confirmListed(r.network)}>
+                  Mark listed
+                </button>
+              )}
+              {onConfirm && r.teamConfirmed && (
+                <button type="button" style={{ ...smallBtn, color: "#9aa3ad" }} title="Remove the team confirmation" onClick={() => onConfirm(r.network, null)}>
+                  Undo
+                </button>
+              )}
+            </span>
           );
         })}
       </div>
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
-        Directional read from one brand search — networks, not individual sibling sites (a listing on Apartments.com covers ApartmentFinder/ForRent). A &ldquo;○&rdquo; means that network didn&apos;t surface, so it&apos;s worth verifying/claiming — not a confirmed absence.{aptNotAdvertising ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
+        Directional read from one brand search — networks, not individual sibling sites (a listing on Apartments.com covers ApartmentFinder/ForRent). A &ldquo;○&rdquo; means that network didn&apos;t surface, so it&apos;s worth verifying/claiming — not a confirmed absence. Listings Google hasn&apos;t indexed won&apos;t surface here; use &ldquo;Mark listed&rdquo; when you know the property is on a network.{aptNotAdvertising ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
       </p>
     </div>
   );
@@ -3541,7 +3597,12 @@ Return ONLY a JSON array of 9 strings.`;
         setProgress("Crawling the site for technical / on-page SEO…");
         try {
           const crawl = await callFetch({ url: currentProperty.website, follow: true, maxPages: 6 });
-          const faqUrl = (crawl.pages || []).map((p) => p.url).find((u) => /\/faqs?\b|frequently-asked/i.test(u || ""));
+          // A crawled /faq page, else the FAQ link from the home page's full link
+          // list (catches a link hidden in a nav dropdown, the Farmhouse case).
+          const faqUrl =
+            (crawl.pages || []).map((p) => p.url).find((u) => /\/faqs?\b|frequently-asked/i.test(u || "")) ||
+            crawl.faqUrl ||
+            undefined;
           // Scan the FULL page text (not just the first 500 chars) and match a bare
           // "FAQ" too — an FAQ nav/footer LINK (singular, often below the fold) used
           // to be missed, producing a false "no FAQ page" for sites that have one.
@@ -3650,7 +3711,7 @@ ${technicalSeoPromptSummary(technicalSeo)}
 ${faqPagePath ? `\nNOTE: the site ALREADY has an FAQ page (${faqPagePath}). Do NOT recommend creating/publishing a new FAQ page. If it lacks FAQPage (JSON-LD) schema, you MAY recommend adding schema to the EXISTING page instead.\n` : ""}
 ${pageSpeedPromptSummary(pageSpeed)}
 
-${citationsPromptSummary(citations)}
+${citationsPromptSummary(citations, currentProperty.confirmedCitations)}
 
 Based on BOTH the Google rank data AND the AI-assistant visibility above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s visibility across Google search AND AI assistants (ChatGPT/Claude/Gemini). Order by highest ROI first.
 
@@ -3670,7 +3731,7 @@ Return ONLY a JSON object, no prose before or after:
   ]
 }
 
-${CRES_PLAYBOOK}
+${CRES_PLAYBOOK}${reviewTacticsPromptBlock(currentProperty.reviewTacticsInPlace) ? "\n" + reviewTacticsPromptBlock(currentProperty.reviewTacticsInPlace) : ""}
 
 Recommendation rules (STRICT):
 1. EXACTLY 5 recommendations.
@@ -3730,6 +3791,8 @@ Recommendation rules (STRICT):
             if (promisesFaqRichResult(t)) return false;
             // Never propose content for a floorplan the property doesn't offer.
             if (recInventsFloorplan(t, offeredBeds)) return false;
+            // Never propose setting up a review tactic the property already runs.
+            if (recSetsUpInPlaceTactic(c.title || "", currentProperty.reviewTacticsInPlace)) return false;
             return true;
           });
         }
@@ -4469,6 +4532,13 @@ Recommendation rules (STRICT):
           <CitationsPanel
             citations={results.citations}
             aptNotAdvertising={aptListedNotAdvertising(property.marketingAudit?.consistency)}
+            confirmed={property.confirmedCitations}
+            onConfirm={(network, url) => {
+              const next = { ...(property.confirmedCitations || {}) };
+              if (url === null) delete next[network];
+              else next[network] = url;
+              onUpdateProperty({ ...property, confirmedCitations: next });
+            }}
           />
 
           {/* ===== Group 2: Website Optimization (the site itself) ===== */}
@@ -5115,6 +5185,15 @@ function MarketingAuditTab({
           /* keep the web_fetch-based read */
         }
       }
+      // A special that only the model read (no raw-HTML confirmation) whose deadline
+      // has already passed is an old cached copy, not the live listing. Farmhouse's
+      // audit reported "m/i by September 25th" after the listing had moved to a
+      // November offer. Don't present it as current; ask for a live check instead.
+      let aptConcessionStale = "";
+      if (aptRead && !aptRawFetchOk && aptRead.concessions && concessionDeadlinePassed(aptRead.concessions)) {
+        aptConcessionStale = aptRead.concessions;
+        aptRead.concessions = "";
+      }
 
       const apartmentsBlock = !current.apartmentsUrl
         ? "APARTMENTS.COM LISTING: no listing URL was provided."
@@ -5125,8 +5204,8 @@ function MarketingAuditTab({
 - Advertising / active: ${aptRead.advertising === null ? "unknown" : aptRead.advertising ? "yes, active listing with units" : "listing present but not advertising units"}
 - Pricing: ${aptRead.priceText || "not shown"}${aptRead.beds ? ` (${aptRead.beds})` : ""}${aptRead.sqft ? `, ${aptRead.sqft}` : ""}
 - Office hours (as listed): ${Object.keys(aptRead.officeHours).length ? Object.entries(aptRead.officeHours).map(([d, h]) => `${d} ${h}`).join(", ") : "not shown on the listing"}
-- Media on listing (verbatim gallery badge): "${aptRead.mediaSummary || "not shown"}"
-- Concession / special: ${aptRead.concessions || "none advertised"}
+- Media on listing (verbatim gallery badge): "${aptRead.mediaSummary || "not shown"}"${aptRead.mediaCounts.virtualTours ? ` (${aptRead.mediaCounts.virtualTours} virtual tour${aptRead.mediaCounts.virtualTours > 1 ? "s" : ""} confirmed)` : ""}
+- Concession / special: ${aptConcessionStale ? `UNVERIFIED this run. The read returned an EXPIRED offer ("${aptConcessionStale}"), which is an outdated copy, not the live listing. Mark the Apartments.com concession cell AMBER "Couldn't verify the current special this run; check the live listing". Do NOT quote the expired offer and do NOT recommend updating it.` : aptRead.concessions || "none advertised"}
 - Tour scheduling (Request-a-Tour / contact form): ${aptRead.tourScheduling === null ? "unknown" : aptRead.tourScheduling ? "available" : "not found"}
 - Online application / inquiry: ${aptRead.onlineApplication === null ? "unknown" : aptRead.onlineApplication ? "available" : "not found"}
 - Amenities: ${aptRead.amenities.join(", ") || "not listed"}
@@ -5497,6 +5576,14 @@ Return ONLY this JSON object, no prose before or after:
                 : { status: "na", note: "No concession currently offered (not a deficiency)." };
             }
           }
+          // The listing read returned an expired special (stale copy): never show it
+          // as the live offer and never call it missing. Ask for a live check.
+          if (aptConcessionStale && concRow.apartments && concRow.apartments.status !== "na") {
+            concRow.apartments = {
+              status: "amber",
+              note: "Couldn't verify the current special this run (the read returned an expired offer). Check the live listing.",
+            };
+          }
         }
       }
       // Office-hours row — OVERWRITE with the deterministic reconciliation computed
@@ -5671,19 +5758,20 @@ Return ONLY this JSON object, no prose before or after:
                 ? "Matterport / 3D tour present on the listing."
                 : `Media summary lists ${mediaVts} virtual tour${mediaVts! > 1 ? "s" : ""}.`,
             };
-          } else if (mediaVts === 0 || aptRawFetchOk) {
-            // CONFIRMED ABSENT. mediaVts === 0 means the media badge WAS read and shows
-            // photos but no virtual tour — and Apartments.com ALWAYS badges a tour when
-            // one exists ("2 Virtual Tours"), so no badge = no tour. (aptRawFetchOk with
-            // no marker is the same confirmation from the raw HTML.) Real gap -> RED with
-            // a rec to add one; Apartments.com includes a 3D tour with the ad package.
+          } else if (aptRawFetchOk) {
+            // CONFIRMED ABSENT: the full raw HTML (Bright Data) carries no
+            // "N Virtual Tours" button, and Apartments.com always shows one when a
+            // tour exists. Real gap -> RED with a rec to add one; Apartments.com
+            // includes a 3D tour with the ad package. The model's badge copy alone
+            // (mediaVts === 0) is NOT confirmation: it copied only "36 Photos" for
+            // Farmhouse, which has 6 tours. Without the raw read we say "verify".
             vtRow.apartments = {
               status: "red",
               note: "No virtual tour on the Apartments.com listing — the media badge shows photos but no tour. Add a Matterport/3D tour; Apartments.com includes one with your advertising package, so request it from your rep.",
             };
           } else {
-            // Truly couldn't read this run: the media badge was unreadable (mediaVts null)
-            // AND the raw fetch came back thin. Don't assert absence — flag as unconfirmed.
+            // No tour count seen and no raw HTML to confirm absence this run. Don't
+            // assert absence: flag as unconfirmed.
             vtRow.apartments = { status: "amber", note: "Couldn’t confirm a virtual tour this run (the listing read came back incomplete) — verify on the listing." };
           }
         }
@@ -6815,7 +6903,7 @@ ${gapLines}
 
 REVIEWS WITH AN OWNER REPLY (flag ONLY a reply that is GENUINELY problematic — see the strict rule below; a warm, polite reply to a positive review is GOOD and must NOT be flagged):
 ${qualityLines}
-
+${CRES_PLAYBOOK}${reviewTacticsPromptBlock(current.reviewTacticsInPlace) ? "\n" + reviewTacticsPromptBlock(current.reviewTacticsInPlace) : ""}
 ${CRES_PLAYBOOK}
 ${suppressIncentives ? `\nRATING COST GATE — IMPORTANT: this property's Google rating is ${currentRating?.toFixed(2)}, ABOVE 4.25, so it does NOT need paid review-generation spend. Do NOT recommend or mention the paid incentive programs (the daily $25-per-named-review employee bonus or the monthly $150 / $250 team bonuses), and do NOT add a "$25 incentive" note to any sentimentPeriod row. Recommend only FREE tactics (respond to every review, text a one-tap review link at the trigger moments, QR touchpoints, fix specific complaints). Recommending a paid incentive for an already-highly-rated property wastes money.\n` : ""}
 Return ONLY this JSON object, no prose:
@@ -6872,6 +6960,10 @@ RULES:
       // review-incentive rec when the property is already rated above 4.25.
       if (suppressIncentives && Array.isArray(recs)) {
         recs = recs.filter((c) => !recommendsReviewIncentive(`${c.title || ""} ${c.what || ""}`));
+      }
+      // Never recommend setting up a review tactic the team marked as already in place.
+      if (Array.isArray(recs)) {
+        recs = recs.filter((c) => !recSetsUpInPlaceTactic(c.title || "", current.reviewTacticsInPlace));
       }
 
       // Merge Claude's suggestions onto the code-held review/response text by id.
@@ -7617,7 +7709,7 @@ Report EXACTLY what the listing shows, as JSON only (no prose). Never guess or i
   "beds": "bedroom types offered, e.g. \\"2-3 BR\\"",
   "sqft": "square-footage range if shown",
   "officeHours": {"monday":"9 AM-5 PM or Closed","tuesday":"...", "wednesday":"...","thursday":"...","friday":"...","saturday":"...","sunday":"..."},
-  "mediaSummaryVerbatim": "the small media-count badge on the photo gallery, transcribed EXACTLY as printed, e.g. \\"16 Photos\\" or \\"29 Photos, 2 Virtual Tours, 1 Video\\"",
+  "mediaSummaryVerbatim": "ALL the media-count buttons under the photo gallery, transcribed EXACTLY as printed and joined with commas, e.g. \\"16 Photos\\" or \\"36 Photos, 6 Virtual Tours, 1 Video\\" (they are separate buttons: include every one)",
   "photoUrls": ["direct gallery image src URLs, e.g. https://images1.apartments.com/... ; up to 6; only URLs you actually see"],
   "concessions": "the exact special/concession text if one is advertised, else empty string",
   "tourScheduling": true or false,
@@ -7685,11 +7777,17 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         sqft: typeof j.sqft === "string" ? j.sqft : "",
         officeHours: j.officeHours && typeof j.officeHours === "object" ? (j.officeHours as Record<string, string>) : {},
         mediaSummary,
-        mediaCounts: {
-          photos: grabCount(/(\d+)\s*photos?/i),
-          virtualTours: grabCount(/(\d+)\s*virtual\s*tours?/i),
-          videos: grabCount(/(\d+)\s*videos?/i),
-        },
+        // Counts from the fetched page itself win over the model's badge copy: the
+        // gallery shows "36 Photos | 6 Virtual Tours | 1 Video" as three buttons and
+        // the model often copies only the first (Farmhouse: 6 tours read as none).
+        mediaCounts: (() => {
+          const fromPage = aptMediaCountsFromContent(rawFetched);
+          return {
+            photos: fromPage?.photos ?? grabCount(/(\d+)\s*photos?/i),
+            virtualTours: fromPage?.virtualTours ?? grabCount(/(\d+)\s*virtual\s*tours?/i),
+            videos: fromPage?.videos ?? grabCount(/(\d+)\s*videos?/i),
+          };
+        })(),
         photoUrls: strArr(j.photoUrls, 6).filter((u) => /^https?:\/\/[^/]*apartments\.com\//i.test(u)),
         concessions: typeof j.concessions === "string" ? j.concessions : "",
         tourScheduling: typeof j.tourScheduling === "boolean" ? j.tourScheduling : null,
@@ -8766,7 +8864,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
             </table>
 
             {seo.citations && seo.citations.sources.length > 0 && (() => {
-              const rows = citationNetworkRows(seo.citations);
+              const rows = citationNetworkRows(seo.citations, property.confirmedCitations);
               // Prefer the caveat carried by the citation data itself (determined
               // deterministically at fetch time); fall back to the marketing audit.
               const aptNotAdv = rows.some((r) => r.notAdvertising) || aptListedNotAdvertising(mkt?.consistency);
@@ -8808,7 +8906,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                               ) : caveat ? (
                                 <span style={{ color: "#9a6a2a" }}> — listed, not actively advertising</span>
                               ) : active && r.foundSites.length > 0 ? (
-                                <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}</span>
+                                <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}{r.teamConfirmed ? " (confirmed by property team)" : ""}</span>
                               ) : null}
                             </td>
                             <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: na ? "#9aa3ad" : active ? "#15803d" : "#9a6a2a" }}>
@@ -9165,6 +9263,12 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <li style={li}>Marking a cell <strong>Issue</strong> automatically <strong>adds a matching recommendation</strong>; marking it <strong>Good</strong> <strong>removes</strong> the auto-generated one.</li>
             <li style={li}>Your correction shows an <strong>&ldquo;edited&rdquo;</strong> marker, replaces the result <strong>on screen and in the printed report</strong>, and <strong>sticks through future re-runs</strong>.</li>
             <li style={li}>If a later run <strong>positively detects the problem as fixed</strong>, your flag auto-clears back to <strong>Good</strong> under &ldquo;Resolved since you flagged them.&rdquo; If the detector still can&apos;t confirm, your flag stays put.</li>
+          </ul>
+
+          <div style={h2}>Things the audit can&apos;t see</div>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li style={li}><strong>Directory listings Google hasn&apos;t indexed</strong> (e.g. Rent.com through a Zillow package): on the SEO tab&apos;s Local Citations panel, click <strong>Mark listed</strong> next to the network and paste the listing URL. It counts as listed on screen and in print. <strong>Undo</strong> removes it.</li>
+            <li style={li}><strong>Offline review tactics</strong> (office QR plaque, direct Google review links, maintenance door hangers): tick them under <strong>Review tactics already in place</strong> in Property Settings. The SEO and Review audits will stop recommending them.</li>
           </ul>
 
           <div style={h2}>Client deliverables</div>
