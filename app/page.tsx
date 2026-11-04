@@ -5190,7 +5190,10 @@ function MarketingAuditTab({
       // audit reported "m/i by September 25th" after the listing had moved to a
       // November offer. Don't present it as current; ask for a live check instead.
       let aptConcessionStale = "";
-      if (aptRead && !aptRawFetchOk && aptRead.concessions && concessionDeadlinePassed(aptRead.concessions)) {
+      if (
+        aptRead && !aptRawFetchOk && aptRead.concessions &&
+        (aptRead.staleCopy || concessionDeadlinePassed(aptRead.concessions))
+      ) {
         aptConcessionStale = aptRead.concessions;
         aptRead.concessions = "";
       }
@@ -7681,6 +7684,8 @@ interface ApartmentsListingRead {
   phones: string[];
   amenities: string[];
   hasWebsiteLink: boolean | null; // "View Property Website" link present on the listing
+  /** True when web_fetch served a copy retrieved more than 2 days ago (cached, not live). */
+  staleCopy: boolean;
 }
 
 /**
@@ -7697,10 +7702,21 @@ async function readApartmentsListing(url: string): Promise<ApartmentsListingRead
     ok: false, advertising: null, priceText: "", beds: "", sqft: "",
     officeHours: {}, mediaSummary: "", mediaCounts: { photos: null, virtualTours: null, videos: null },
     photoUrls: [], concessions: "", tourScheduling: null, onlineApplication: null,
-    phones: [], amenities: [], hasWebsiteLink: null,
+    phones: [], amenities: [], hasWebsiteLink: null, staleCopy: false,
   };
   if (!url) return empty;
-  const prompt = `Use your web_fetch tool to load this Apartments.com listing and read it carefully: ${url}
+  // web_fetch serves CACHED copies keyed by the exact URL: on Nov 4 Farmhouse's
+  // listing URL came back as a Sept 15 copy ("Move in by September 25th", 38
+  // photos). A unique query param forces a live fetch (verified: today's page).
+  let fetchUrl = url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set("_cres", String(Date.now()));
+    fetchUrl = u.toString();
+  } catch {
+    /* keep the stored URL */
+  }
+  const prompt = `Use your web_fetch tool to load this Apartments.com listing and read it carefully: ${fetchUrl}
 
 Report EXACTLY what the listing shows, as JSON only (no prose). Never guess or invent — use null / [] / "" for anything you cannot actually see on the page.
 {
@@ -7788,7 +7804,17 @@ IF the page shows "This property is not currently advertising on Apartments.com"
             videos: fromPage?.videos ?? grabCount(/(\d+)\s*videos?/i),
           };
         })(),
-        photoUrls: strArr(j.photoUrls, 6).filter((u) => /^https?:\/\/[^/]*apartments\.com\//i.test(u)),
+        // Gallery image URLs straight from the fetched page. The model truncates or
+        // garbles the long CDN paths, which made the photo-quality pass fail ("38
+        // photos present, quality not assessed"); its list is only the fallback.
+        photoUrls: (() => {
+          const fromPage = Array.from(
+            new Set<string>(String(rawFetched).match(/https?:\/\/images\d*\.apartments\.com\/i2\/[A-Za-z0-9_\-/.%]+?\.(?:jpe?g|png|webp)/gi) || [])
+          ).slice(0, 6);
+          return fromPage.length >= 2
+            ? fromPage
+            : strArr(j.photoUrls, 6).filter((u) => /^https?:\/\/[^/]*apartments\.com\//i.test(u));
+        })(),
         concessions: typeof j.concessions === "string" ? j.concessions : "",
         tourScheduling: typeof j.tourScheduling === "boolean" ? j.tourScheduling : null,
         onlineApplication: typeof j.onlineApplication === "boolean" ? j.onlineApplication : null,
@@ -7799,6 +7825,13 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         // button text), not model judgment. null = page too thin to tell.
         hasWebsiteLink:
           rawFetched.length > 500 ? /view\s+property\s+website|property\s+website/i.test(rawFetched) : null,
+        // Backstop for the cache-buster: if the page web_fetch served was retrieved
+        // more than 2 days ago, its special/photos may be outdated.
+        staleCopy: (() => {
+          const at = (rawFetched.match(/"retrieved_at":"([^"]+)"/) || [])[1];
+          const t = at ? Date.parse(at) : NaN;
+          return Number.isFinite(t) && Date.now() - t > 2 * 24 * 3600 * 1000;
+        })(),
       };
       // A "thin" read (nothing substantive) is a partial/blocked fetch — retry once.
       const thin =
