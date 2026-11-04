@@ -7705,18 +7705,21 @@ async function readApartmentsListing(url: string): Promise<ApartmentsListingRead
     phones: [], amenities: [], hasWebsiteLink: null, staleCopy: false,
   };
   if (!url) return empty;
-  // web_fetch serves CACHED copies keyed by the exact URL: on Nov 4 Farmhouse's
-  // listing URL came back as a Sept 15 copy ("Move in by September 25th", 38
-  // photos). A unique query param forces a live fetch (verified: today's page).
-  let fetchUrl = url;
-  try {
-    const u = new URL(url);
-    u.searchParams.set("_cres", String(Date.now()));
-    fetchUrl = u.toString();
-  } catch {
-    /* keep the stored URL */
-  }
-  const prompt = `Use your web_fetch tool to load this Apartments.com listing and read it carefully: ${fetchUrl}
+  // web_fetch serves CACHED copies keyed by the URL: on Nov 4 Farmhouse's listing
+  // URL came back as a Sept 15 copy ("Move in by September 25th", 38 photos). A
+  // unique query param forces a live fetch, BUT the cache ignores params that start
+  // with "_" (verified: "?_cres=…" still returned the Sept copy, "?cb=…" returned
+  // today's page). Keep the name underscore-free.
+  const freshUrl = () => {
+    try {
+      const u = new URL(url);
+      u.searchParams.set("cb", String(Date.now()));
+      return u.toString();
+    } catch {
+      return url;
+    }
+  };
+  const buildPrompt = (fetchUrl: string) => `Use your web_fetch tool to load this Apartments.com listing and read it carefully: ${fetchUrl}
 
 Report EXACTLY what the listing shows, as JSON only (no prose). Never guess or invent — use null / [] / "" for anything you cannot actually see on the page.
 {
@@ -7739,7 +7742,7 @@ IF the page shows "This property is not currently advertising on Apartments.com"
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const resp = await callAI({ prompt, webFetch: true, maxTokens: 1200 });
+      const resp = await callAI({ prompt: buildPrompt(freshUrl()), webFetch: true, maxTokens: 1200 });
       const text = (resp.content || [])
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
@@ -7838,7 +7841,8 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         read.advertising === null && !read.priceText &&
         Object.keys(read.officeHours).length === 0 &&
         read.mediaCounts.photos === null && read.photoUrls.length === 0;
-      if (thin && attempt < 2) continue;
+      // A stale cached copy gets one more try with a new cache-buster.
+      if ((thin || read.staleCopy) && attempt < 2) continue;
       return thin ? empty : read;
     } catch {
       if (attempt < 2) continue;
