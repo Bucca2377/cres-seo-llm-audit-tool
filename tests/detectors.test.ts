@@ -23,6 +23,7 @@ import {
   scrubRecClaims,
   reviewTacticsInText,
   isCarrierIntercept,
+  classifyHeard,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
@@ -1305,4 +1306,15 @@ test("detectors: isCarrierIntercept catches carrier 'not in service' recordings,
     "",
   ]) assert.equal(isCarrierIntercept(t), false, t);
   assert.equal(isCarrierIntercept(null), false);
+});
+
+test("detectors: classifyHeard tells a phone menu, voicemail and a dead line apart (Farmhouse text-back menu)", () => {
+  assert.equal(
+    classifyHeard("Thank you for calling. Can I text you after our call at this number with details of this community? If so, please press 1 to decline, press 2."),
+    "menu"
+  );
+  assert.equal(classifyHeard("You've reached Farmhouse Apartments. Please leave a message after the tone."), "voicemail");
+  assert.equal(classifyHeard("The number you have dialed is not in service."), "intercept");
+  assert.equal(classifyHeard("Hello, Farmhouse Apartments, this is Katherine."), null);
+  assert.equal(classifyHeard(""), null);
 });

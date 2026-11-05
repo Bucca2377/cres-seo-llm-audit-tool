@@ -576,3 +576,22 @@ export function isCarrierIntercept(text: string | null | undefined): boolean {
   if (!t) return false;
   return /\b(not|no longer) (in|a) (service|working number)\b|\bno longer in service\b|\b(has been|is) disconnected\b|\bnot a working number\b|\bcannot be completed as dialed\b|\bcall (cannot|could not|can ?not) be completed\b|\btemporarily (out of service|disconnected)\b|\bnumber (you have dialed|you dialed|dialed) (is|has)\b[\s\S]{0,40}\b(changed|disconnected|not)\b|\bcheck the number and (dial|try) again\b/.test(t);
 }
+
+/**
+ * What answered a test call, judged from the transcript of what the line said.
+ * More reliable than answering-machine detection, which calls any recording a
+ * "machine": Farmhouse's lines answer with a text-back phone menu ("…please press
+ * 1… press 2…") that showed as "likely voicemail".
+ *   "intercept" carrier not-in-service recording (dead line)
+ *   "menu"      automated phone menu / IVR (a working line)
+ *   "voicemail" voicemail greeting
+ *   null        can't tell from the words (fall back to machine detection)
+ */
+export function classifyHeard(text: string | null | undefined): "intercept" | "menu" | "voicemail" | null {
+  const t = (text || "").toLowerCase();
+  if (!t) return null;
+  if (isCarrierIntercept(t)) return "intercept";
+  if (/\bpress (\d|one|two|three|four|five|star|pound|zero)\b|\bmain menu\b|\bdial by name\b/.test(t)) return "menu";
+  if (/\bleave (a|your) (message|name)\b|\bafter the (tone|beep)\b|\bvoice ?mail\b|\bmailbox\b|\bnot available to take your call\b|\bunable to (take|answer) (your|the) call\b/.test(t)) return "voicemail";
+  return null;
+}

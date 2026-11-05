@@ -33,7 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, reviewTacticsInText, type RankFact } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, reviewTacticsInText, classifyHeard, type RankFact } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -6446,10 +6446,12 @@ function PhoneInventoryPanel({
   const badge = (n: PhoneNumberEntry) => {
     const core = badgeCore(n);
     if (testing || !n.heard) return core;
+    // One-line excerpt; the full transcript is on hover.
+    const excerpt = n.heard.length > 110 ? n.heard.slice(0, 110).replace(/s+S*$/, "") + "…" : n.heard;
     return (
       <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
         {core}
-        <span style={{ color: "#6b7580", fontSize: 10.5, fontStyle: "italic", maxWidth: 340, textAlign: "right" }}>Heard: &ldquo;{n.heard}&rdquo;</span>
+        <span title={n.heard} style={{ color: "#6b7580", fontSize: 11, fontStyle: "italic", textAlign: "right", cursor: "help" }}>Heard: &ldquo;{excerpt}&rdquo;</span>
       </span>
     );
   };
@@ -6471,6 +6473,10 @@ function PhoneInventoryPanel({
     if (s === "failed") return <span style={red}>✗ Didn&apos;t connect (dead number or routing issue)</span>;
     if (s === "unknown") return <span style={neutral}>? Inconclusive</span>;
     if (s === "connected") {
+      // What the line SAID beats machine detection (which calls any recording a machine).
+      const heardAs = classifyHeard(n.heard);
+      if (heardAs === "menu") return <span style={neutral}>✓ Connected: automated phone menu{secs != null ? ` (${secs}s)` : ""}</span>;
+      if (heardAs === "voicemail") return <span style={amber}>⚠ Went to voicemail{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "human") return <span style={green}>✓ Answered — sounded like a live person{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "voicemail") return <span style={amber}>⚠ Likely voicemail or an automated system{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "fax") return <span style={amber}>⚠ Likely a fax line</span>;
@@ -6509,7 +6515,7 @@ function PhoneInventoryPanel({
                 <td style={{ padding: "7px 10px", borderBottom: "1px solid #eef0f2", fontFamily: "'Josefin Sans',sans-serif", fontSize: 13, color: "#333", fontWeight: 600 }}>
                   {n.number}
                 </td>
-                <td style={{ padding: "7px 10px", borderBottom: "1px solid #eef0f2", textAlign: "right", width: 130 }}>
+                <td style={{ padding: "7px 10px", borderBottom: "1px solid #eef0f2", textAlign: "right", width: "55%" }}>
                   {badge(n)}
                 </td>
               </tr>
@@ -8682,7 +8688,10 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                             else if (n.dialStatus === "failed") { label = "Didn't connect (dead number or routing)"; color = "#b14a2a"; }
                             else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#5b6670"; }
                             else if (n.dialStatus === "connected") {
-                              if (n.answeredBy === "human") { label = `Answered — sounded live${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
+                              const heardAs = classifyHeard(n.heard);
+                              if (heardAs === "menu") { label = `Connected: automated phone menu${secs != null ? ` (${secs}s)` : ""}`; color = "#5b6670"; }
+                              else if (heardAs === "voicemail") { label = `Went to voicemail${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
+                              else if (n.answeredBy === "human") { label = `Answered — sounded live${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
                               else if (n.answeredBy === "voicemail") { label = `Likely voicemail or automated${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
                               else if (n.answeredBy === "fax") { label = "Likely a fax line"; color = "#9a7200"; }
                               else if (n.dialNote === "no-answer") { label = `Rang${secs != null ? ` ~${secs}s` : ""}, no answer`; color = "#9a7200"; }
