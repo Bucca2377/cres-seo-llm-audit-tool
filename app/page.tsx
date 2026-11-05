@@ -9423,7 +9423,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <div style={h2}>Things the audit can&apos;t see</div>
           <ul style={{ paddingLeft: 18, margin: 0 }}>
             <li style={li}><strong>Directory listings Google hasn&apos;t indexed</strong> (Rent.com is now filled in automatically for 25+ unit properties on Zillow, since Zillow feeds Rent.com): on the SEO tab&apos;s Local Citations panel, click <strong>Mark listed</strong> next to the network and paste the listing URL. It counts as listed on screen and in print. <strong>Undo</strong> removes it.</li>
-            <li style={li}><strong>Offline review tactics</strong> (office QR plaque, direct Google review links, maintenance door hangers): click <strong>✓ Done</strong> on the recommendation that suggests them and they are remembered as in place for that property automatically (or tick them under <strong>Review tactics already in place</strong> in Property Settings). The SEO and Review audits will stop recommending them. <strong>Apply these to all properties</strong> sets them across the whole roster in one click.</li>
+            <li style={li}><strong>Review tactics the property already uses</strong> (door hangers, office QR plaque, direct review link): click <strong>✓ Done</strong> on that recommendation. The property remembers the tactic and it won&apos;t be recommended again there, however it&apos;s worded. To undo, restore the card from &ldquo;Completed &amp; Set Aside.&rdquo;</li>
           </ul>
 
           <div style={h2}>Client deliverables</div>

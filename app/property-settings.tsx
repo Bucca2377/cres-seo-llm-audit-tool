@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Property } from "@/lib/property";
-import { REVIEW_TACTICS } from "@/lib/detectors";
 
 const B = {
   oxford: "#062347",
@@ -526,46 +525,6 @@ export default function PropertySettings({
             This property has <strong>no Apartments.com listing</strong> — mark Apartments.com <strong>N/A</strong> everywhere (the Marketing Audit column and the SEO directory-presence check). Use when the property intentionally does not advertise there.
           </span>
         </label>
-
-        <div style={{ margin: "0 0 16px" }}>
-          <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, fontWeight: 600, color: "#444", marginBottom: 6 }}>
-            Review tactics already in place (the audits won&apos;t recommend setting these up)
-          </div>
-          {REVIEW_TACTICS.map((t) => {
-            const on = (draft.reviewTacticsInPlace || []).includes(t.id);
-            return (
-              <label key={t.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 4, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#444", cursor: "pointer", lineHeight: 1.4 }}>
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={(e) => {
-                    const cur = (draft.reviewTacticsInPlace || []).filter((x) => x !== t.id);
-                    setDraft({ ...draft, reviewTacticsInPlace: e.target.checked ? [...cur, t.id] : cur });
-                  }}
-                  style={{ cursor: "pointer", marginTop: 2 }}
-                />
-                <span>{t.label}</span>
-              </label>
-            );
-          })}
-          {properties.length > 1 && (
-            <button
-              type="button"
-              onClick={() => {
-                const tactics = draft.reviewTacticsInPlace || [];
-                const names = REVIEW_TACTICS.filter((t) => tactics.includes(t.id)).map((t) => t.label);
-                const msg = names.length
-                  ? `Set ALL ${properties.length} properties to these review tactics?\n\n• ${names.join("\n• ")}\n\nYou can untick any property individually afterward.`
-                  : `Clear the review tactics on ALL ${properties.length} properties?`;
-                if (!window.confirm(msg)) return;
-                for (const p of properties) onUpdateProperty(p.id, { reviewTacticsInPlace: [...tactics] });
-              }}
-              style={{ marginTop: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${B.cambridge}`, background: "white", color: B.caribbean, fontFamily: "'Josefin Sans',sans-serif", fontSize: 12, cursor: "pointer" }}
-            >
-              Apply these to all {properties.length} properties
-            </button>
-          )}
-        </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           {field(
