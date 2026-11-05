@@ -130,6 +130,15 @@ export async function POST(req: NextRequest) {
     };
     // Only a conclusive read is worth keeping as the fallback.
     if (typeof read.advertising === "boolean") await saveRead(url, read);
+    else {
+      // A page came back but carries no listing structure (typically a bot-check /
+      // challenge page). Say so, and serve the last good read if there is one.
+      const title = (html.match(/<title>([^<]{0,80})/i) || [])[1]?.trim();
+      const readError = `a page came back but it wasn't the listing (${Math.round(html.length / 1024)} KB${title ? `, titled "${title}"` : ""}), likely a bot check`;
+      const cached = await lastGoodRead(url);
+      if (cached) return NextResponse.json({ ...cached.data, cachedAt: cached.fetchedAt, readError });
+      return NextResponse.json({ ...read, readError });
+    }
     return NextResponse.json(read);
   } catch {
     return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null });

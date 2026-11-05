@@ -125,9 +125,10 @@ export function parseWeekHours(text: string): Record<string, string> {
     ["saturday", "saturday|sat|sa"],
     ["sunday", "sunday|sun|su"],
   ];
-  // A time range separated by a dash OR the word "to" ("9:00 AM to 5:00 PM").
+  // A time range separated by a dash, the word "to", or BOTH ("9:00 AM to 5:00 PM",
+  // Edge 26's "10:00 AM to - 6:00 PM").
   const VAL =
-    "(closed|open 24 hours|24 hours|\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?\\s*(?:[–—-]|to)\\s*\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?)";
+    "(closed|open 24 hours|24 hours|\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?\\s*(?:[–—-]|to(?:\\s*[–—-])?)\\s*\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?)";
   const out: Record<string, string> = {};
   const dayTok = (s: string) => abbrevDayIndex(s);
   // Pass 1 — day RANGES first ("Mon-Fri 8:30 AM - 5:30 PM", "Monday - Thursday 9-5"),

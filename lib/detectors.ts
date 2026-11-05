@@ -46,9 +46,24 @@ export function detectWebsiteSpecial(siteText: string): string | null {
   return best;
 }
 
+/**
+ * Decode the HTML entities that leak into crawled text from raw markup (Edge 26's
+ * special read "first full month&rsquo;s rent &mdash;so you can settle").
+ */
+export function decodeEntities(s: string): string {
+  const named: Record<string, string> = {
+    amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", rsquo: "’", lsquo: "‘",
+    rdquo: "”", ldquo: "“", mdash: "—", ndash: "–", hellip: "…", trade: "™", reg: "®", copy: "©",
+  };
+  return (s || "")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&([a-z]+);/gi, (m, name) => named[name.toLowerCase()] ?? m);
+}
+
 /** Strip a single concession window down to clean, readable special wording. */
 function cleanSpecial(rawWindow: string): string | null {
-  let raw = rawWindow;
+  let raw = decodeEntities(rawWindow);
   // Belt-and-suspenders: if a transcript header still leaked in on some other
   // separator, drop everything up to its closing "===" or "(status NNN)" marker.
   const sep = raw.lastIndexOf("===");
@@ -585,14 +600,18 @@ export function isCarrierIntercept(text: string | null | undefined): boolean {
  *   "intercept" carrier not-in-service recording (dead line)
  *   "menu"      automated phone menu / IVR (a working line)
  *   "voicemail" voicemail greeting
+ *   "hold"      hold / queue message before connecting (a working line)
  *   "person"    a live greeting ("This is Destiny, how can I assist?", Loch Haven)
  *   null        can't tell from the words (fall back to machine detection)
  */
-export function classifyHeard(text: string | null | undefined): "intercept" | "menu" | "voicemail" | "person" | null {
+export function classifyHeard(text: string | null | undefined): "intercept" | "menu" | "voicemail" | "person" | "hold" | null {
   const t = (text || "").toLowerCase();
   if (!t) return null;
   if (isCarrierIntercept(t)) return "intercept";
   if (/\bpress (\d|one|two|three|four|five|star|pound|zero)\b|\bmain menu\b|\bdial by name\b/.test(t)) return "menu";
+  // Hold / queue message before the call is connected to someone (Edge 26: "We will
+  // be with you shortly, this call may be recorded…"). A working line, not voicemail.
+  if (/\bbe with you (shortly|momentarily|in a moment)\b|\bplease (hold|stay on the line)\b|\byour call is important\b|\bnext available\b|\bwhile we (connect|transfer)\b|\bconnecting your call\b/.test(t)) return "hold";
   if (/\bleave (a|your) (message|name)\b|\bafter the (tone|beep)\b|\bvoice ?mail\b|\bmailbox\b|\bnot available to take your call\b|\bunable to (take|answer) (your|the) call\b/.test(t)) return "voicemail";
   // A live answer: "how can I/we help / assist" or "<name> speaking". Checked after
   // menu/voicemail, so a recording that also says "press 1" or "leave a message"

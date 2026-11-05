@@ -5128,8 +5128,10 @@ function MarketingAuditTab({
       let officeHoursHtml: Record<string, string> | null = null;
       let websiteVtFromHtml = false;
       let websiteApplyFromHtml = false;
+      let siteContactUrl = "";
       try {
         const siteRes = await callFetch({ url: current.website || "", follow: true, maxPages: 5 });
+        siteContactUrl = siteRes.contactUrl || "";
         const sitePages = siteRes.pages || [];
         siteText = sitePages
           .map((p) => `=== ${p.url} (status ${p.status ?? "?"}) ===\n${(p.text || "").trim() || "[no content rendered]"}`)
@@ -5180,7 +5182,7 @@ function MarketingAuditTab({
           const crawledContact = (siteText.match(/===\s*(https?:\/\/[^\s(]*contact[^\s(]*)/i) || [])[1];
           const candidates = Array.from(
             new Set(
-              [crawledContact, origin ? `${origin}/contact/` : "", origin ? `${origin}/contact-us/` : "", origin].filter(Boolean)
+              [siteContactUrl, crawledContact, origin ? `${origin}/contact/` : "", origin ? `${origin}/contact-us/` : "", origin ? `${origin}/contactus` : "", origin].filter(Boolean)
             )
           );
           if (candidates.length) {
@@ -6523,6 +6525,7 @@ function PhoneInventoryPanel({
       if (heardAs === "menu") return <span style={neutral}>✓ Connected: automated phone menu{secs != null ? ` (${secs}s)` : ""}</span>;
       if (heardAs === "voicemail") return <span style={amber}>⚠ Went to voicemail{secs != null ? ` (${secs}s)` : ""}</span>;
       if (heardAs === "person") return <span style={green}>✓ Answered by a person{secs != null ? ` (${secs}s)` : ""}</span>;
+      if (heardAs === "hold") return <span style={neutral}>✓ Connected: hold message before an agent{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "human") return <span style={green}>✓ Answered — sounded like a live person{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "voicemail") return <span style={amber}>⚠ Likely voicemail or an automated system{secs != null ? ` (${secs}s)` : ""}</span>;
       if (n.answeredBy === "fax") return <span style={amber}>⚠ Likely a fax line</span>;
@@ -8748,6 +8751,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                               if (heardAs === "menu") { label = `Connected: automated phone menu${secs != null ? ` (${secs}s)` : ""}`; color = "#5b6670"; }
                               else if (heardAs === "voicemail") { label = `Went to voicemail${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
                               else if (heardAs === "person") { label = `Answered by a person${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
+                              else if (heardAs === "hold") { label = `Connected: hold message before an agent${secs != null ? ` (${secs}s)` : ""}`; color = "#5b6670"; }
                               else if (n.answeredBy === "human") { label = `Answered — sounded live${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
                               else if (n.answeredBy === "voicemail") { label = `Likely voicemail or automated${secs != null ? ` (${secs}s)` : ""}`; color = "#9a7200"; }
                               else if (n.answeredBy === "fax") { label = "Likely a fax line"; color = "#9a7200"; }

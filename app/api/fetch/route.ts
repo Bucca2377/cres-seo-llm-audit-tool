@@ -431,6 +431,23 @@ export async function POST(req: NextRequest) {
     } catch {
       /* ignore */
     }
+    // The site's real Contact page link (hours usually live there). The audit's
+    // hours fallback used to guess /contact/ and /contact-us/ only, missing
+    // Edge 26's /contactus.
+    let contactUrl: string | null = null;
+    try {
+      const origin = new URL(start).origin;
+      contactUrl =
+        home.links.find((l) => {
+          try {
+            return new URL(l.href).origin === origin && (/contact/i.test(new URL(l.href).pathname) || /^\s*contact/i.test(l.text || ""));
+          } catch {
+            return false;
+          }
+        })?.href || null;
+    } catch {
+      /* ignore */
+    }
 
     if (body.follow && maxPages > 1) {
       let origin = "";
@@ -492,7 +509,7 @@ export async function POST(req: NextRequest) {
 
     // Gallery/photos-page images first (best represent the property), then the rest.
     const images = [...galleryImages, ...otherImages].slice(0, MAX_IMAGES);
-    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, onlineApplication, faqUrl, _meta: { source: "playwright", pages: pages.length, images: images.length } });
+    return NextResponse.json({ pages, images, platform: home.platform ?? null, officeHoursHtml, virtualTour, onlineApplication, faqUrl, contactUrl, _meta: { source: "playwright", pages: pages.length, images: images.length } });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Render failed", pages },

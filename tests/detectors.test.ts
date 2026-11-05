@@ -24,6 +24,7 @@ import {
   reviewTacticsInText,
   isCarrierIntercept,
   classifyHeard,
+  decodeEntities,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
@@ -1344,4 +1345,14 @@ test("detectors: classifyHeard recognizes a live answer (Loch Haven: 'This is De
 test("detectors: classifyHeard counts 'How can we assist?' as a person (Loch Haven, all three lines)", () => {
   assert.equal(classifyHeard("Thank you for calling the Lock Haven Apartments. How can we assist?"), "person");
   assert.equal(classifyHeard("Thanks for calling, how can we help you today? For leasing press 1."), "menu");
+});
+
+test("Edge 26: hours with 'to -', a hold message, and entity-encoded specials", () => {
+  const contact = "Monday: 10:00 AM to - 6:00 PM Tuesday: 10:00 AM to - 6:00 PM Wednesday: 10:00 AM to - 6:00 PM Thursday: 10:00 AM to - 6:00 PM Friday: 10:00 AM to - 6:00 PM Saturday: 10:00 AM to - 5:00 PM Sunday: Closed";
+  const h = parseWeekHours(contact);
+  assert.equal(Object.keys(h).length, 7);
+  assert.match(h.saturday, /10:00 AM to - 5:00 PM/);
+  assert.equal(classifyHeard("We will be with you shortly, this call may be recorded for quality assurance and training purposes."), "hold");
+  assert.equal(decodeEntities("first full month&rsquo;s rent &mdash;so you can settle &amp; relax"), "first full month’s rent —so you can settle & relax");
+  assert.doesNotMatch(detectWebsiteSpecial("Enjoy waived admin fees, plus $250 off your first full month&rsquo;s rent!") || "", /&rsquo;/);
 });

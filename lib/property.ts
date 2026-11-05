@@ -1169,6 +1169,8 @@ export async function callFetch(opts: {
   virtualTour?: boolean;
   /** FAQ page URL found among ALL home-page links (hidden nav dropdowns included). */
   faqUrl?: string | null;
+  /** The site's Contact page link from the home page (hours usually live there). */
+  contactUrl?: string | null;
   error?: string;
 }> {
   const r = await fetch("/api/fetch", {
