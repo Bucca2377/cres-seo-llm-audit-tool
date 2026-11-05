@@ -28,7 +28,7 @@ import {
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
-import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml, aptOfficeHoursFromPageText } from "../lib/hours";
+import { parseWeekHours, parseHoursToken, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml, aptOfficeHoursFromPageText } from "../lib/hours";
 import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml, faqLinkFromLinks } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
@@ -1361,6 +1361,9 @@ test("Edge 26: hours with 'to -', a hold message, and entity-encoded specials", 
   const h = parseWeekHours(contact);
   assert.equal(Object.keys(h).length, 7);
   assert.match(h.saturday, /10:00 AM to - 5:00 PM/);
+  // And it must COMPARE as real hours (it read as unparsed, so the website cell showed only "Sun closed").
+  assert.deepEqual(parseHoursToken(h.saturday), { open: 600, close: 1020 });
+  assert.deepEqual(parseHoursToken("10:00 AM \nto\n- 6:00 PM"), { open: 600, close: 1080 });
   assert.equal(classifyHeard("We will be with you shortly, this call may be recorded for quality assurance and training purposes."), "hold");
   assert.equal(decodeEntities("first full month&rsquo;s rent &mdash;so you can settle &amp; relax"), "first full month’s rent —so you can settle & relax");
   assert.doesNotMatch(detectWebsiteSpecial("Enjoy waived admin fees, plus $250 off your first full month&rsquo;s rent!") || "", /&rsquo;/);
@@ -1374,4 +1377,31 @@ test("detectors: detectWebsiteSpecial prefers the headline special over a progra
   assert.match(got, /4 WEEKS FREE ON SELECT UNITS/i);
   assert.match(got, /MOVE IN BY 12\/15\/26/i);
   assert.doesNotMatch(got, /\$250/);
+});
+
+test("Edge 26: website 'to -' hours join the vote, so Google is the lone Saturday outlier", () => {
+  const site = parseWeekHours(
+    "Monday: 10:00 AM \nto\n- 6:00 PM Tuesday: 10:00 AM \nto\n- 6:00 PM Wednesday: 10:00 AM \nto\n- 6:00 PM Thursday: 10:00 AM \nto\n- 6:00 PM Friday: 10:00 AM \nto\n- 6:00 PM Saturday: 10:00 AM \nto\n- 5:00 PM Sunday: Closed"
+  );
+  const wk = { monday: "10 AM–6 PM", tuesday: "10 AM–6 PM", wednesday: "10 AM–6 PM", thursday: "10 AM–6 PM", friday: "10 AM–6 PM", sunday: "Closed" };
+  const v = reconcileOfficeHours([
+    { key: "website", label: "the website", hours: site, authoritative: true },
+    { key: "google", label: "Google", hours: { ...wk, saturday: "10 AM–6 PM" }, authoritative: true },
+    { key: "apartments", label: "Apartments.com", hours: { ...wk, saturday: "10am - 5pm" }, authoritative: false },
+  ])!;
+  assert.equal(v.website.status, "green");
+  assert.equal(v.apartments.status, "green");
+  assert.equal(v.google.status, "red");
+  assert.match(v.google.note, /the website and Apartments\.com/);
+});
+
+test("coverage: hours card states the finding cleanly (no nested parentheses or advice tail)", async () => {
+  const { missingFindingCards } = await import("../lib/coverage");
+  const [c] = missingFindingCards(
+    [{ label: "Office hours listed", google: { status: "red", note: "Lists Sat 10 AM–6 PM, but the website and Apartments.com show Sat 10am–5pm. This conflict misleads prospects. Align it." } }],
+    [],
+    { aptIsDark: false }
+  );
+  assert.match(c.what, /The Google Business Profile lists Sat 10 AM–6 PM, but the website and Apartments\.com show Sat 10am–5pm\. Decide/);
+  assert.doesNotMatch(c.what, /\(|misleads prospects/);
 });

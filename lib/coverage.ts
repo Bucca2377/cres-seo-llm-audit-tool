@@ -55,6 +55,17 @@ const PLATFORM_PHRASE: Record<PlatformKey, string> = {
 const listPhrase = (ps: PlatformKey[]) => ps.map((p) => PLATFORM_PHRASE[p]).join(" and ");
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const verb = (ps: PlatformKey[]) => (ps.length > 1 ? "have" : "has");
+/** The cell note's finding as a client-ready sentence: "Lists Sat 10 AM–6 PM, but the
+ *  website … show Sat 10am–5pm. This conflict misleads prospects. Align it." becomes
+ *  " The Google Business Profile lists Sat 10 AM–6 PM, but …" (advice tail dropped, the
+ *  card already says what to do; no nested parentheses). Leading space, or "" if none. */
+export function hoursFinding(p: PlatformKey | undefined, note: string): string {
+  let s = (note || "").replace(/\s*(?:This conflict|Verify)\b[\s\S]*$/, "").trim();
+  if (!s) return "";
+  if (p && /^lists\b/i.test(s)) s = `${cap(PLATFORM_PHRASE[p])} ${s.charAt(0).toLowerCase()}${s.slice(1)}`;
+  if (!/[.!?]$/.test(s)) s += ".";
+  return " " + s;
+}
 const escapeReg = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 interface Topic {
@@ -88,7 +99,7 @@ const TOPICS: Topic[] = [
       return {
         priority: "FOUNDATIONAL",
         title: "Fix the office-hours conflict across listings",
-        what: `The office hours don't match across your listings${note ? ` (${note})` : ""}. Decide the correct schedule, then update ${
+        what: `The office hours don't match across your listings.${hoursFinding(red[0], note)} Decide the correct schedule, then update ${
           dark ? "the Google Business Profile and the website" : "the Google Business Profile, the website, and the Apartments.com listing"
         } so every platform shows the SAME hours. Verify with a live check afterward.`,
         why: "Mismatched hours send prospects to a closed leasing office, destroying trust and losing tours on the spot.",

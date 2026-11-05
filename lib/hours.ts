@@ -26,7 +26,12 @@ export function parseHoursToken(s: string): "closed" | "24h" | { open: number; c
   if (/^clos/.test(t)) return "closed";
   if (t.includes("24 hour") || t.includes("open 24")) return "24h";
   // Split on a dash OR the word "to" ("9:00 am to 5:00 pm" is as common as a dash).
-  const parts = t.split(/\s+to\s+|[–—-]/).map((x) => x.trim());
+  // "10:00 AM to - 6:00 PM" (Edge 26's site) uses BOTH separators; collapse them to
+  // one first, or the split yields 3 parts and every open day reads as unparsed.
+  const parts = t
+    .replace(/\s*\bto\b\s*[–—-]\s*/g, " to ")
+    .split(/\s+to\s+|[–—-]/)
+    .map((x) => x.trim());
   if (parts.length !== 2) return null;
   const toMin = (x: string): number | null => {
     const m = x.match(/(\d{1,2})(?::(\d{2}))?\s*(a|p)\.?m/i);
@@ -472,7 +477,7 @@ export function reconcileOfficeHours(platforms: HoursPlatform[]): Record<string,
       const status: "red" | "amber" = p.authoritative ? "red" : "amber";
       result[p.key] =
         status === "red"
-          ? { status, note: `Lists ${mineTxt}, but ${others2} show ${consTxt}. This conflict misleads prospects — align it.` }
+          ? { status, note: `Lists ${mineTxt}, but ${others2} show ${consTxt}. This conflict misleads prospects. Align it.` }
           : { status, note: `Lists ${mineTxt}, while ${others2} show ${consTxt}. Verify the listing and align it.` };
     } else if (ties.length) {
       // Two listings disagree with no majority to pick a winner. SHOW each side's
@@ -499,7 +504,7 @@ export function reconcileOfficeHours(platforms: HoursPlatform[]): Record<string,
       const status: "red" | "amber" = p.authoritative ? "red" : "amber";
       const tail =
         status === "red"
-          ? "This conflict misleads prospects — decide the correct hours and align them."
+          ? "This conflict misleads prospects. Decide the correct hours and align them."
           : "Verify which is correct and align them.";
       result[p.key] = {
         status,

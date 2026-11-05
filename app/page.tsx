@@ -6548,7 +6548,7 @@ function PhoneInventoryPanel({
         const capped = found > shownWeb;
         return (
           <p style={{ ...para, marginBottom: 10 }}>
-            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.{capped ? ` This site uses call-tracking that rotates ${found} different website numbers; we show ${shownWeb} representative ones — each forwards to the property.` : ""} Each test call listens to how the line answers (phone menu, voicemail, live person, or a carrier &ldquo;not in service&rdquo; recording) and shows what it heard. Spot-check any flagged line with a manual call.
+            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.{capped ? ` This site uses call-tracking that rotates ${found} different website numbers; we show ${shownWeb} representative ones — each forwards to the property.` : ""}{" "}Each test call listens to how the line answers (phone menu, voicemail, live person, or a carrier &ldquo;not in service&rdquo; recording) and shows what it heard. Spot-check any flagged line with a manual call.
           </p>
         );
       })()}
@@ -8729,7 +8729,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                   Phone / Tracking Numbers
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.{(() => { const shownWeb = mkt.phones!.numbers.filter((n) => n.source === "Website").length; const found = mkt.phones!.websiteTrackingFound ?? shownWeb; return found > shownWeb ? ` This site uses call-tracking that rotates ${found} website numbers; we show ${shownWeb} representative ones.` : ""; })()} Each test call listens to how the line answers and shows what it heard. Spot-check any flagged line.
+                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.{(() => { const shownWeb = mkt.phones!.numbers.filter((n) => n.source === "Website").length; const found = mkt.phones!.websiteTrackingFound ?? shownWeb; return found > shownWeb ? ` This site uses call-tracking that rotates ${found} website numbers; we show ${shownWeb} representative ones.` : ""; })()}{" "}Each test call listens to how the line answers and shows what it heard. Spot-check any flagged line.
                 </p>
                 <table>
                   <tbody>
