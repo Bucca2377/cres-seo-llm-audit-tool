@@ -512,3 +512,18 @@ export function reconcileOfficeHours(platforms: HoursPlatform[]): Record<string,
   }
   return result;
 }
+
+/**
+ * Apartments.com office hours from the backup reader's PAGE TEXT (web_fetch
+ * markdown), used when the raw-HTML read fails. The text carries the full week
+ * ("Office Hours Monday - Friday, 9am - 6pm Saturday, 10am - 5pm Sunday, Closed"
+ * plus a day-by-day table). Returns all 7 days, or null when the section doesn't
+ * parse to a full week (never a partial guess).
+ */
+export function aptOfficeHoursFromPageText(text: string): Record<string, string> | null {
+  const t = (text || "").replace(/\n/g, "\n").replace(/\|/g, " ");
+  const i = t.search(/office hours/i);
+  if (i < 0) return null;
+  const hours = parseWeekHours(t.slice(i, i + 700));
+  return Object.keys(hours).length === 7 ? hours : null;
+}

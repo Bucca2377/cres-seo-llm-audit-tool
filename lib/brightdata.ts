@@ -53,7 +53,7 @@ export async function brightDataRawDetailed(
       if (r.ok && body && body.length >= minLength) return { html: body, error: null };
       error = r.ok
         ? `empty response (${body.length} chars)`
-        : `Bright Data HTTP ${r.status}${body ? ": " + body.replace(/s+/g, " ").slice(0, 120) : ""}`;
+        : `Bright Data HTTP ${r.status}${body ? ": " + body.replace(/\s+/g, " ").slice(0, 120) : ""}`;
     } catch (e) {
       error =
         e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")

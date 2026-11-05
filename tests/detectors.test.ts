@@ -27,7 +27,7 @@ import {
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
-import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml } from "../lib/hours";
+import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromRawHtml, officeHoursFromHtml, aptOfficeHoursFromPageText } from "../lib/hours";
 import { detectWebsiteFeatures, detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml, faqLinkFromLinks } from "../lib/website-features";
 import { brightDataRaw } from "../lib/brightdata";
 import { buildLocalReviewComparison, selfReviewPosition } from "../lib/review-rank";
@@ -1317,4 +1317,17 @@ test("detectors: classifyHeard tells a phone menu, voicemail and a dead line apa
   assert.equal(classifyHeard("The number you have dialed is not in service."), "intercept");
   assert.equal(classifyHeard("Hello, Farmhouse Apartments, this is Katherine."), null);
   assert.equal(classifyHeard(""), null);
+});
+
+test("hours: aptOfficeHoursFromPageText reads the full week from the backup reader's page text", () => {
+  const page = "(629) 219-4874\n\nOpen 9am - 6pm Today\n\nView All Hours Office Hours Monday - Friday, 9am - 6pm Saturday, 10am - 5pm Sunday, Closed\n\nLanguage: English";
+  assert.deepEqual(aptOfficeHoursFromPageText(page), {
+    monday: "9am - 6pm", tuesday: "9am - 6pm", wednesday: "9am - 6pm", thursday: "9am - 6pm", friday: "9am - 6pm",
+    saturday: "10am - 5pm", sunday: "Closed",
+  });
+  const table = "Office Hours\n\n| Monday | 9am - 6pm |\n| Tuesday | 9am - 6pm |\n| Wednesday | 9am - 6pm |\n| Thursday | 9am - 6pm |\n| Friday | 9am - 6pm |\n| Saturday | 10am - 5pm |\n| Sunday | Closed |";
+  assert.equal(Object.keys(aptOfficeHoursFromPageText(table) || {}).length, 7);
+  // A partial week is never returned as if complete.
+  assert.equal(aptOfficeHoursFromPageText("Office Hours Monday - Friday, 9am - 6pm"), null);
+  assert.equal(aptOfficeHoursFromPageText("no hours here"), null);
 });

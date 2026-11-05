@@ -39,7 +39,7 @@ import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, am
 import { allFindingCards } from "@/lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "@/lib/recs";
 import { cellOverride, applyConsistencyOverrides, withCellOverride, effectiveMarketingRecommendations, resolveCuredOverrides, overridesExcludingPlatform, type OverridePlatform } from "@/lib/overrides";
-import { parseWeekHours, reconcileOfficeHours } from "@/lib/hours";
+import { parseWeekHours, reconcileOfficeHours, aptOfficeHoursFromPageText } from "@/lib/hours";
 import { detectWebsiteFeatures } from "@/lib/website-features";
 import PropertySettings from "./property-settings";
 
@@ -5254,10 +5254,18 @@ function MarketingAuditTab({
             websiteUrl?: string | null;
             virtualTour?: boolean | null;
             readError?: string | null;
+            photoUrls?: string[];
+            /** Set when Bright Data failed and this is the last good read (ISO time). */
+            cachedAt?: string;
           };
           const rawFetchOk = typeof sj.advertising === "boolean";
           aptRawFetchOk = rawFetchOk;
           if (!rawFetchOk) aptReadError = sj.readError || (sr.ok ? "no usable page returned" : `listing check failed (HTTP ${sr.status})`);
+          else if (sj.cachedAt) {
+            aptReadError = `${sj.readError || "failed"}; used the last good read from ${new Date(sj.cachedAt).toLocaleDateString("en-US")}`;
+          }
+          // Gallery images from the raw HTML (or last good read) for the photo pass.
+          if (Array.isArray(sj.photoUrls) && sj.photoUrls.length >= 2 && aptRead.photoUrls.length < 2) aptRead.photoUrls = sj.photoUrls;
           if (rawFetchOk) {
             aptRead.advertising = sj.advertising as boolean;
             aptRead.ok = true;
@@ -5272,7 +5280,13 @@ function MarketingAuditTab({
           // (which has reported stale/fabricated offers like "Apply by July 3"). When
           // the good raw fetch shows NO concession, clear the model's guess rather
           // than assert a wrong one.
-          if (sj.concession) aptRead.concessions = sj.concession;
+          // From the LAST GOOD READ (cachedAt), a fresh, unexpired special from the
+          // backup reader wins: specials change often, hours/tours/photos rarely.
+          const freshBackupSpecial =
+            !!sj.cachedAt && !!aptRead.concessions && !aptRead.staleCopy && !concessionDeadlinePassed(aptRead.concessions);
+          if (freshBackupSpecial) {
+            /* keep the backup reader's current special */
+          } else if (sj.concession) aptRead.concessions = sj.concession;
           else if (rawFetchOk && sj.advertising !== false) aptRead.concessions = "";
           // The listing's "View Property Website" outbound link (direct anchor to the
           // property domain) — used below to verify it reaches the real site.
@@ -5283,6 +5297,12 @@ function MarketingAuditTab({
         } catch {
           /* keep the web_fetch-based read */
         }
+      }
+      // No raw-HTML hours this run: read the full week from the backup reader's
+      // page text ("Office Hours Monday - Friday, 9am - 6pm …"), parsed in code.
+      if (!aptHoursVerified && aptRead?.ok && aptRead.officeHoursFromPage) {
+        aptRead.officeHours = aptRead.officeHoursFromPage;
+        aptHoursVerified = true;
       }
       // A special that only the model read (no raw-HTML confirmation) whose deadline
       // has already passed is an old cached copy, not the live listing. Farmhouse's
@@ -5956,7 +5976,10 @@ Return ONLY this JSON object, no prose before or after:
         try {
           setProgress("Assessing Apartments.com photos…");
           const aPrompt = `These ${Math.min(aptPhotoUrls.length, 6)} images are from the Apartments.com listing gallery of ${current.name}, a ${current.propertyType || "multifamily apartment"} community. Judge PHOTOGRAPHIC quality ONLY — lighting, focus/sharpness, framing/composition, resolution — the way a leasing prospect perceives it. Vacant or unstaged units and a basic set are NORMAL and expected for a rental listing: do NOT downgrade for empty rooms, lack of staging/furniture, or limited coverage. Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you actually see"}. green = professional real-estate photography (well-lit, sharp, properly framed), EVEN IF the units are empty; amber = several genuinely weak shots (noticeably dark, blurry, crooked/tilted, or low-res phone snapshots); red = clearly amateur throughout or almost no usable photos. When in doubt between green and amber for a clean, well-lit set, choose green.`;
-          const aResp = await callAI({ prompt: aPrompt, images: aptPhotoUrls, maxTokens: 400 });
+          // One unreachable image fails the whole call; retry once with the first 3.
+          const aResp = await callAI({ prompt: aPrompt, images: aptPhotoUrls, maxTokens: 400 }).catch(() =>
+            callAI({ prompt: aPrompt, images: aptPhotoUrls.slice(0, 3), maxTokens: 400 })
+          );
           const aTextResp = (aResp.content || [])
             .filter((b: any) => b.type === "text")
             .map((b: any) => b.text)
@@ -7852,6 +7875,8 @@ interface ApartmentsListingRead {
   hasWebsiteLink: boolean | null; // "View Property Website" link present on the listing
   /** True when web_fetch served a copy retrieved more than 2 days ago (cached, not live). */
   staleCopy: boolean;
+  /** Full week parsed IN CODE from the page text (null when it doesn't parse to 7 days). */
+  officeHoursFromPage: Record<string, string> | null;
 }
 
 /**
@@ -7868,7 +7893,7 @@ async function readApartmentsListing(url: string): Promise<ApartmentsListingRead
     ok: false, advertising: null, priceText: "", beds: "", sqft: "",
     officeHours: {}, mediaSummary: "", mediaCounts: { photos: null, virtualTours: null, videos: null },
     photoUrls: [], concessions: "", tourScheduling: null, onlineApplication: null,
-    phones: [], amenities: [], hasWebsiteLink: null, staleCopy: false,
+    phones: [], amenities: [], hasWebsiteLink: null, staleCopy: false, officeHoursFromPage: null,
   };
   if (!url) return empty;
   // web_fetch serves CACHED copies keyed by the URL: on Nov 4 Farmhouse's listing
@@ -7978,7 +8003,7 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         // photos present, quality not assessed"); its list is only the fallback.
         photoUrls: (() => {
           const fromPage = Array.from(
-            new Set<string>(String(rawFetched).match(/https?:\/\/images\d*\.apartments\.com\/i2\/[A-Za-z0-9_\-/.%]+?\.(?:jpe?g|png|webp)/gi) || [])
+            new Set<string>(String(rawFetched).match(/https?:\/\/images\d*\.apartments\.com\/i2\/[A-Za-z0-9_-]+\/\d+\/[A-Za-z0-9_.%-]+/g) || [])
           ).slice(0, 6);
           return fromPage.length >= 2
             ? fromPage
@@ -7996,6 +8021,7 @@ IF the page shows "This property is not currently advertising on Apartments.com"
           rawFetched.length > 500 ? /view\s+property\s+website|property\s+website/i.test(rawFetched) : null,
         // Backstop for the cache-buster: if the page web_fetch served was retrieved
         // more than 2 days ago, its special/photos may be outdated.
+        officeHoursFromPage: aptOfficeHoursFromPageText(String(rawFetched)),
         staleCopy: (() => {
           const at = (rawFetched.match(/"retrieved_at":"([^"]+)"/) || [])[1];
           const t = at ? Date.parse(at) : NaN;
