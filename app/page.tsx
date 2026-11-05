@@ -6499,7 +6499,7 @@ function PhoneInventoryPanel({
         const capped = found > shownWeb;
         return (
           <p style={{ ...para, marginBottom: 10 }}>
-            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.{capped ? ` This site uses call-tracking that rotates ${found} different website numbers; we show ${shownWeb} representative ones — each forwards to the property.` : ""} How the call was answered (live person vs. voicemail or an automated system) is detected automatically and is approximate &mdash; spot-check any flagged line with a manual call.
+            Numbers found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); what matters is that each one dials the property.{capped ? ` This site uses call-tracking that rotates ${found} different website numbers; we show ${shownWeb} representative ones — each forwards to the property.` : ""} Each test call listens to how the line answers (phone menu, voicemail, live person, or a carrier &ldquo;not in service&rdquo; recording) and shows what it heard. Spot-check any flagged line with a manual call.
           </p>
         );
       })()}
@@ -6559,7 +6559,7 @@ function PhoneInventoryPanel({
           <span>📞</span> {testing ? "Calling each number…" : phones.dialTested ? "Re-test call each number" : "Test-call each number"}
         </button>
         <span style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad" }}>
-          Places a brief live call to each number (~1.4¢ each) to confirm it rings a real line.
+          Places a brief live call to each number (a few cents each) and listens to how it answers.
         </span>
       </div>
       {error && (
@@ -8670,7 +8670,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                   Phone / Tracking Numbers
                 </div>
                 <p style={{ ...bodyP, fontSize: 10.5, color: "#555", marginBottom: 8 }}>
-                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.{(() => { const shownWeb = mkt.phones!.numbers.filter((n) => n.source === "Website").length; const found = mkt.phones!.websiteTrackingFound ?? shownWeb; return found > shownWeb ? ` This site uses call-tracking that rotates ${found} website numbers; we show ${shownWeb} representative ones.` : ""; })()} How a call was answered (live person vs. voicemail/automated) is detected automatically and is approximate &mdash; spot-check any flagged line.
+                  Found across the website, Google, and Apartments.com. Different numbers per platform are expected (lead-source tracking); each should dial the property.{(() => { const shownWeb = mkt.phones!.numbers.filter((n) => n.source === "Website").length; const found = mkt.phones!.websiteTrackingFound ?? shownWeb; return found > shownWeb ? ` This site uses call-tracking that rotates ${found} website numbers; we show ${shownWeb} representative ones.` : ""; })()} Each test call listens to how the line answers and shows what it heard. Spot-check any flagged line.
                 </p>
                 <table>
                   <tbody>
