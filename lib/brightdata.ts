@@ -52,7 +52,7 @@ export async function brightDataRawDetailed(
       const body = await r.text();
       if (r.ok && body && body.length >= minLength) return { html: body, error: null };
       error = r.ok
-        ? `empty response (${body.length} chars)`
+        ? `the page that came back was too small to be the real page (${Math.round(body.length / 1024)} KB), likely a bot check`
         : `Bright Data HTTP ${r.status}${body ? ": " + body.replace(/\s+/g, " ").slice(0, 120) : ""}`;
     } catch (e) {
       error =

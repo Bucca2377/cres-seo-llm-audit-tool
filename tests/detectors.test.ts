@@ -1356,3 +1356,13 @@ test("Edge 26: hours with 'to -', a hold message, and entity-encoded specials", 
   assert.equal(decodeEntities("first full month&rsquo;s rent &mdash;so you can settle &amp; relax"), "first full month’s rent —so you can settle & relax");
   assert.doesNotMatch(detectWebsiteSpecial("Enjoy waived admin fees, plus $250 off your first full month&rsquo;s rent!") || "", /&rsquo;/);
 });
+
+test("detectors: detectWebsiteSpecial prefers the headline special over a program perk (Edge 26)", () => {
+  const site =
+    "4 WEEKS FREE ON SELECT UNITS! MOVE IN BY 12/15/26!! HOME AMENITIES FLOOR PLANS. " +
+    "Edge 26 Apartments is proud to offer a Preferred Employer Program. As a thank-you to the professionals who help our community thrive, we're offering waived application and admin fees, plus $250 off your first full month&rsquo;s rent &mdash;so you can settle in.";
+  const got = detectWebsiteSpecial(site) || "";
+  assert.match(got, /4 WEEKS FREE ON SELECT UNITS/i);
+  assert.match(got, /MOVE IN BY 12\/15\/26/i);
+  assert.doesNotMatch(got, /\$250/);
+});

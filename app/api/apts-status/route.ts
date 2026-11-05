@@ -108,7 +108,10 @@ export async function POST(req: NextRequest) {
     // 35s cap kills a slow-but-successful fetch, dropping VT/hours/concession and
     // producing a false "couldn't confirm" (the recurring virtual-tour CHECK). 3
     // attempts x 45s stays under the route's maxDuration.
-    const { html, error } = await brightDataRawDetailed(url, { minLength: 5000, attempts: 3, timeoutMs: 45000 });
+    // minLength 60 KB: a real listing (active or dark shell) is hundreds of KB, while a
+    // bot-check page is ~5-10 KB. The old 5 KB floor ACCEPTED a challenge page as the
+    // listing, so no retry happened and Edge 26 read "no usable page returned".
+    const { html, error } = await brightDataRawDetailed(url, { minLength: 60000, attempts: 3, timeoutMs: 45000 });
     if (!html) {
       const cached = await lastGoodRead(url);
       if (cached) return NextResponse.json({ ...cached.data, cachedAt: cached.fetchedAt, readError: error });

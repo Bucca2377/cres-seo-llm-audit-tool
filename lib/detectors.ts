@@ -36,14 +36,37 @@ export function detectWebsiteSpecial(siteText: string): string | null {
   // past the cap and truncated it. Stopping at "=" keeps the match on one page.
   const re = new RegExp("[^.!?\\n=]*(?:" + CONCESSION_RE.source + ")[^.!?\\n=]*", "gi");
   // A special can appear more than once (a clean hero banner AND a messy social-feed
-  // post with hashtags/carousel labels around it). Clean EACH candidate and keep the
-  // longest — the fullest clean wording — instead of whichever matched first.
+  // post with hashtags/carousel labels around it), and a site can carry SEVERAL offers.
+  // Rank them: the headline rent concession ("4 WEEKS FREE … MOVE IN BY 12/15/26")
+  // beats a program perk (Edge 26's Preferred Employer "waived application fees, plus
+  // $250 off", which the old keep-the-longest rule picked). Length breaks ties, so the
+  // fullest clean wording of the same offer still wins.
   let best: string | null = null;
+  let bestScore = -Infinity;
   for (const m of flat.matchAll(re)) {
-    const cleaned = cleanSpecial(m[0]);
-    if (cleaned && (!best || cleaned.length > best.length)) best = cleaned;
+    let cleaned = cleanSpecial(m[0]);
+    if (!cleaned) continue;
+    // Banners split the deadline into its own sentence ("…SELECT UNITS! MOVE IN BY
+    // 12/15/26!!"); carry it along so the special keeps its date.
+    const after = flat.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 60);
+    const deadline = after.match(/^[!.\s]*((?:move[-\s]?in|lease|sign|apply)\s+by\s+[^.!?\n=]{3,25})/i);
+    if (deadline && !/\bby\s+\S/i.test(cleaned)) cleaned = `${cleaned}! ${decodeEntities(deadline[1]).trim()}`;
+    const s = specialScore(cleaned);
+    if (s > bestScore || (s === bestScore && best && cleaned.length > best.length)) {
+      best = cleaned;
+      bestScore = s;
+    }
   }
   return best;
+}
+
+/** Headline rent concessions rank above fee waivers and program-specific perks. */
+function specialScore(t: string): number {
+  let s = 0;
+  if (/\b(\d+|one|two|three|four|five|six|eight)\s+(weeks?|months?)\s+free\b|\bfree\s+(rent|weeks?|months?)\b|\bmonths?\s+free\b/i.test(t)) s += 3;
+  if (/\b(move[-\s]?in|lease|sign|apply)\s+by\b/i.test(t)) s += 1;
+  if (/preferred\s+employer|employer\s+program|\bprofessionals?\b|\bthank[-\s]?you\b|\bresident\s+referral|\breferral\b/i.test(t)) s -= 3;
+  return s;
 }
 
 /**
