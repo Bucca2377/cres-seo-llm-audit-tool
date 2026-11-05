@@ -5239,6 +5239,7 @@ function MarketingAuditTab({
       let aptWebsiteUrl: string | null = null;
       let aptHasVirtualTour = false;
       let aptRawFetchOk = false; // true when the Apartments.com raw-HTML read succeeded this run
+      let aptReadError: string | null = null; // why that read failed (shown under the table)
       if (current.apartmentsUrl && aptRead) {
         try {
           const sr = await fetch("/api/apts-status", {
@@ -5252,9 +5253,11 @@ function MarketingAuditTab({
             concession?: string | null;
             websiteUrl?: string | null;
             virtualTour?: boolean | null;
+            readError?: string | null;
           };
           const rawFetchOk = typeof sj.advertising === "boolean";
           aptRawFetchOk = rawFetchOk;
+          if (!rawFetchOk) aptReadError = sj.readError || (sr.ok ? "no usable page returned" : `listing check failed (HTTP ${sr.status})`);
           if (rawFetchOk) {
             aptRead.advertising = sj.advertising as boolean;
             aptRead.ok = true;
@@ -6174,6 +6177,7 @@ Return ONLY this JSON object, no prose before or after:
         criticalIssues: parsed.criticalIssues || [],
         consistency,
         recommendations: recsFinal,
+        aptReadError,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
         phones,
@@ -6619,6 +6623,13 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
           <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#888", marginTop: -4, marginBottom: 8, lineHeight: 1.45 }}>
             Auto-detected across the three platforms. Something wrong or unverified? Click the <span style={{ color: "#666" }}>✎</span> on any cell to correct it — your change replaces the result on screen and in the printed client report, and sticks through future re-runs until you reset it.
           </div>
+          {/* Team-only diagnostic (not printed): why the direct Apartments.com read
+              failed, so a silent fallback to the weaker backup reader is visible. */}
+          {results.aptReadError && (
+            <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9a6a2a", background: "#fdf6ee", border: "1px solid #e6d9c6", borderRadius: 6, padding: "6px 10px", marginBottom: 8 }}>
+              Apartments.com direct read failed this run: <strong>{results.aptReadError}</strong>. The Apartments.com column used the backup reader, so hours and photo quality may show as Check.
+            </div>
+          )}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>

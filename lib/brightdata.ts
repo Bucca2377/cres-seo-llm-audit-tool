@@ -19,9 +19,23 @@ export async function brightDataRaw(
   url: string,
   opts: { minLength?: number; attempts?: number; timeoutMs?: number } = {}
 ): Promise<string | null> {
+  return (await brightDataRawDetailed(url, opts)).html;
+}
+
+/**
+ * Same fetch, but also says WHY it failed (last attempt's reason), so the audit
+ * can show it instead of silently falling back: "no credentials", "HTTP 402 …",
+ * "empty body (n chars)", "timed out after 45s".
+ */
+export async function brightDataRawDetailed(
+  url: string,
+  opts: { minLength?: number; attempts?: number; timeoutMs?: number } = {}
+): Promise<{ html: string | null; error: string | null }> {
   const token = process.env.BRIGHTDATA_API_TOKEN;
   const zone = process.env.BRIGHTDATA_ZONE;
-  if (!token || !zone || !url) return null;
+  if (!token || !zone) return { html: null, error: "Bright Data credentials are not set in Railway" };
+  if (!url) return { html: null, error: "no listing URL" };
+  let error: string | null = null;
   const minLength = opts.minLength ?? 1000;
   const attempts = opts.attempts ?? 3;
   // A real Unlocker fetch returns in ~9s and an empty body comes back near-instantly,
@@ -35,13 +49,17 @@ export async function brightDataRaw(
         body: JSON.stringify({ zone, url, format: "raw" }),
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (r.ok) {
-        const html = await r.text();
-        if (html && html.length >= minLength) return html;
-      }
-    } catch {
-      /* empty body / timeout / network — fall through and retry */
+      const body = await r.text();
+      if (r.ok && body && body.length >= minLength) return { html: body, error: null };
+      error = r.ok
+        ? `empty response (${body.length} chars)`
+        : `Bright Data HTTP ${r.status}${body ? ": " + body.replace(/s+/g, " ").slice(0, 120) : ""}`;
+    } catch (e) {
+      error =
+        e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")
+          ? `timed out after ${Math.round(timeoutMs / 1000)}s`
+          : `network error: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
-  return null;
+  return { html: null, error: `${error ?? "unknown error"} (after ${attempts} attempts)` };
 }

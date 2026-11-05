@@ -546,6 +546,8 @@ export interface MarketingAuditResult {
    * note so the cure is visible and accountable.
    */
   overrideResolutions?: { label: string; platform: "apartments" | "google" | "website" }[];
+  /** Why the direct (Bright Data) Apartments.com read failed this run, if it did. */
+  aptReadError?: string | null;
   timestamp: string;
 }
 

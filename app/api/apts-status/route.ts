@@ -6,7 +6,7 @@ import {
   aptHasVirtualTourFromRawHtml,
 } from "@/lib/detectors";
 import { aptOfficeHoursFromRawHtml } from "@/lib/hours";
-import { brightDataRaw } from "@/lib/brightdata";
+import { brightDataRawDetailed } from "@/lib/brightdata";
 
 export const runtime = "nodejs";
 export const maxDuration = 150;
@@ -46,8 +46,8 @@ export async function POST(req: NextRequest) {
     // 35s cap kills a slow-but-successful fetch, dropping VT/hours/concession and
     // producing a false "couldn't confirm" (the recurring virtual-tour CHECK). 3
     // attempts x 45s stays under the route's maxDuration.
-    const html = await brightDataRaw(url, { minLength: 5000, attempts: 3, timeoutMs: 45000 });
-    if (!html) return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null });
+    const { html, error } = await brightDataRawDetailed(url, { minLength: 5000, attempts: 3, timeoutMs: 45000 });
+    if (!html) return NextResponse.json({ advertising: null, officeHours: null, concession: null, websiteUrl: null, virtualTour: null, readError: error });
     // Office hours + concession from the RAW HTML are AUTHORITATIVE. The visible
     // listing collapses hours behind "View All Hours" (model misreads closed days as
     // open) and the model has also misread the concession banner (e.g. reporting a
