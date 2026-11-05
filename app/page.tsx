@@ -5429,10 +5429,14 @@ function MarketingAuditTab({
       } else if (!googleWebsiteUrl) {
         googleLink = { status: "red", note: "No website link on the Google listing — prospects can't click through to your site." };
       } else if (propDomain && gWebDomain && gWebDomain !== propDomain) {
-        // Google points to a different domain than the property's site.
+        // Google points to a different domain than the property's site. A vanity
+        // domain that REDIRECTS to the property's site is fine (Loch Haven:
+        // livelochhaven.com -> liveatcf.com/loch-haven-apartments).
         googleLink =
           gReach?.reachable === false
             ? { status: "red", note: `Google's website link (${gWebDomain}) doesn't load — a broken click-through for prospects.` }
+            : gReach?.reachable === true && gFinal === propDomain
+            ? { status: "green", note: `Verified: Google's website link (${gWebDomain}) redirects to your site (${propDomain}).` }
             : { status: "amber", note: `Google's website link goes to ${gWebDomain}, not your site (${propDomain}) — verify it's intended.` };
       } else if (gReach?.reachable === false) {
         googleLink = { status: "red", note: `The Website link on your Google listing (${propDomain}) returned an error and didn't load — verify it's live.` };
@@ -5456,20 +5460,25 @@ function MarketingAuditTab({
         aptLink = { status: "na", note: "Not advertising on Apartments.com." };
       } else if (aptWebsiteUrl) {
         const linkDomain = domainOf(aptWebsiteUrl);
+        let reach: { reachable?: boolean | null; finalDomain?: string } | null = null;
+        try {
+          const rr = await fetch("/api/linkcheck", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: aptWebsiteUrl }),
+          });
+          reach = await rr.json();
+        } catch {
+          reach = null;
+        }
+        const aptFinal = (reach?.finalDomain || "").toLowerCase();
         if (propDomain && linkDomain && linkDomain !== propDomain) {
-          aptLink = { status: "amber", note: `The listing's "View Property Website" link points to ${linkDomain}, not your site (${propDomain}) — verify it's intended.` };
+          // Another domain is fine when it REDIRECTS to the property's site.
+          aptLink =
+            reach?.reachable === true && aptFinal === propDomain
+              ? { status: "green", note: `Verified: the "View Property Website" link (${linkDomain}) redirects to your site (${propDomain}).` }
+              : { status: "amber", note: `The listing's "View Property Website" link points to ${linkDomain}, not your site (${propDomain}) — verify it's intended.` };
         } else {
-          let reach: { reachable?: boolean | null } | null = null;
-          try {
-            const rr = await fetch("/api/linkcheck", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url: aptWebsiteUrl }),
-            });
-            reach = await rr.json();
-          } catch {
-            reach = null;
-          }
           aptLink =
             reach?.reachable === false
               ? { status: "red", note: `The listing's website link (${linkDomain || propDomain}) returned an error and didn't load — verify it's live.` }

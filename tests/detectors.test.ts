@@ -1340,3 +1340,8 @@ test("detectors: classifyHeard recognizes a live answer (Loch Haven: 'This is De
   assert.equal(classifyHeard("How can I help you today? For leasing, press 1."), "menu");
   assert.equal(classifyHeard("This is the Lock Haven leasing office."), null);
 });
+
+test("detectors: classifyHeard counts 'How can we assist?' as a person (Loch Haven, all three lines)", () => {
+  assert.equal(classifyHeard("Thank you for calling the Lock Haven Apartments. How can we assist?"), "person");
+  assert.equal(classifyHeard("Thanks for calling, how can we help you today? For leasing press 1."), "menu");
+});
