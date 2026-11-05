@@ -564,3 +564,15 @@ export function reviewTacticsInText(text: string): string[] {
   const t = (text || "").toLowerCase();
   return REVIEW_TACTICS.filter((tac) => tac.match(t)).map((tac) => tac.id);
 }
+
+/**
+ * True when the transcript of a test call is a CARRIER INTERCEPT ("The number
+ * you have dialed is not in service"). A disconnected US number usually answers
+ * with this recording, which answering-machine detection classifies as "machine",
+ * so the dial test used to report a dead line as "likely voicemail".
+ */
+export function isCarrierIntercept(text: string | null | undefined): boolean {
+  const t = (text || "").toLowerCase();
+  if (!t) return false;
+  return /\b(not|no longer) (in|a) (service|working number)\b|\bno longer in service\b|\b(has been|is) disconnected\b|\bnot a working number\b|\bcannot be completed as dialed\b|\bcall (cannot|could not|can ?not) be completed\b|\btemporarily (out of service|disconnected)\b|\bnumber (you have dialed|you dialed|dialed) (is|has)\b[\s\S]{0,40}\b(changed|disconnected|not)\b|\bcheck the number and (dial|try) again\b/.test(t);
+}

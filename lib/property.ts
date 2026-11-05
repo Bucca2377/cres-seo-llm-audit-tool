@@ -497,6 +497,10 @@ export interface PhoneNumberEntry {
   answeredBy?: "human" | "voicemail" | "fax" | "unknown" | null;
   /** Approximate seconds the line rang before it was answered / gave up. */
   ringSeconds?: number | null;
+  /** What the answering side said on the test call (speech transcript), when captured. */
+  heard?: string | null;
+  /** The carrier answered with a "not in service / disconnected" recording. */
+  notInService?: boolean;
 }
 
 /** All phone/tracking numbers found across the property's platforms. */

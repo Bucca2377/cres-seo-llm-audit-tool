@@ -2396,6 +2396,8 @@ type DialResult = {
   detail?: string;
   answeredBy?: "human" | "voicemail" | "fax" | "unknown" | null;
   ringSeconds?: number | null;
+  heard?: string | null;
+  notInService?: boolean;
 };
 
 /**
@@ -6088,7 +6090,7 @@ Return ONLY this JSON object, no prose before or after:
               numbers: phones.numbers.map((n) => {
                 const res = byNum.get(normalizePhone(n.number));
                 return res
-                  ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds }
+                  ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds, heard: res.heard ?? null, notInService: !!res.notInService }
                   : n;
               }),
             };
@@ -6099,7 +6101,20 @@ Return ONLY this JSON object, no prose before or after:
         // Drop dial-confirmed phantom numbers (a "failed" dial = invalid/unreachable,
         // e.g. a leasing-widget tracking number that isn't a live line). Only when at
         // least one other number connected, so a dial-wide outage can't wipe the list.
-        if (phones?.dialTested) phones = { ...phones, numbers: dropDeadDialedNumbers(phones.numbers) };
+        // A carrier "not in service" recording on a Google / Apartments.com number,
+        // or the site's main number, is a REAL finding (prospects can't reach the
+        // office), not a phantom widget number, so it is never dropped.
+        if (phones?.dialTested) {
+          const all = phones.numbers;
+          const firstWeb = all.find((n) => n.source === "Website")?.number;
+          const keep = new Set(dropDeadDialedNumbers(all).map((n) => n.number));
+          phones = {
+            ...phones,
+            numbers: all.filter(
+              (n) => keep.has(n.number) || (n.notInService && (n.source !== "Website" || n.number === firstWeb))
+            ),
+          };
+        }
       }
 
       // Property marked NOT on Apartments.com -> force the whole Apartments.com
@@ -6124,7 +6139,20 @@ Return ONLY this JSON object, no prose before or after:
       // Amber/verify cells stay as table annotations, not recs. Single source of
       // truth in lib/coverage.ts, covered by tests/detectors.test.ts.
       const tableCards = allFindingCards(consistency, { aptIsDark }) as RecommendationCard[];
-      let recsFinal: RecommendationCard[] = aptIsDark ? [aptActivationCard, ...tableCards] : tableCards;
+      // A listed number that reaches a carrier "not in service" recording is a lead
+      // leak: deterministic fix card per number (from the dial test, not the model).
+      const deadNumberCards: RecommendationCard[] = (phones?.numbers || [])
+        .filter((n) => n.notInService)
+        .map((n) => ({
+          priority: "FOUNDATIONAL" as RecommendationPriority,
+          title: `Fix the disconnected ${n.source} phone number`,
+          what: `${n.number} on ${n.source} reaches the carrier's "not in service" recording, so prospects calling it can't reach the leasing office. Replace it on ${n.source} with a working leasing line (or restore service on it), then re-test.`,
+          why: n.heard ? `On the test call the line said: "${n.heard}"` : "The test call reached a carrier disconnect recording.",
+          effort: "~15 min · property manager",
+          success: "A re-test shows the line connects to the leasing office.",
+          source: "Phone dial test",
+        }));
+      let recsFinal: RecommendationCard[] = [...deadNumberCards, ...(aptIsDark ? [aptActivationCard, ...tableCards] : tableCards)];
       // Stable priority ordering — critical hygiene leads, longer-horizon work trails.
       const RECS_PRIORITY_RANK: Record<string, number> = {
         FOUNDATIONAL: 0, "QUICK WIN": 1, "MAP PACK": 2, "AI VISIBILITY": 3, CONTENT: 4, STRATEGIC: 5, "LONG-TAIL": 6,
@@ -6398,7 +6426,7 @@ function PhoneInventoryPanel({
         phones.numbers.map((n) => {
           const res = byNum.get(normalizePhone(n.number));
           return res
-            ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds }
+            ? { ...n, dialStatus: res.status as PhoneNumberEntry["dialStatus"], dialNote: res.detail, answeredBy: res.answeredBy, ringSeconds: res.ringSeconds, heard: res.heard ?? null, notInService: !!res.notInService }
             : n;
         })
       );
@@ -6414,7 +6442,18 @@ function PhoneInventoryPanel({
     setTesting(false);
   };
 
+  // Status label plus, when the test call captured it, what the line actually said.
   const badge = (n: PhoneNumberEntry) => {
+    const core = badgeCore(n);
+    if (testing || !n.heard) return core;
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+        {core}
+        <span style={{ color: "#6b7580", fontSize: 10.5, fontStyle: "italic", maxWidth: 340, textAlign: "right" }}>Heard: &ldquo;{n.heard}&rdquo;</span>
+      </span>
+    );
+  };
+  const badgeCore = (n: PhoneNumberEntry) => {
     if (testing) return <span style={{ color: "#9aa3ad", fontSize: 11 }}>testing…</span>;
     const s = n.dialStatus;
     const secs = typeof n.ringSeconds === "number" ? n.ringSeconds : null;
@@ -6428,6 +6467,7 @@ function PhoneInventoryPanel({
     // Labels are HEDGED: Twilio's answering-machine detection is probabilistic and
     // cannot reliably tell voicemail from an auto-attendant/IVR, or a failed route
     // from a dead number. Verify any flagged line with a manual call.
+    if (n.notInService) return <span style={red}>✗ Not in service: the carrier says this number is disconnected</span>;
     if (s === "failed") return <span style={red}>✗ Didn&apos;t connect (dead number or routing issue)</span>;
     if (s === "unknown") return <span style={neutral}>? Inconclusive</span>;
     if (s === "connected") {
@@ -8638,7 +8678,8 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                             const secs = typeof n.ringSeconds === "number" ? n.ringSeconds : null;
                             let label = "—";
                             let color = "#9a7200";
-                            if (n.dialStatus === "failed") { label = "Didn't connect (dead number or routing)"; color = "#b14a2a"; }
+                            if (n.notInService) { label = "Not in service (carrier says disconnected)"; color = "#b14a2a"; }
+                            else if (n.dialStatus === "failed") { label = "Didn't connect (dead number or routing)"; color = "#b14a2a"; }
                             else if (n.dialStatus === "unknown") { label = "Inconclusive"; color = "#5b6670"; }
                             else if (n.dialStatus === "connected") {
                               if (n.answeredBy === "human") { label = `Answered — sounded live${secs != null ? ` (${secs}s)` : ""}`; color = "#15803d"; }
@@ -8649,7 +8690,14 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                               else { label = "Connected — answered (live vs automated unclear)"; color = "#5b6670"; }
                             }
                             return (
-                              <td style={{ ...findingsTd, textAlign: "center", width: 150, fontWeight: 700, color }}>{label}</td>
+                              <td style={{ ...findingsTd, textAlign: "center", width: 150, fontWeight: 700, color }}>
+                                {label}
+                                {n.heard ? (
+                                  <div style={{ fontWeight: 400, fontStyle: "italic", fontSize: 9.5, color: "#666", marginTop: 2 }}>
+                                    Heard: &ldquo;{n.heard.length > 90 ? n.heard.slice(0, 90) + "…" : n.heard}&rdquo;
+                                  </div>
+                                ) : null}
+                              </td>
                             );
                           })()}
                         </tr>

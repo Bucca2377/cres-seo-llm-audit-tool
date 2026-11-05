@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
+import { dialStore, pruneDialStore } from "@/lib/dial-store";
+import { isCarrierIntercept } from "@/lib/detectors";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -24,6 +27,18 @@ type DialStatus = "connected" | "failed" | "unknown";
 
 const TWIML =
   "<Response><Say voice=\"alice\">This is an automated line check from C R E S. Thank you, goodbye.</Say><Hangup/></Response>";
+
+/**
+ * Listen first, then say goodbye. <Gather input="speech"> transcribes what the
+ * ANSWERING side says ("Thank you for calling…", a voicemail greeting, or a carrier
+ * "this number is not in service" recording) and posts it to /api/dial-callback,
+ * which returns the goodbye TwiML. Without this, a disconnected number's carrier
+ * recording read as "likely voicemail" (machine detection can't tell them apart).
+ */
+function listeningTwiml(callbackUrl: string): string {
+  const action = `${callbackUrl}&t=gather`.replace(/&/g, "&amp;");
+  return `<Response><Gather input="speech" language="en-US" speechModel="phone_call" timeout="6" speechTimeout="2" actionOnEmptyResult="true" method="POST" action="${action}"></Gather><Say voice="alice">This is an automated line check from C R E S. Thank you, goodbye.</Say><Hangup/></Response>`;
+}
 
 /** Map a terminal Twilio call status to our connected/failed verdict. */
 function mapStatus(twilioStatus: string): DialStatus {
@@ -67,6 +82,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No valid US phone numbers to test." }, { status: 400 });
   }
 
+  // Public origin Twilio can call back (Railway sets x-forwarded-*). Local dev
+  // (localhost) can't receive callbacks -> fall back to the old say-and-hang-up call.
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const proto = (req.headers.get("x-forwarded-proto") || "https").split(",")[0].trim();
+  const origin = process.env["PUBLIC_BASE_URL"] || (host && !/localhost|127.0.0.1/.test(host) ? `${proto}://${host}` : "");
+  pruneDialStore();
+
   const authHeader = "Basic " + Buffer.from(`${sid}:${token}`).toString("base64");
   const base = `https://api.twilio.com/2010-04-01/Accounts/${sid}`;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -87,18 +109,41 @@ export async function POST(req: NextRequest) {
     detail: string;
     answeredBy: "human" | "voicemail" | "fax" | "unknown" | null;
     ringSeconds: number | null;
+    /** What the answering side said (speech transcript), when captured. */
+    heard?: string | null;
+    /** Carrier "not in service" recording detected in the transcript. */
+    notInService?: boolean;
   }> => {
+    const key = origin ? crypto.randomBytes(18).toString("hex") : "";
+    const callbackUrl = key ? `${origin}/api/dial-callback?k=${key}` : "";
+    if (key) dialStore.set(key, { url: callbackUrl, created: Date.now() });
     try {
-      // Place the call with inline TwiML, a short ring timeout, and Answering
-      // Machine Detection so we learn whether a live person or voicemail picked up.
-      const form = new URLSearchParams({
-        To: to,
-        From: from,
-        Twiml: TWIML,
-        Timeout: "20",
-        MachineDetection: "Enable",
-        MachineDetectionTimeout: "12",
-      });
+      // Place the call with a short ring timeout and Answering Machine Detection.
+      // With a callback origin: ASYNC machine detection (so the call starts
+      // listening the moment it's answered, before the carrier recording ends)
+      // plus the listening TwiML. Without one: the original say-and-hang-up call.
+      const form = new URLSearchParams(
+        callbackUrl
+          ? {
+              To: to,
+              From: from,
+              Twiml: listeningTwiml(callbackUrl),
+              Timeout: "20",
+              MachineDetection: "Enable",
+              MachineDetectionTimeout: "12",
+              AsyncAmd: "true",
+              AsyncAmdStatusCallback: `${callbackUrl}&t=amd`,
+              AsyncAmdStatusCallbackMethod: "POST",
+            }
+          : {
+              To: to,
+              From: from,
+              Twiml: TWIML,
+              Timeout: "20",
+              MachineDetection: "Enable",
+              MachineDetectionTimeout: "12",
+            }
+      );
       const placeRes = await fetch(`${base}/Calls.json`, {
         method: "POST",
         headers: { Authorization: authHeader, "Content-Type": "application/x-www-form-urlencoded" },
@@ -118,7 +163,7 @@ export async function POST(req: NextRequest) {
       let status = String(placed?.status || "queued");
       let answeredBy = "";
       let ringSeconds: number | null = null;
-      for (let i = 0; i < 24 && !["completed", "busy", "no-answer", "failed", "canceled"].includes(status); i++) {
+      for (let i = 0; i < 30 && !["completed", "busy", "no-answer", "failed", "canceled"].includes(status); i++) {
         await sleep(1500);
         const poll = await fetch(`${base}/Calls/${callSid}.json`, { headers: { Authorization: authHeader } });
         const pj = await poll.json().catch(() => ({} as Record<string, unknown>));
@@ -130,13 +175,24 @@ export async function POST(req: NextRequest) {
         }
       }
       if (ringSeconds === null && status === "no-answer") ringSeconds = Math.round((Date.now() - t0) / 1000);
-      return { number: to, status: mapStatus(status), detail: status, answeredBy: mapAnsweredBy(answeredBy), ringSeconds };
+      // Callback results (async machine detection + transcript) can land a moment
+      // after the call ends; give them up to ~3s.
+      const entry = key ? dialStore.get(key) : undefined;
+      for (let i = 0; entry && status === "completed" && i < 6 && (!entry.gatherDone || !entry.answeredBy); i++) await sleep(500);
+      if (entry?.answeredBy) answeredBy = entry.answeredBy;
+      const heard = entry?.speech?.trim() || null;
+      if (key) dialStore.delete(key);
+      if (isCarrierIntercept(heard)) {
+        return { number: to, status: "failed", detail: "not in service (carrier recording)", answeredBy: "unknown", ringSeconds, heard, notInService: true };
+      }
+      return { number: to, status: mapStatus(status), detail: status, answeredBy: mapAnsweredBy(answeredBy), ringSeconds, heard };
     } catch (e) {
+      if (key) dialStore.delete(key);
       return { number: to, status: "unknown", detail: e instanceof Error ? e.message : "request failed", answeredBy: null, ringSeconds: null };
     }
   };
 
   const results = await Promise.all(numbers.map(testOne));
-  const cost = numbers.length * 0.02; // rough: ~1-2¢/call + $1/mo number
+  const cost = numbers.length * (origin ? 0.05 : 0.02); // rough: call + AMD (+ speech recognition when listening)
   return NextResponse.json({ results, _meta: { calls: numbers.length, cost, source: "twilio" } });
 }

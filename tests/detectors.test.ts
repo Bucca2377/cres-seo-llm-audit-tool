@@ -22,6 +22,7 @@ import {
   reviewTacticsPromptBlock,
   scrubRecClaims,
   reviewTacticsInText,
+  isCarrierIntercept,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
@@ -1287,4 +1288,21 @@ test("detectors: reviewTacticsInText finds the tactics a Done card covers; door-
     scrubRecClaims("Text move-ins a review link. Leave a QR door hanger after every closed work order.", { inPlace: ["door_hangers"] }),
     "Text move-ins a review link."
   );
+});
+
+test("detectors: isCarrierIntercept catches carrier 'not in service' recordings, not greetings", () => {
+  for (const t of [
+    "We're sorry, you have reached a number that has been disconnected or is no longer in service.",
+    "The number you have dialed is not in service. Please check the number and dial again.",
+    "Your call cannot be completed as dialed.",
+    "The number you dialed has been changed or disconnected",
+    "this is not a working number",
+  ]) assert.equal(isCarrierIntercept(t), true, t);
+  for (const t of [
+    "Thank you for calling Farmhouse Apartments, our office is currently closed.",
+    "Hello?",
+    "Please leave a message after the tone and we'll call you back.",
+    "",
+  ]) assert.equal(isCarrierIntercept(t), false, t);
+  assert.equal(isCarrierIntercept(null), false);
 });

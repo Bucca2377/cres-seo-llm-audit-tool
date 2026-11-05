@@ -12,8 +12,10 @@ import { NextRequest, NextResponse } from "next/server";
  * only the password is checked, so the team just needs to remember one secret.
  */
 export const config = {
-  // Apply to everything except Next's static assets and the logo.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|cres-logo.svg).*)"],
+  // Apply to everything except Next's static assets, the logo, and the Twilio callback.
+  // api/dial-callback is Twilio's webhook for the phone dial test: Twilio can't
+  // send the site password, so that route verifies Twilio's request signature instead.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|cres-logo.svg|api/dial-callback).*)"],
 };
 
 export function middleware(req: NextRequest) {
