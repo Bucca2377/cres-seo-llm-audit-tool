@@ -20,6 +20,7 @@ import {
   aptMediaCountsFromContent,
   recSetsUpInPlaceTactic,
   reviewTacticsPromptBlock,
+  scrubRecClaims,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
@@ -1240,4 +1241,35 @@ test("detectors: recSetsUpInPlaceTactic drops recs to set up review tactics the 
   assert.equal(recSetsUpInPlaceTactic("Add a framed review QR code at the front desk", undefined), false);
   assert.equal(reviewTacticsPromptBlock([]), "");
   assert.match(reviewTacticsPromptBlock(["door_hangers"]), /door hangers/i);
+});
+
+test("detectors: scrubRecClaims removes rank claims the table contradicts (the Farmhouse SEO recs)", () => {
+  const ranks = [
+    { query: "Farmhouse Luxury Apartments", branded: true, mapPack: [1], organic: [4] },
+    { query: "1 bedroom apartments to rent in Murfreesboro", branded: false, mapPack: [8], organic: [] },
+    { query: "pet friendly apartments in Murfreesboro", branded: false, mapPack: [5], organic: [] },
+    { query: "apartments near mtsu campus", branded: false, mapPack: [], organic: [] },
+    { query: "luxury apartments near mtsu", branded: false, mapPack: [3], organic: [4] },
+    { query: "apartment complexes near mtsu", branded: false, mapPack: [17], organic: [2] },
+  ];
+  // Wrong "all queries" range -> sentence removed, the rest kept.
+  const r1 = scrubRecClaims("Respond within 48 hours. The property ranks Map Pack #8–#17 for all tested queries except its brand name. Keep going.", { ranks });
+  assert.equal(r1, "Respond within 48 hours. Keep going.");
+  // A specific range about two named searches (no "all") is left alone.
+  const r2 = "Move from Map Pack #5–#6 to top 3 within 120 days.";
+  assert.equal(scrubRecClaims(r2, { ranks }), r2);
+  // Quoted search followed by its true position is kept; a wrong one is removed.
+  const ok = 'It ranks "1 bedroom apartments to rent in Murfreesboro" #8 today.';
+  assert.equal(scrubRecClaims(ok, { ranks }), ok);
+  assert.equal(scrubRecClaims('Absent for "pet friendly apartments in Murfreesboro" (Map Pack #2). Ok.', { ranks }), "Ok.");
+  // "#2 for <quoted>" phrasing is not misread as the previous quote's number.
+  const r3 = 'It ranks organic #4 for "luxury apartments near mtsu" and #2 for "apartment complexes near mtsu".';
+  assert.equal(scrubRecClaims(r3, { ranks }), r3);
+  // Depth claims beyond what we check become top 30; top 3 stays.
+  assert.equal(scrubRecClaims("Absent from organic top 100 and the top 3.", { ranks }), "Absent from organic top 30 and the top 3.");
+  // In-place review tactic sentence removed from the body.
+  assert.equal(
+    scrubRecClaims("Text move-ins a review link. Place framed QR codes at the front desk and in common areas.", { inPlace: ["qr_office"] }),
+    "Text move-ins a review link."
+  );
 });

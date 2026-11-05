@@ -33,7 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, type RankFact } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -3487,17 +3487,40 @@ Return ONLY a JSON array of 9 strings.`;
       setStage("analyzing");
       setProgress("Analyzing results and generating recommendations...");
 
-      const queryRankSummary = queries
+      // Verified positions per search, matching what the report TABLE shows (the
+      // smoothed Map Pack median when there is history, else this run). Fed to the
+      // prompt AND used to scrub rec sentences that misstate them (scrubRecClaims).
+      const rankFacts: RankFact[] = queries.map((q, i) => {
+        const r = ranks[i];
+        const raw = r.map_pack_rank ?? r.expanded_map_pack_rank ?? null;
+        const sm = smoothedMapPack(currentProperty.seoRankSnapshots, q, 5)?.median ?? null;
+        return {
+          query: q,
+          branded: isBrandedQuery(q, currentProperty),
+          mapPack: Array.from(new Set([raw, sm].filter((v): v is number => v != null))),
+          organic: r.organic_rank ? [r.organic_rank] : [],
+        };
+      });
+      const compFacts = rankFacts.filter((f) => !f.branded);
+      const compShown = compFacts.map((f) => f.mapPack[f.mapPack.length - 1] ?? null);
+      const compIn = compShown.filter((p): p is number => p != null);
+      const rankFactsLine = compFacts.length
+        ? `COMPETITIVE MAP PACK FACTS (non-branded searches, as the table shows them): ${compIn.length ? `best #${Math.min(...compIn)}, worst #${Math.max(...compIn)}` : "not in any Map Pack"}; in the visible top 3 on ${compIn.filter((p) => p <= 3).length} of ${compFacts.length}; not in the Map Pack top 20 on ${compShown.length - compIn.length} of ${compFacts.length}. Quote positions exactly from the per-search lines; never claim a range or "all / every search" unless these facts support it. Organic is checked to the top 30 only.\n\n`
+        : "";
+      const queryRankSummary = rankFactsLine + queries
         .map((q, i) => {
           const r = ranks[i];
-          const mp = r.map_pack_rank
-            ? `Map Pack #${r.map_pack_rank}`
-            : r.map_pack_appeared
-            ? "Map Pack appeared but not in top 3"
-            : "No Map Pack";
+          const pos = rankFacts[i].mapPack[rankFacts[i].mapPack.length - 1] ?? null;
+          const mp = pos == null
+            ? r.map_pack_appeared
+              ? "Map Pack shows for this search but the property is not in its top 20"
+              : "No Map Pack"
+            : pos <= 3
+            ? `Map Pack #${pos} (visible top 3)`
+            : `Map Pack #${pos} (expanded list, not in the visible top 3)`;
           const org = r.organic_rank
             ? `Organic #${r.organic_rank} (Page ${r.organic_page})`
-            : "Not in organic top 100";
+            : "Not in organic top 30";
           const competitors = [
             r.top_map_pack.slice(0, 2).join(", "),
             r.top_organic.slice(0, 2).map((o) => o.name).join(", "),
@@ -3795,6 +3818,19 @@ Recommendation rules (STRICT):
             if (recSetsUpInPlaceTactic(c.title || "", currentProperty.reviewTacticsInPlace)) return false;
             return true;
           });
+          // Sentence-level: remove claims that contradict the rank table (wrong
+          // "all searches" ranges, wrong positions, "top 100") and any sentence
+          // setting up a review tactic already in place. A card whose action is
+          // left empty is dropped.
+          const scrubOpts = { ranks: rankFacts, inPlace: currentProperty.reviewTacticsInPlace };
+          recommendations = recommendations
+            .map((c) => ({
+              ...c,
+              what: scrubRecClaims(c.what || "", scrubOpts),
+              why: scrubRecClaims(c.why || "", scrubOpts),
+              success: scrubRecClaims(c.success || "", scrubOpts),
+            }))
+            .filter((c) => c.what.trim().length > 0);
         }
       } catch {
         /* keep recommendations empty; the audit still saves */
@@ -6966,7 +7002,15 @@ RULES:
       }
       // Never recommend setting up a review tactic the team marked as already in place.
       if (Array.isArray(recs)) {
-        recs = recs.filter((c) => !recSetsUpInPlaceTactic(c.title || "", current.reviewTacticsInPlace));
+        recs = recs
+          .filter((c) => !recSetsUpInPlaceTactic(c.title || "", current.reviewTacticsInPlace))
+          // Also remove in-place-tactic sentences from the body; drop a card left empty.
+          .map((c) => ({
+            ...c,
+            what: scrubRecClaims(c.what || "", { inPlace: current.reviewTacticsInPlace }),
+            why: scrubRecClaims(c.why || "", { inPlace: current.reviewTacticsInPlace }),
+          }))
+          .filter((c) => c.what.trim().length > 0);
       }
 
       // Merge Claude's suggestions onto the code-held review/response text by id.

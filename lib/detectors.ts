@@ -497,3 +497,59 @@ export function reviewTacticsPromptBlock(inPlace: string[] | undefined): string 
   if (!labels.length) return "";
   return `REVIEW TACTICS ALREADY IN PLACE at this property (confirmed by the property team): ${labels.join("; ")}. Do NOT recommend setting up, adding, printing or installing any of these. You MAY recommend using them more effectively (timing, follow-up, staff habits) or tactics beyond them.`;
 }
+
+/** One tracked search's verified positions, for checking claims in a recommendation. */
+export interface RankFact {
+  query: string;
+  branded: boolean;
+  /** Every Map Pack position a reader could see for it (this run + the table's smoothed value). */
+  mapPack: number[];
+  /** Organic position(s), empty when not in the top 30. */
+  organic: number[];
+}
+
+/**
+ * Remove sentences from a model-written recommendation that misstate the audit's
+ * own data, and fix the one wording error we can fix in place. Farmhouse's report
+ * said "ranks Map Pack #8–#17 for all tested queries" next to a table showing
+ * #3, #5 and #6, and "absent from organic top 100" when we only check 30 deep.
+ *  - a sentence claiming a Map Pack range for ALL/EVERY query that the data
+ *    contradicts (some competitive search ranks outside it, or isn't in the pack);
+ *  - a sentence quoting a tracked search followed directly by a "#N" that is
+ *    neither its Map Pack nor its organic position;
+ *  - a sentence proposing to set up a review tactic the property already runs;
+ *  - "top 50/100" depth claims become "top 30" (the depth we actually check).
+ */
+export function scrubRecClaims(text: string, opts: { ranks?: RankFact[]; inPlace?: string[] }): string {
+  if (!text) return text;
+  const ranks = opts.ranks || [];
+  const comp = ranks.filter((r) => !r.branded);
+  const compPositions = comp.flatMap((r) => r.mapPack);
+  const anyCompAbsent = comp.some((r) => r.mapPack.length === 0);
+  const fixed = text.replace(/\btop[\s-]+(\d{2,3})\b/gi, (m, n) => (parseInt(n, 10) > 30 ? m.replace(n, "30") : m));
+  const sentences = fixed.split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9#])/);
+  const keep = sentences.filter((s) => {
+    const low = s.toLowerCase();
+    if (comp.length && /map\s*pack/.test(low) && /\b(all|every|each)\b/.test(low)) {
+      const range = s.match(/#(\d{1,2})\s*(?:–|—|-|to)\s*#?(\d{1,2})\b/);
+      if (range) {
+        const a = parseInt(range[1], 10);
+        const b = parseInt(range[2], 10);
+        if (compPositions.some((p) => p < a || p > b) || anyCompAbsent) return false;
+      }
+    }
+    for (const m of s.matchAll(/["“]([^"”]{3,90})["”]/g)) {
+      const fact = ranks.find((r) => r.query.trim().toLowerCase() === m[1].trim().toLowerCase());
+      if (!fact) continue;
+      const after = s.slice((m.index ?? 0) + m[0].length);
+      const n = after.match(/^\s*[(,]?\s*(?:(?:map\s*pack|organic|is|at|ranks?)\s*)*#(\d{1,3})\b/i);
+      if (n) {
+        const v = parseInt(n[1], 10);
+        if (!fact.mapPack.includes(v) && !fact.organic.includes(v)) return false;
+      }
+    }
+    if (recSetsUpInPlaceTactic(s, opts.inPlace)) return false;
+    return true;
+  });
+  return keep.join(" ").trim();
+}
