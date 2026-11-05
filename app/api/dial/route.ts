@@ -37,7 +37,7 @@ const TWIML =
  */
 function listeningTwiml(callbackUrl: string): string {
   const action = `${callbackUrl}&t=gather`.replace(/&/g, "&amp;");
-  return `<Response><Gather input="speech" language="en-US" speechModel="phone_call" timeout="6" speechTimeout="2" actionOnEmptyResult="true" method="POST" action="${action}"></Gather><Say voice="alice">This is an automated line check from C R E S. Thank you, goodbye.</Say><Hangup/></Response>`;
+  return `<Response><Gather input="speech" language="en-US" speechModel="phone_call" timeout="15" speechTimeout="2" actionOnEmptyResult="true" method="POST" action="${action}"></Gather><Say voice="alice">This is an automated line check from C R E S. Thank you, goodbye.</Say><Hangup/></Response>`;
 }
 
 /** Map a terminal Twilio call status to our connected/failed verdict. */
@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
       let status = String(placed?.status || "queued");
       let answeredBy = "";
       let ringSeconds: number | null = null;
-      for (let i = 0; i < 30 && !["completed", "busy", "no-answer", "failed", "canceled"].includes(status); i++) {
+      for (let i = 0; i < 36 && !["completed", "busy", "no-answer", "failed", "canceled"].includes(status); i++) {
         await sleep(1500);
         const poll = await fetch(`${base}/Calls/${callSid}.json`, { headers: { Authorization: authHeader } });
         const pj = await poll.json().catch(() => ({} as Record<string, unknown>));
@@ -180,7 +180,9 @@ export async function POST(req: NextRequest) {
       const entry = key ? dialStore.get(key) : undefined;
       for (let i = 0; entry && status === "completed" && i < 6 && (!entry.gatherDone || !entry.answeredBy); i++) await sleep(500);
       if (entry?.answeredBy) answeredBy = entry.answeredBy;
-      const heard = entry?.speech?.trim() || null;
+      // "" = the listen step ran but heard no words (silence, ringing, hold music);
+      // null = no transcript came back at all.
+      const heard = entry?.gatherDone ? (entry.speech || "").trim() : null;
       if (key) dialStore.delete(key);
       if (isCarrierIntercept(heard)) {
         return { number: to, status: "failed", detail: "not in service (carrier recording)", answeredBy: "unknown", ringSeconds, heard, notInService: true };

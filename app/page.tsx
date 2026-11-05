@@ -6445,7 +6445,14 @@ function PhoneInventoryPanel({
   // Status label plus, when the test call captured it, what the line actually said.
   const badge = (n: PhoneNumberEntry) => {
     const core = badgeCore(n);
-    if (testing || !n.heard) return core;
+    if (testing || n.heard == null) return core;
+    if (n.heard === "")
+      return (
+        <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          {core}
+          <span style={{ color: "#6b7580", fontSize: 11, fontStyle: "italic" }}>Heard: no words in the first 15 seconds (silence, ringing or hold music)</span>
+        </span>
+      );
     // One-line excerpt; the full transcript is on hover.
     const excerpt = n.heard.length > 110 ? n.heard.slice(0, 110).replace(/s+S*$/, "") + "…" : n.heard;
     return (
