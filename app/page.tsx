@@ -85,6 +85,7 @@ RESIDENT REVIEWS (CRES Resident Reviews P&P):
 - Ask ONLY at peak-satisfaction moments, texting the SPECIFIC resident segment at that moment — NEVER blast a review link to all residents. The three core triggers: (1) residents who MOVED IN within the past week, (2) residents who SUCCESSFULLY RENEWED their lease within the past 30 days, and (3) residents whose WORK ORDER was COMPLETED within 24 hours of submitting. Also acceptable: application/lease signing, after resident events, and during "Hug a Building" visits. Never ask during unresolved issues, delinquency, or move-out.
 - TEXT MESSAGE is the preferred channel — text a one-tap Google review link (under 60 seconds) to the residents who just hit one of those trigger moments, NOT to the whole resident list. A recommendation to "text all residents a review link" is WRONG; always scope it to the trigger segments above.
 - Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, a review QR code on the maintenance door hanger left after every completed work order, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
+- ONE TOUCHPOINT PER CARD: when recommending review-request touchpoints (door hangers, office QR plaque, direct review link, staff-badge QR, the work-order-complete notice, text triggers), give each its OWN card. Never bundle several touchpoints into one card, so the team can mark each one done separately. At most 2 such cards per audit; pick the ones most likely missing.
 - "Hug a Building" (≈twice/year per building): power-wash + touch-up + resident gift baskets; use the face-to-face moment to gather feedback and solicit reviews with the QR code in hand.
 - Respond to EVERY review. Never ask specifically for 5 stars — ask for honest feedback. Follow up only once.
 - Employee incentives (all payouts subject to owner/client approval) — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle). Any recommendation to pay these MUST say it is subject to owner/client approval. These paid incentives are ONLY for a property that needs to LIFT its rating/volume — do NOT recommend them for a property already rated ABOVE 4.25 (that wastes money).
@@ -2707,15 +2708,14 @@ function CitationsPanel({
   /** Save (url string, "" for none) or clear (null) a team confirmation for a network. */
   onConfirm?: (network: string, url: string | null) => void;
 }) {
+  // Inline "Mark listed" editor (the browser's native prompt looked like an error).
+  const [editing, setEditing] = useState<string | null>(null);
+  const [urlDraft, setUrlDraft] = useState("");
   if (!citations || citations.sources.length === 0) return null;
   const rows = citationNetworkRows(citations, confirmed, units);
   const confirmListed = (network: string) => {
-    const url = window.prompt(
-      `Confirm ${network} lists this property. Paste the listing URL (optional), then OK:`,
-      ""
-    );
-    if (url === null) return; // cancelled
-    onConfirm?.(network, url.trim());
+    setEditing(network);
+    setUrlDraft("");
   };
   const smallBtn: React.CSSProperties = {
     marginLeft: 4,
@@ -2810,6 +2810,35 @@ function CitationsPanel({
           );
         })}
       </div>
+      {editing && onConfirm && (
+        <div style={{ marginTop: 10, padding: "10px 12px", border: `1px solid ${B.cambridge}`, borderRadius: 8, background: "#f6faf9", fontFamily: "'Josefin Sans',sans-serif", fontSize: 12.5, color: "#333" }}>
+          <div style={{ marginBottom: 6 }}>
+            Only confirm if you know this property is listed on <strong>{editing}</strong>. Paste the listing link if you have it (optional).
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <input
+              autoFocus
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
+              placeholder="https://… (optional)"
+              style={{ flex: "1 1 260px", padding: "5px 8px", border: "1px solid #d7dde3", borderRadius: 6, fontFamily: "inherit", fontSize: 12.5 }}
+            />
+            <button
+              type="button"
+              style={{ ...smallBtn, marginLeft: 0, background: B.caribbean, color: "white", border: "none", padding: "5px 12px" }}
+              onClick={() => {
+                onConfirm(editing, urlDraft.trim());
+                setEditing(null);
+              }}
+            >
+              Confirm listed
+            </button>
+            <button type="button" style={{ ...smallBtn, marginLeft: 0, padding: "5px 12px" }} onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <p style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11, color: "#9aa3ad", marginTop: 10 }}>
         Directional read from one brand search — networks, not individual sibling sites (a listing on Apartments.com covers ApartmentFinder/ForRent). A &ldquo;○&rdquo; means that network didn&apos;t surface, so it&apos;s worth verifying/claiming — not a confirmed absence. Listings Google hasn&apos;t indexed won&apos;t surface here; use &ldquo;Mark listed&rdquo; when you know the property is on a network.{aptNotAdvertising ? " Apartments.com shows a directory listing, but the property is not currently advertising there (see the consistency check)." : ""}
       </p>
