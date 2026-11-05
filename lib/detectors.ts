@@ -243,7 +243,13 @@ export function aptWebsiteLinkFromRawHtml(html: string): string | null {
  */
 export function aptAdvertisingFromRawHtml(html: string): boolean | null {
   if (!html || html.length < 500) return null;
-  const ownPricing = /pricing\s*&?\s*floor\s*plans|monthly\s+rent/i.test(html);
+  // The heading is HTML-encoded in the raw page ("Pricing &amp; Floor Plans"), and
+  // Apartments.com replaced "Monthly Rent" with "Total Monthly Price" (a label that
+  // ALSO appears on nearby-listing placards, so it is not used). The old pattern
+  // matched neither, so a real 579 KB Edge 26 listing read as "not the listing".
+  // pricingGridItem is the property's own floor-plan grid.
+  const ownPricing =
+    /pricing\s*(?:&amp;|&|and)?\s*floor\s*plans|monthly\s+rent|\bpricingGridItem\b/i.test(html);
   if (ownPricing) return true;
   if (/explore similar rentals nearby/i.test(html)) return false;
   return null;

@@ -144,6 +144,15 @@ test("apts: ACTIVE listing (own Pricing & Floor Plans / Monthly Rent) -> true", 
   assert.equal(aptAdvertisingFromRawHtml(active + " Explore Similar Rentals Nearby"), true);
 });
 
+test("apts: 2026 markup (encoded &amp; heading, no 'Monthly Rent') -> true (Edge 26)", () => {
+  const pad = "<html>" + "x".repeat(600);
+  // Raw HTML encodes the ampersand; "Monthly Rent" is gone (now "Total Monthly Price").
+  assert.equal(aptAdvertisingFromRawHtml(pad + "<h2 class=\"sectionTitle\">Pricing &amp; Floor Plans</h2></html>"), true);
+  assert.equal(aptAdvertisingFromRawHtml(pad + "<div class=\"pricingGridItem multiFamily\"></div></html>"), true);
+  // "Total Monthly Price" alone is a placard label (nearby listings too): not a signal.
+  assert.equal(aptAdvertisingFromRawHtml(pad + " Total Monthly Price </html>"), null);
+});
+
 test("apts: undeterminable -> null (caller keeps its prior read)", () => {
   assert.equal(aptAdvertisingFromRawHtml(""), null); // empty
   assert.equal(aptAdvertisingFromRawHtml("short"), null); // too thin
