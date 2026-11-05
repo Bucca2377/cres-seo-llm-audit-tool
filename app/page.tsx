@@ -2314,8 +2314,21 @@ async function checkCitations(property: Property): Promise<CitationResult | unde
  * "present" if ANY sibling surfaced. Returns the found sites (with links) and
  * whether the network counts as a gap worth claiming.
  */
-function citationNetworkRows(citations: CitationResult | undefined, confirmed?: Record<string, string>) {
+/**
+ * Zillow has been the EXCLUSIVE provider of multifamily (25+ unit) rental
+ * listings on Redfin, Rent.com and ApartmentGuide since spring 2025 (Zillow /
+ * Redfin partnership, announced Feb 11, 2025). So a 25+ unit property on Zillow
+ * is on Rent. through that feed, even though Google rarely indexes those Rent.com
+ * pages (Farmhouse: listed on Rent.com via its Zillow package, invisible to the
+ * search-based check).
+ */
+const ZILLOW_SYNDICATION_MIN_UNITS = 25;
+
+function citationNetworkRows(citations: CitationResult | undefined, confirmed?: Record<string, string>, units?: number) {
   const sources = citations?.sources ?? [];
+  const zillowPresent = CITATION_NETWORKS.filter((n) => n.network === "Zillow").some((n) =>
+    n.sites.some((s) => sources.some((x) => x.domain === s.domain && x.present))
+  );
   return CITATION_NETWORKS.map((net) => {
     const siteResults = net.sites
       .map((s) => sources.find((x) => x.domain === s.domain))
@@ -2330,12 +2343,22 @@ function citationNetworkRows(citations: CitationResult | undefined, confirmed?: 
       const site = net.sites[0];
       foundSites = [{ name: site.name, domain: site.domain, present: true, url: teamUrl || undefined, network: net.network, standalone: net.standalone }];
     }
+    // Rent. through the Zillow feed: on Zillow + 25 units or more (or unit count
+    // not entered) -> listed via syndication. Unit count under 25 -> not inferred.
+    const viaZillow =
+      !na && foundSites.length === 0 && net.network === "Rent. (RentPath)" && zillowPresent &&
+      (!units || units >= ZILLOW_SYNDICATION_MIN_UNITS);
+    if (viaZillow) {
+      const site = net.sites[0];
+      foundSites = [{ name: site.name, domain: site.domain, present: true, network: net.network, standalone: net.standalone }];
+    }
     return {
       network: net.network,
       standalone: net.standalone,
       present: foundSites.length > 0 && !na,
       na,
       teamConfirmed,
+      viaZillow,
       foundSites,
       // Carried from the citation data itself (see checkCitations) so the "listed,
       // not advertising" caveat doesn't depend on a separate audit's state.
@@ -2653,9 +2676,9 @@ function smoothedMapPack(
 }
 
 /** Plain-text citation summary fed into the recommendations prompt. */
-function citationsPromptSummary(c: CitationResult | undefined, confirmed?: Record<string, string>): string {
+function citationsPromptSummary(c: CitationResult | undefined, confirmed?: Record<string, string>, units?: number): string {
   if (!c) return "LOCAL CITATIONS: not checked this run.";
-  const rows = citationNetworkRows(c, confirmed);
+  const rows = citationNetworkRows(c, confirmed, units);
   const present = rows.filter((r) => r.present).map((r) => r.network);
   // N/A networks (e.g. a property intentionally not on Apartments.com) are NOT a
   // gap — exclude them so the model never recommends claiming/listing there.
@@ -2674,15 +2697,18 @@ function CitationsPanel({
   aptNotAdvertising = false,
   confirmed,
   onConfirm,
+  units,
 }: {
   citations: CitationResult | undefined;
   aptNotAdvertising?: boolean;
   confirmed?: Record<string, string>;
+  /** Property unit count (Zillow syndicates 25+ unit listings to Rent.com). */
+  units?: number;
   /** Save (url string, "" for none) or clear (null) a team confirmation for a network. */
   onConfirm?: (network: string, url: string | null) => void;
 }) {
   if (!citations || citations.sources.length === 0) return null;
-  const rows = citationNetworkRows(citations, confirmed);
+  const rows = citationNetworkRows(citations, confirmed, units);
   const confirmListed = (network: string) => {
     const url = window.prompt(
       `Confirm ${network} lists this property. Paste the listing URL (optional), then OK:`,
@@ -2736,6 +2762,8 @@ function CitationsPanel({
             ? `${r.network} — listed, not actively advertising`
             : r.teamConfirmed
             ? `${r.network} · confirmed by team`
+            : r.viaZillow
+            ? `${r.network} · via Zillow feed`
             : active && r.foundSites.length > 1
             ? `${r.network} (${r.foundSites.length} sites)`
             : r.network;
@@ -3734,7 +3762,7 @@ ${technicalSeoPromptSummary(technicalSeo)}
 ${faqPagePath ? `\nNOTE: the site ALREADY has an FAQ page (${faqPagePath}). Do NOT recommend creating/publishing a new FAQ page. If it lacks FAQPage (JSON-LD) schema, you MAY recommend adding schema to the EXISTING page instead.\n` : ""}
 ${pageSpeedPromptSummary(pageSpeed)}
 
-${citationsPromptSummary(citations, currentProperty.confirmedCitations)}
+${citationsPromptSummary(citations, currentProperty.confirmedCitations, currentProperty.units)}
 
 Based on BOTH the Google rank data AND the AI-assistant visibility above, return EXACTLY 5 ranked recommendations to improve ${currentProperty.name}'s visibility across Google search AND AI assistants (ChatGPT/Claude/Gemini). Order by highest ROI first.
 
@@ -4569,6 +4597,7 @@ Recommendation rules (STRICT):
             citations={results.citations}
             aptNotAdvertising={aptListedNotAdvertising(property.marketingAudit?.consistency)}
             confirmed={property.confirmedCitations}
+            units={property.units}
             onConfirm={(network, url) => {
               const next = { ...(property.confirmedCitations || {}) };
               if (url === null) delete next[network];
@@ -8945,7 +8974,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
             </table>
 
             {seo.citations && seo.citations.sources.length > 0 && (() => {
-              const rows = citationNetworkRows(seo.citations, property.confirmedCitations);
+              const rows = citationNetworkRows(seo.citations, property.confirmedCitations, property.units);
               // Prefer the caveat carried by the citation data itself (determined
               // deterministically at fetch time); fall back to the marketing audit.
               const aptNotAdv = rows.some((r) => r.notAdvertising) || aptListedNotAdvertising(mkt?.consistency);
@@ -8987,7 +9016,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                               ) : caveat ? (
                                 <span style={{ color: "#9a6a2a" }}> — listed, not actively advertising</span>
                               ) : active && r.foundSites.length > 0 ? (
-                                <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}{r.teamConfirmed ? " (confirmed by property team)" : ""}</span>
+                                <span style={{ color: "#888" }}> — {r.foundSites.map((s) => s.name).join(", ")}{r.teamConfirmed ? " (confirmed by property team)" : r.viaZillow ? " (via Zillow's listing feed)" : ""}</span>
                               ) : null}
                             </td>
                             <td style={{ ...findingsTd, textAlign: "center", fontWeight: 700, color: na ? "#9aa3ad" : active ? "#15803d" : "#9a6a2a" }}>
@@ -9348,8 +9377,8 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
           <div style={h2}>Things the audit can&apos;t see</div>
           <ul style={{ paddingLeft: 18, margin: 0 }}>
-            <li style={li}><strong>Directory listings Google hasn&apos;t indexed</strong> (e.g. Rent.com through a Zillow package): on the SEO tab&apos;s Local Citations panel, click <strong>Mark listed</strong> next to the network and paste the listing URL. It counts as listed on screen and in print. <strong>Undo</strong> removes it.</li>
-            <li style={li}><strong>Offline review tactics</strong> (office QR plaque, direct Google review links, maintenance door hangers): tick them under <strong>Review tactics already in place</strong> in Property Settings. The SEO and Review audits will stop recommending them.</li>
+            <li style={li}><strong>Directory listings Google hasn&apos;t indexed</strong> (Rent.com is now filled in automatically for 25+ unit properties on Zillow, since Zillow feeds Rent.com): on the SEO tab&apos;s Local Citations panel, click <strong>Mark listed</strong> next to the network and paste the listing URL. It counts as listed on screen and in print. <strong>Undo</strong> removes it.</li>
+            <li style={li}><strong>Offline review tactics</strong> (office QR plaque, direct Google review links, maintenance door hangers): tick them under <strong>Review tactics already in place</strong> in Property Settings. The SEO and Review audits will stop recommending them. <strong>Apply these to all properties</strong> sets them across the whole roster in one click.</li>
           </ul>
 
           <div style={h2}>Client deliverables</div>
