@@ -1331,3 +1331,12 @@ test("hours: aptOfficeHoursFromPageText reads the full week from the backup read
   assert.equal(aptOfficeHoursFromPageText("Office Hours Monday - Friday, 9am - 6pm"), null);
   assert.equal(aptOfficeHoursFromPageText("no hours here"), null);
 });
+
+test("detectors: classifyHeard recognizes a live answer (Loch Haven: 'This is Destiny. How can I assist?')", () => {
+  assert.equal(classifyHeard("Thank you for calling the Lock Haven Apartments. This is Destiny. How can I assist?"), "person");
+  assert.equal(classifyHeard("Farmhouse Apartments, Katherine speaking"), "person");
+  // Recordings stay recordings.
+  assert.equal(classifyHeard("This is the leasing office. Please leave a message after the tone."), "voicemail");
+  assert.equal(classifyHeard("How can I help you today? For leasing, press 1."), "menu");
+  assert.equal(classifyHeard("This is the Lock Haven leasing office."), null);
+});

@@ -585,13 +585,18 @@ export function isCarrierIntercept(text: string | null | undefined): boolean {
  *   "intercept" carrier not-in-service recording (dead line)
  *   "menu"      automated phone menu / IVR (a working line)
  *   "voicemail" voicemail greeting
+ *   "person"    a live greeting ("This is Destiny, how can I assist?", Loch Haven)
  *   null        can't tell from the words (fall back to machine detection)
  */
-export function classifyHeard(text: string | null | undefined): "intercept" | "menu" | "voicemail" | null {
+export function classifyHeard(text: string | null | undefined): "intercept" | "menu" | "voicemail" | "person" | null {
   const t = (text || "").toLowerCase();
   if (!t) return null;
   if (isCarrierIntercept(t)) return "intercept";
   if (/\bpress (\d|one|two|three|four|five|star|pound|zero)\b|\bmain menu\b|\bdial by name\b/.test(t)) return "menu";
   if (/\bleave (a|your) (message|name)\b|\bafter the (tone|beep)\b|\bvoice ?mail\b|\bmailbox\b|\bnot available to take your call\b|\bunable to (take|answer) (your|the) call\b/.test(t)) return "voicemail";
+  // A live answer: first-person "how can I help / assist" or "<name> speaking".
+  // Checked after menu/voicemail, so a recording that also offers help with
+  // "press 1" or "leave a message" isn't counted as a person.
+  if (/\bhow (can|may) i (help|assist)\b|\bwhat can i (do|help)\b|\b[a-z]+ speaking\b/.test(t)) return "person";
   return null;
 }
