@@ -57,6 +57,8 @@ export interface SetAsideRec {
   note?: string;                  // optional free-text detail
   audit: "marketing" | "seo" | "review"; // which audit surfaced it (for display grouping)
   setAsideAt: string;             // ISO timestamp
+  /** Review tactics this card covered, recorded as in place when marked Done (removed on restore). */
+  tactics?: string[];
 }
 
 /**

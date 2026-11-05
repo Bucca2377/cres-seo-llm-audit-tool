@@ -487,7 +487,7 @@ export const REVIEW_TACTICS: { id: string; label: string; match: (t: string) => 
 export function recSetsUpInPlaceTactic(title: string, inPlace: string[] | undefined): boolean {
   if (!inPlace || inPlace.length === 0) return false;
   const t = (title || "").toLowerCase();
-  if (!/\b(add|adds|adding|create|generate|set\s*up|install|print|place|post|display|launch|introduce|implement|order|design|make|deploy|roll\s*out|start)\b/.test(t)) return false;
+  if (!/\b(add|adds|adding|create|generate|set\s*up|install|print|place|post|display|launch|introduce|implement|order|design|make|deploy|roll\s*out|start|leave|hang|attach|distribute|hand\s+out|put)\b/.test(t)) return false;
   return REVIEW_TACTICS.some((tac) => inPlace.includes(tac.id) && tac.match(t));
 }
 
@@ -552,4 +552,15 @@ export function scrubRecClaims(text: string, opts: { ranks?: RankFact[]; inPlace
     return true;
   });
   return keep.join(" ").trim();
+}
+
+/**
+ * Review tactics a recommendation card is about (ids from REVIEW_TACTICS).
+ * Marking such a card "✓ Done" records these as in place, so the tactic stays
+ * out of future runs however the model rewords or re-bundles it (the Done list
+ * alone matches by exact title).
+ */
+export function reviewTacticsInText(text: string): string[] {
+  const t = (text || "").toLowerCase();
+  return REVIEW_TACTICS.filter((tac) => tac.match(t)).map((tac) => tac.id);
 }

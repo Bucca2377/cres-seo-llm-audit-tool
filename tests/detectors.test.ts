@@ -21,6 +21,7 @@ import {
   recSetsUpInPlaceTactic,
   reviewTacticsPromptBlock,
   scrubRecClaims,
+  reviewTacticsInText,
 } from "../lib/detectors";
 import { missingFindingCards, allFindingCards } from "../lib/coverage";
 import { setAsideKey, setAsideKeySet, isSetAside } from "../lib/recs";
@@ -1270,6 +1271,20 @@ test("detectors: scrubRecClaims removes rank claims the table contradicts (the F
   // In-place review tactic sentence removed from the body.
   assert.equal(
     scrubRecClaims("Text move-ins a review link. Place framed QR codes at the front desk and in common areas.", { inPlace: ["qr_office"] }),
+    "Text move-ins a review link."
+  );
+});
+
+test("detectors: reviewTacticsInText finds the tactics a Done card covers; door-hanger sentences are scrubbed after", () => {
+  assert.deepEqual(reviewTacticsInText("Add review QR codes to maintenance door hangers"), ["door_hangers"]);
+  assert.deepEqual(
+    reviewTacticsInText("Trigger review requests. Place framed QR codes at the front desk and leave door hangers after work orders."),
+    ["qr_office", "door_hangers"]
+  );
+  assert.deepEqual(reviewTacticsInText("Respond to every review within 48 hours"), []);
+  // Once recorded, a reworded door-hanger sentence inside another card is removed.
+  assert.equal(
+    scrubRecClaims("Text move-ins a review link. Leave a QR door hanger after every closed work order.", { inPlace: ["door_hangers"] }),
     "Text move-ins a review link."
   );
 });

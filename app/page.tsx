@@ -33,7 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, type RankFact } from "@/lib/detectors";
+import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, reviewTacticsInText, type RankFact } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -84,7 +84,7 @@ CLIENT APPROVAL — any recommendation that spends the owner's / client's money 
 RESIDENT REVIEWS (CRES Resident Reviews P&P):
 - Ask ONLY at peak-satisfaction moments, texting the SPECIFIC resident segment at that moment — NEVER blast a review link to all residents. The three core triggers: (1) residents who MOVED IN within the past week, (2) residents who SUCCESSFULLY RENEWED their lease within the past 30 days, and (3) residents whose WORK ORDER was COMPLETED within 24 hours of submitting. Also acceptable: application/lease signing, after resident events, and during "Hug a Building" visits. Never ask during unresolved issues, delinquency, or move-out.
 - TEXT MESSAGE is the preferred channel — text a one-tap Google review link (under 60 seconds) to the residents who just hit one of those trigger moments, NOT to the whole resident list. A recommendation to "text all residents a review link" is WRONG; always scope it to the trigger segments above.
-- Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
+- Remove friction everywhere: framed QR code at the front desk, QR on the back of staff badges/lanyards and business cards, a "Leave Us a Review" link in email signatures, a review link embedded in the automated "work order complete" notice, a review QR code on the maintenance door hanger left after every completed work order, QR signage in laundry/mail/elevator/clubhouse, and a persistent "Rate Your Experience" button in the resident portal.
 - "Hug a Building" (≈twice/year per building): power-wash + touch-up + resident gift baskets; use the face-to-face moment to gather feedback and solicit reviews with the QR code in hand.
 - Respond to EVERY review. Never ask specifically for 5 stars — ask for honest feedback. Follow up only once.
 - Employee incentives (all payouts subject to owner/client approval) — DAILY: $25 per 4-/5-star review that names a team member, paid to that employee as part of their commission bonuses. MONTHLY team bonus (split among the staff): +$150 for a month with ZERO 1-/2-star reviews; +$250 for a month with 10+ 4-/5-star reviews. Residents: you cannot pay for a positive review, but may reward ALL feedback with a small incentive (gift card / raffle). Any recommendation to pay these MUST say it is subject to owner/client approval. These paid incentives are ONLY for a property that needs to LIFT its rating/volume — do NOT recommend them for a property already rated ABOVE 4.25 (that wastes money).
@@ -7977,18 +7977,34 @@ function withSetAside(
 ): Property {
   const key = setAsideKey(card);
   const rest = (property.setAsideRecs ?? []).filter((s) => s.key !== key);
+  // Marking a card Done that covers a review tactic (door hangers, office QR
+  // plaque, direct review link) records the tactic as in place, so the code
+  // filter keeps it out of every later run even when reworded or bundled.
+  const tactics = reason === DONE_REASON ? reviewTacticsInText(`${card.title} ${card.what || ""}`) : [];
+  const inPlace = Array.from(new Set([...(property.reviewTacticsInPlace ?? []), ...tactics]));
   return {
     ...property,
+    ...(tactics.length ? { reviewTacticsInPlace: inPlace } : {}),
     setAsideRecs: [
       ...rest,
-      { key, title: card.title, reason, audit, setAsideAt: new Date().toISOString() },
+      { key, title: card.title, reason, audit, setAsideAt: new Date().toISOString(), ...(tactics.length ? { tactics } : {}) },
     ],
   };
 }
 
 /** Return a copy of `property` with the set-aside entry for `key` removed. */
 function withRestored(property: Property, key: string): Property {
-  return { ...property, setAsideRecs: (property.setAsideRecs ?? []).filter((s) => s.key !== key) };
+  const list = property.setAsideRecs ?? [];
+  const restored = list.find((s) => s.key === key);
+  const remaining = list.filter((s) => s.key !== key);
+  // Undo the tactics that card recorded, unless another Done card still covers them.
+  const stillCovered = new Set(remaining.flatMap((s) => s.tactics ?? []));
+  const drop = (restored?.tactics ?? []).filter((t) => !stillCovered.has(t));
+  return {
+    ...property,
+    ...(drop.length ? { reviewTacticsInPlace: (property.reviewTacticsInPlace ?? []).filter((t) => !drop.includes(t)) } : {}),
+    setAsideRecs: remaining,
+  };
 }
 
 /** Standalone printed Resident Review Audit (its own PDF, not combined). */
@@ -9378,7 +9394,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <div style={h2}>Things the audit can&apos;t see</div>
           <ul style={{ paddingLeft: 18, margin: 0 }}>
             <li style={li}><strong>Directory listings Google hasn&apos;t indexed</strong> (Rent.com is now filled in automatically for 25+ unit properties on Zillow, since Zillow feeds Rent.com): on the SEO tab&apos;s Local Citations panel, click <strong>Mark listed</strong> next to the network and paste the listing URL. It counts as listed on screen and in print. <strong>Undo</strong> removes it.</li>
-            <li style={li}><strong>Offline review tactics</strong> (office QR plaque, direct Google review links, maintenance door hangers): tick them under <strong>Review tactics already in place</strong> in Property Settings. The SEO and Review audits will stop recommending them. <strong>Apply these to all properties</strong> sets them across the whole roster in one click.</li>
+            <li style={li}><strong>Offline review tactics</strong> (office QR plaque, direct Google review links, maintenance door hangers): click <strong>✓ Done</strong> on the recommendation that suggests them and they are remembered as in place for that property automatically (or tick them under <strong>Review tactics already in place</strong> in Property Settings). The SEO and Review audits will stop recommending them. <strong>Apply these to all properties</strong> sets them across the whole roster in one click.</li>
           </ul>
 
           <div style={h2}>Client deliverables</div>
