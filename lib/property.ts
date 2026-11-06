@@ -548,6 +548,8 @@ export interface MarketingAuditResult {
   overrideResolutions?: { label: string; platform: "apartments" | "google" | "website" }[];
   /** Why the direct (Bright Data) Apartments.com read failed this run, if it did. */
   aptReadError?: string | null;
+  /** Set when the direct read failed but the last good read (this date) filled the column. */
+  aptReadCachedFrom?: string | null;
   timestamp: string;
 }
 

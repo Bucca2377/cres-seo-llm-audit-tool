@@ -111,7 +111,14 @@ export async function POST(req: NextRequest) {
     // minLength 60 KB: a real listing (active or dark shell) is hundreds of KB, while a
     // bot-check page is ~5-10 KB. The old 5 KB floor ACCEPTED a challenge page as the
     // listing, so no retry happened and Edge 26 read "no usable page returned".
-    const { html, error } = await brightDataRawDetailed(url, { minLength: 60000, attempts: 3, timeoutMs: 45000 });
+    // accept: a page with no listing structure (a generic homepage / challenge page that
+    // still clears 60 KB) is retried instead of used.
+    const { html, error } = await brightDataRawDetailed(url, {
+      minLength: 60000,
+      attempts: 3,
+      timeoutMs: 45000,
+      accept: (h) => aptAdvertisingFromRawHtml(h) !== null,
+    });
     if (!html) {
       const cached = await lastGoodRead(url);
       if (cached) return NextResponse.json({ ...cached.data, cachedAt: cached.fetchedAt, readError: error });

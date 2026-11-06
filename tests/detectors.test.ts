@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   detectWebsiteSpecial,
+  unbundleReviewTactics,
   specialFromHtml,
   aptAdvertisingFromRawHtml,
   aptConcessionFromRawHtml,
@@ -1278,8 +1279,8 @@ test("detectors: scrubRecClaims removes rank claims the table contradicts (the F
   // "#2 for <quoted>" phrasing is not misread as the previous quote's number.
   const r3 = 'It ranks organic #4 for "luxury apartments near mtsu" and #2 for "apartment complexes near mtsu".';
   assert.equal(scrubRecClaims(r3, { ranks }), r3);
-  // Depth claims beyond what we check become top 30; top 3 stays.
-  assert.equal(scrubRecClaims("Absent from organic top 100 and the top 3.", { ranks }), "Absent from organic top 30 and the top 3.");
+  // Organic depth claims past page 1 (all we can see) become "page 1 of Google"; top 3 stays.
+  assert.equal(scrubRecClaims("Absent from organic top 100 and the top 3.", { ranks }), "Absent from page 1 of Google and the top 3.");
   // In-place review tactic sentence removed from the body.
   assert.equal(
     scrubRecClaims("Text move-ins a review link. Place framed QR codes at the front desk and in common areas.", { inPlace: ["qr_office"] }),
@@ -1404,4 +1405,39 @@ test("coverage: hours card states the finding cleanly (no nested parentheses or 
   );
   assert.match(c.what, /The Google Business Profile lists Sat 10 AM–6 PM, but the website and Apartments\.com show Sat 10am–5pm\. Decide/);
   assert.doesNotMatch(c.what, /\(|misleads prospects/);
+});
+
+test("Reserve at Sawmill: organic claims past page 1 are restated (Google returns ~10 results)", () => {
+  const s = (t: string) => scrubRecClaims(t, { ranks: [] });
+  assert.equal(s("It is absent from organic top 30 for all."), "It is absent from page 1 of Google for all.");
+  assert.equal(s("The site is not in the top 30 organic results."), "The site is not on page 1 of Google.");
+  assert.equal(s("Organic top 20 is all aggregators."), "Page 1 of Google is all aggregators.");
+  // Map Pack "top 3" and page-1 "top 10" are untouched.
+  assert.equal(s("Move into the visible top 3 and organic top 10."), "Move into the visible top 3 and organic top 10.");
+});
+
+test("Reserve at Sawmill: a review card bundling the door hanger is split into its own card", () => {
+  const cards = [
+    {
+      priority: "MAP PACK",
+      title: "Text direct Google review links to move-in and renewal residents",
+      what: "Within 7 days of move-in and within 30 days of a renewal, send a one-tap Google review link by text. Include the link in the automated work-order-complete notice and place a QR code on the maintenance door hanger left after every completed repair. The property has 57 reviews at 3.9 stars.",
+      why: "w",
+      effort: "e",
+      success: "s",
+      source: "src",
+    },
+  ];
+  const out = unbundleReviewTactics(cards, []);
+  assert.equal(out.length, 2);
+  assert.doesNotMatch(out[0].what, /door hanger/i);
+  assert.match(out[0].what, /57 reviews/);
+  assert.equal(out[1].title, "Add a review QR code to maintenance door hangers");
+  // Already in place (marked Done): sentence removed, no new card.
+  const done = unbundleReviewTactics(cards, ["door_hangers"]);
+  assert.equal(done.length, 1);
+  assert.doesNotMatch(done[0].what, /door hanger/i);
+  // A separate door-hanger card already exists: no duplicate.
+  const both = unbundleReviewTactics([...cards, { ...cards[0], title: "Leave review door hangers after work orders", what: "Hang them." }], []);
+  assert.equal(both.filter((c) => /door hanger/i.test(c.title)).length, 1);
 });

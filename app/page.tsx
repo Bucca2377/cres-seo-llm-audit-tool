@@ -33,7 +33,7 @@ import {
   type ReviewResponseGap,
   type ReviewResponseQualityFlag,
 } from "@/lib/property";
-import { detectWebsiteSpecial, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, reviewTacticsInText, classifyHeard, type RankFact } from "@/lib/detectors";
+import { detectWebsiteSpecial, unbundleReviewTactics, recommendsGooglePhotos, dropDeadDialedNumbers, extractFirstJsonObject, recommendsReviewIncentive, promisesFaqRichResult, offeredBedroomCounts, recInventsFloorplan, aptMediaCountsFromContent, concessionDeadlinePassed, recSetsUpInPlaceTactic, reviewTacticsPromptBlock, scrubRecClaims, reviewTacticsInText, classifyHeard, type RankFact } from "@/lib/detectors";
 import { buildLocalReviewComparison, selfReviewPosition, type ReviewEntry } from "@/lib/review-rank";
 import { extractAutocompleteSuggestions, finalizeQuerySet, bedroomGeoQueries, amenityGeoQueries, searchUnitWord, isSalesIntent, isOffProfileQuery } from "@/lib/seo-queries";
 import { allFindingCards } from "@/lib/coverage";
@@ -878,13 +878,13 @@ function aggregatorsDominateOrganic(topOrganic: { name: string; domain: string }
   }).length;
   return agg >= Math.ceil(top.length / 2); // a majority of the visible organic results are aggregators
 }
-/** Organic-column label when the property's own site isn't in the top 30. When the
+/** Organic-column label when the property's own site isn't on page 1 (Google returns ~10 organic results; num=30 is no longer honored). When the
  *  listing sites own the head term (the norm, so NOT a failure), say so plainly for a
- *  client instead of a scary "not in top 30". */
+ *  client instead of a scary "not on page 1". */
 function organicAbsentLabel(topOrganic: { name: string; domain: string }[] | undefined): string {
   return aggregatorsDominateOrganic(topOrganic)
     ? "Listing sites own this (normal)"
-    : "Not in organic top 30";
+    : "Not on page 1 of Google";
 }
 
 /**
@@ -1144,7 +1144,7 @@ function diagnose(
         ? ` · organic #${organicRank} (Page ${Math.ceil(organicRank / 10)})`
         : aggDominated
         ? ` · organic dominated by aggregators (${aggList})`
-        : " · absent from organic top 30"
+        : " · not on page 1 of Google (organic)"
     } — local pack is carrying this query.`;
   }
   // In expanded Map Pack but not in top 3
@@ -1154,7 +1154,7 @@ function diagnose(
         ? `Organic #${organicRank} (Page ${Math.ceil(organicRank / 10)}).`
         : aggDominated
         ? `Organic aggregator-dominated (${aggList}).`
-        : "Property's own URL not in organic top 30."
+        : "Property's own site is not on page 1 of Google."
     } To reach the 3-pack, prioritize a complete Google listing, a steady flow of new reviews, and matching name/address/phone across listing sites.`;
   }
   // Not in Map Pack at all but has organic
@@ -1164,7 +1164,7 @@ function diagnose(
   if (organicRank && organicRank <= 30) {
     return `Page ${Math.ceil(organicRank / 10)} organic, not in Map Pack — needs both content depth and stronger local signals.`;
   }
-  // Not in Map Pack and not in organic top 30
+  // Not in Map Pack and not on page 1 organic
   if (topMapPack.length > 0 && aggDominated) {
     return `Not in Map Pack top 20 (3-pack: ${topMapPack[0]}${
       topMapPack[1] ? `, ${topMapPack[1]}` : ""
@@ -1174,7 +1174,7 @@ function diagnose(
     return `Not in Map Pack top 20. 3-pack: ${topMapPack[0]}${topMapPack[1] ? `, ${topMapPack[1]}` : ""}.`;
   }
   if (aggDominated) {
-    return `Aggregator-dominated query (${aggList}). Property's own URL doesn't appear in top 30 — direct ranking would require dedicated content + backlinks.`;
+    return `Aggregator-dominated query (${aggList}). Property's own site is not on page 1 of Google. Ranking directly would require dedicated content and backlinks.`;
   }
   return "Not ranking and no Map Pack rendered — Google deemed this query not local-intent.";
 }
@@ -3564,7 +3564,7 @@ Return ONLY a JSON array of 9 strings.`;
       const compShown = compFacts.map((f) => f.mapPack[f.mapPack.length - 1] ?? null);
       const compIn = compShown.filter((p): p is number => p != null);
       const rankFactsLine = compFacts.length
-        ? `COMPETITIVE MAP PACK FACTS (non-branded searches, as the table shows them): ${compIn.length ? `best #${Math.min(...compIn)}, worst #${Math.max(...compIn)}` : "not in any Map Pack"}; in the visible top 3 on ${compIn.filter((p) => p <= 3).length} of ${compFacts.length}; not in the Map Pack top 20 on ${compShown.length - compIn.length} of ${compFacts.length}. Quote positions exactly from the per-search lines; never claim a range or "all / every search" unless these facts support it. Organic is checked to the top 30 only.\n\n`
+        ? `COMPETITIVE MAP PACK FACTS (non-branded searches, as the table shows them): ${compIn.length ? `best #${Math.min(...compIn)}, worst #${Math.max(...compIn)}` : "not in any Map Pack"}; in the visible top 3 on ${compIn.filter((p) => p <= 3).length} of ${compFacts.length}; not in the Map Pack top 20 on ${compShown.length - compIn.length} of ${compFacts.length}. Quote positions exactly from the per-search lines; never claim a range or "all / every search" unless these facts support it. Organic is checked on page 1 of Google only (about 10 results); never claim a top 20, top 30 or deeper organic position or absence.\n\n`
         : "";
       const queryRankSummary = rankFactsLine + queries
         .map((q, i) => {
@@ -3579,7 +3579,7 @@ Return ONLY a JSON array of 9 strings.`;
             : `Map Pack #${pos} (expanded list, not in the visible top 3)`;
           const org = r.organic_rank
             ? `Organic #${r.organic_rank} (Page ${r.organic_page})`
-            : "Not in organic top 30";
+            : "Not on page 1 of Google";
           const competitors = [
             r.top_map_pack.slice(0, 2).join(", "),
             r.top_organic.slice(0, 2).map((o) => o.name).join(", "),
@@ -3819,7 +3819,7 @@ Recommendation rules (STRICT):
 1. EXACTLY 5 recommendations.
 2. Each "title" is imperative — start with a verb (Build, Optimize, Claim, Target, Audit, Publish, Outreach).
 3. "what" must be concrete: name a specific URL/page/platform/vendor/keyword. Forbid generic verbs without an object ("improve content" is unacceptable; "Build /apartments-with-washer-dryer-salisbury-md landing page on vangardlofts.com" is correct).
-4. "why" must cite at least ONE specific query and rank from the audit above. Forbid generic SEO platitudes ("important for SEO" is unacceptable; "Audit shows Query 4 has Map Pack visibility (winnable) but property absent from organic top 30; competitor The Flatts owns #1" is correct).
+4. "why" must cite at least ONE specific query and rank from the audit above. Forbid generic SEO platitudes ("important for SEO" is unacceptable; "Audit shows Query 4 has Map Pack visibility (winnable) but the property is not on page 1 of organic results; competitor The Flatts owns #1" is correct).
 5. "effort" must include time + role.
 6. "success" must be measurable and time-boxed.
 7. "source" must name the specific query that triggered this.
@@ -3890,6 +3890,8 @@ Recommendation rules (STRICT):
               success: scrubRecClaims(c.success || "", scrubOpts),
             }))
             .filter((c) => c.what.trim().length > 0);
+          // One review touchpoint per card, so each can be marked ✓ Done on its own.
+          recommendations = unbundleReviewTactics(recommendations, currentProperty.reviewTacticsInPlace);
         }
       } catch {
         /* keep recommendations empty; the audit still saves */
@@ -4217,7 +4219,7 @@ Recommendation rules (STRICT):
                       <>
                         <br />
                         <span style={{ color: B.tangelo, fontWeight: 700 }}>
-                          absent on {summary.competitiveTotal - summary.rankingCount} of {summary.competitiveTotal} (not in top 30)
+                          absent on {summary.competitiveTotal - summary.rankingCount} of {summary.competitiveTotal} (not on page 1)
                         </span>
                       </>
                     )}
@@ -5242,6 +5244,7 @@ function MarketingAuditTab({
       let aptHasVirtualTour = false;
       let aptRawFetchOk = false; // true when the Apartments.com raw-HTML read succeeded this run
       let aptReadError: string | null = null; // why that read failed (shown under the table)
+      let aptReadCachedFrom: string | null = null; // date of the saved read used instead
       if (current.apartmentsUrl && aptRead) {
         try {
           const sr = await fetch("/api/apts-status", {
@@ -5264,7 +5267,8 @@ function MarketingAuditTab({
           aptRawFetchOk = rawFetchOk;
           if (!rawFetchOk) aptReadError = sj.readError || (sr.ok ? "no usable page returned" : `listing check failed (HTTP ${sr.status})`);
           else if (sj.cachedAt) {
-            aptReadError = `${sj.readError || "failed"}; used the last good read from ${new Date(sj.cachedAt).toLocaleDateString("en-US")}`;
+            aptReadError = sj.readError || "failed";
+            aptReadCachedFrom = new Date(sj.cachedAt).toLocaleDateString("en-US");
           }
           // Gallery images from the raw HTML (or last good read) for the photo pass.
           if (Array.isArray(sj.photoUrls) && sj.photoUrls.length >= 2 && aptRead.photoUrls.length < 2) aptRead.photoUrls = sj.photoUrls;
@@ -6212,6 +6216,7 @@ Return ONLY this JSON object, no prose before or after:
         consistency,
         recommendations: recsFinal,
         aptReadError,
+        aptReadCachedFrom,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
         phones,
@@ -6665,7 +6670,10 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
               failed, so a silent fallback to the weaker backup reader is visible. */}
           {results.aptReadError && (
             <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9a6a2a", background: "#fdf6ee", border: "1px solid #e6d9c6", borderRadius: 6, padding: "6px 10px", marginBottom: 8 }}>
-              Apartments.com direct read failed this run: <strong>{results.aptReadError}</strong>. The Apartments.com column used the backup reader, so hours and photo quality may show as Check.
+              Apartments.com direct read failed this run: <strong>{results.aptReadError}</strong>.{" "}
+              {results.aptReadCachedFrom
+                ? `The Apartments.com column uses the last good read from ${results.aptReadCachedFrom}, so it is still accurate.`
+                : "The Apartments.com column used the backup reader, so hours and photo quality may show as Check."}
             </div>
           )}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -7171,6 +7179,7 @@ RULES:
             why: scrubRecClaims(c.why || "", { inPlace: current.reviewTacticsInPlace }),
           }))
           .filter((c) => c.what.trim().length > 0);
+        recs = unbundleReviewTactics(recs, current.reviewTacticsInPlace);
       }
 
       // Merge Claude's suggestions onto the code-held review/response text by id.
@@ -8836,7 +8845,7 @@ function PrintableReport({ property, mode = "combined", headerLabel }: { propert
                     "Avg Organic Rank",
                     seoAvg ? `#${seoAvg}` : "—",
                     seoAvg
-                      ? `avg of ${seoRankingCount} of ${seoCompTotal} that rank${seoCompTotal - seoRankingCount > 0 ? ` · absent on ${seoCompTotal - seoRankingCount} (not in top 30)` : ""}`
+                      ? `avg of ${seoRankingCount} of ${seoCompTotal} that rank${seoCompTotal - seoRankingCount > 0 ? ` · absent on ${seoCompTotal - seoRankingCount} (not on page 1)` : ""}`
                       : "Not ranking (competitive)",
                   ],
                   [

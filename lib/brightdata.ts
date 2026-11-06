@@ -17,7 +17,7 @@
  */
 export async function brightDataRaw(
   url: string,
-  opts: { minLength?: number; attempts?: number; timeoutMs?: number } = {}
+  opts: { minLength?: number; attempts?: number; timeoutMs?: number; accept?: (html: string) => boolean } = {}
 ): Promise<string | null> {
   return (await brightDataRawDetailed(url, opts)).html;
 }
@@ -29,7 +29,7 @@ export async function brightDataRaw(
  */
 export async function brightDataRawDetailed(
   url: string,
-  opts: { minLength?: number; attempts?: number; timeoutMs?: number } = {}
+  opts: { minLength?: number; attempts?: number; timeoutMs?: number; accept?: (html: string) => boolean } = {}
 ): Promise<{ html: string | null; error: string | null }> {
   const token = process.env.BRIGHTDATA_API_TOKEN;
   const zone = process.env.BRIGHTDATA_ZONE;
@@ -50,7 +50,15 @@ export async function brightDataRawDetailed(
         signal: AbortSignal.timeout(timeoutMs),
       });
       const body = await r.text();
-      if (r.ok && body && body.length >= minLength) return { html: body, error: null };
+      if (r.ok && body && body.length >= minLength) {
+        // A full-size page can still be the WRONG page (Apartments.com served Reserve at
+        // Sawmill's fetch its 69 KB generic homepage). Let the caller reject it so the
+        // next attempt runs instead of the bad page being used.
+        if (!opts.accept || opts.accept(body)) return { html: body, error: null };
+        const title = (body.match(/<title>([^<]{0,80})/i) || [])[1]?.trim();
+        error = `a page came back but it wasn't the listing (${Math.round(body.length / 1024)} KB${title ? `, titled "${title}"` : ""}), likely a bot check`;
+        continue;
+      }
       error = r.ok
         ? `the page that came back was too small to be the real page (${Math.round(body.length / 1024)} KB), likely a bot check`
         : `Bright Data HTTP ${r.status}${body ? ": " + body.replace(/\s+/g, " ").slice(0, 120) : ""}`;

@@ -548,7 +548,7 @@ export interface RankFact {
   branded: boolean;
   /** Every Map Pack position a reader could see for it (this run + the table's smoothed value). */
   mapPack: number[];
-  /** Organic position(s), empty when not in the top 30. */
+  /** Organic position(s), empty when not on page 1 (Google returns ~10 organic results). */
   organic: number[];
 }
 
@@ -556,13 +556,13 @@ export interface RankFact {
  * Remove sentences from a model-written recommendation that misstate the audit's
  * own data, and fix the one wording error we can fix in place. Farmhouse's report
  * said "ranks Map Pack #8–#17 for all tested queries" next to a table showing
- * #3, #5 and #6, and "absent from organic top 100" when we only check 30 deep.
+ * #3, #5 and #6, and "absent from organic top 100" when we only see page 1.
  *  - a sentence claiming a Map Pack range for ALL/EVERY query that the data
  *    contradicts (some competitive search ranks outside it, or isn't in the pack);
  *  - a sentence quoting a tracked search followed directly by a "#N" that is
  *    neither its Map Pack nor its organic position;
  *  - a sentence proposing to set up a review tactic the property already runs;
- *  - "top 50/100" depth claims become "top 30" (the depth we actually check).
+ *  - organic depth claims past page 1 ("absent from organic top 30") become "page 1 of Google".
  */
 export function scrubRecClaims(text: string, opts: { ranks?: RankFact[]; inPlace?: string[] }): string {
   if (!text) return text;
@@ -570,7 +570,21 @@ export function scrubRecClaims(text: string, opts: { ranks?: RankFact[]; inPlace
   const comp = ranks.filter((r) => !r.branded);
   const compPositions = comp.flatMap((r) => r.mapPack);
   const anyCompAbsent = comp.some((r) => r.mapPack.length === 0);
-  const fixed = text.replace(/\btop[\s-]+(\d{2,3})\b/gi, (m, n) => (parseInt(n, 10) > 30 ? m.replace(n, "30") : m));
+  // Google now returns ~10 organic results (num=30 is ignored), so we only ever see
+  // page 1. Any deeper organic claim ("absent from organic top 30") is unverified:
+  // restate it as page 1. "top 3" (Map Pack) and "top 10" are left alone.
+  const deep = (n: string) => parseInt(n, 10) > 10;
+  const page1 = (m: string) => (/^[A-Z]/.test(m) ? "Page 1 of Google" : "page 1 of Google");
+  const fixed = text
+    .replace(
+      /\b(in|from|within|outside(?:\s+of)?)\s+(?:the\s+)?(?:organic\s+)?top[\s-]+(\d{2,3})(?:\s+organic)?(?:\s+(?:search\s+)?results)?\b/gi,
+      (m, prep: string, n: string) =>
+        deep(n) ? `${/^(in|within)$/i.test(prep) ? "on" : prep} page 1 of Google` : m
+    )
+    .replace(/\b(?:the\s+)?organic\s+top[\s-]+(\d{2,3})\b/gi, (m, n: string) => (deep(n) ? page1(m) : m))
+    .replace(/\btop[\s-]+(\d{2,3})\s+organic(?:\s+(?:search\s+)?results)?\b/gi, (m, n: string) =>
+      deep(n) ? page1(m) : m
+    );
   const sentences = fixed.split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9#])/);
   const keep = sentences.filter((s) => {
     const low = s.toLowerCase();
@@ -607,6 +621,68 @@ export function scrubRecClaims(text: string, opts: { ranks?: RankFact[]; inPlace
 export function reviewTacticsInText(text: string): string[] {
   const t = (text || "").toLowerCase();
   return REVIEW_TACTICS.filter((tac) => tac.match(t)).map((tac) => tac.id);
+}
+
+/** Stable stand-alone card for each review touchpoint (stable titles also keep ✓ Done sticky). */
+const TACTIC_CARDS: Record<string, { title: string; what: string; why: string; effort: string; success: string }> = {
+  door_hangers: {
+    title: "Add a review QR code to maintenance door hangers",
+    what: "Leave a door hanger with a Google review QR code after every completed work order. A resident whose repair was just finished is at a positive moment, and the code takes them straight to the review form. The printing cost is small and subject to owner/client approval.",
+    why: "Residents who just had a problem fixed are among the most likely to leave a positive review, and a physical prompt at the door reaches residents who ignore texts and emails.",
+    effort: "~1 hr · property manager to order hangers and brief the maintenance team",
+    success: "A door hanger left on every completed work order within 30 days, with new Google reviews mentioning maintenance.",
+  },
+  qr_office: {
+    title: "Display a review QR code plaque in the leasing office",
+    what: "Place a plaque or sign with a Google review QR code at the leasing office front desk so residents and visitors can leave a review in one step. The printing cost is subject to owner/client approval.",
+    why: "A visible prompt at the desk turns in-person moments (package pickup, a resolved request, a lease signing) into reviews without extra staff effort.",
+    effort: "~30 min · leasing manager",
+    success: "QR plaque visible at the front desk within 2 weeks.",
+  },
+  direct_link: {
+    title: "Text a direct Google review link to residents at positive moments",
+    what: "Send a one-tap Google review link by text within 7 days of move-in, within 30 days of a renewal, and within 24 hours of a closed work order. Target only those segments rather than messaging every resident.",
+    why: "Asking at a positive moment produces more and better reviews than a general request, and a direct link removes the steps that make residents give up.",
+    effort: "~2 hrs · leasing manager to set up the text triggers",
+    success: "Review texts going out on all three triggers within 30 days.",
+  },
+};
+
+/**
+ * ONE TOUCHPOINT PER CARD, enforced in code (the prompt rule alone was ignored:
+ * Reserve at Sawmill's "Text direct Google review links" card also carried the
+ * maintenance door hanger). A card whose body mentions a review touchpoint other
+ * than the one it is about loses those sentences, and that touchpoint gets its own
+ * stand-alone card, unless it is already in place or another card covers it. The
+ * team can then mark each one ✓ Done separately.
+ */
+export function unbundleReviewTactics<
+  C extends { title?: string; what?: string; why?: string; success?: string; priority?: string }
+>(cards: C[], inPlace?: string[]): C[] {
+  const split = (s: string) => s.split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9#])/);
+  const covered = new Set<string>();
+  for (const c of cards) for (const id of reviewTacticsInText(c.title || "")) covered.add(id);
+  const out: C[] = [];
+  const extra: C[] = [];
+  for (const c of cards) {
+    const own = reviewTacticsInText(c.title || "");
+    const inBody = reviewTacticsInText(c.what || "");
+    const primary = own.length ? own : inBody.slice(0, 1);
+    const others = inBody.filter((id) => !primary.includes(id));
+    if (!primary.length || !others.length) {
+      out.push(c);
+      continue;
+    }
+    const keep = split(c.what || "").filter((s) => !reviewTacticsInText(s).some((id) => others.includes(id)));
+    out.push(keep.length ? { ...c, what: keep.join(" ").trim() } : c);
+    if (!keep.length) continue; // nothing left to separate from; leave the card as written
+    for (const id of others) {
+      if (covered.has(id) || (inPlace || []).includes(id) || !TACTIC_CARDS[id]) continue;
+      covered.add(id);
+      extra.push({ ...c, ...TACTIC_CARDS[id] } as C);
+    }
+  }
+  return [...out, ...extra];
 }
 
 /**
