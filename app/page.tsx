@@ -6215,7 +6215,9 @@ Return ONLY this JSON object, no prose before or after:
         criticalIssues: parsed.criticalIssues || [],
         consistency,
         recommendations: recsFinal,
-        aptReadError,
+        // Only a read failure that actually DEGRADED the column is worth a note: none when the
+        // last good read filled it, or when the listing isn't advertising (nothing to act on).
+        aptReadError: aptIsDark || aptReadCachedFrom ? null : aptReadError,
         aptReadCachedFrom,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
@@ -6668,7 +6670,10 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
           </div>
           {/* Team-only diagnostic (not printed): why the direct Apartments.com read
               failed, so a silent fallback to the weaker backup reader is visible. */}
-          {results.aptReadError && (
+          {results.aptReadError &&
+            !results.aptReadCachedFrom &&
+            !/used the last good read/i.test(results.aptReadError) &&
+            !aptListedNotAdvertising(results.consistency) && (
             <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9a6a2a", background: "#fdf6ee", border: "1px solid #e6d9c6", borderRadius: 6, padding: "6px 10px", marginBottom: 8 }}>
               Apartments.com direct read failed this run: <strong>{results.aptReadError}</strong>.{" "}
               {results.aptReadCachedFrom
