@@ -1441,3 +1441,27 @@ test("Reserve at Sawmill: a review card bundling the door hanger is split into i
   const both = unbundleReviewTactics([...cards, { ...cards[0], title: "Leave review door hangers after work orders", what: "Hang them." }], []);
   assert.equal(both.filter((c) => /door hanger/i.test(c.title)).length, 1);
 });
+
+test("seoFromRawHtml reads real tags from a rescued page (no false 'missing meta/H1/schema')", async () => {
+  const { seoFromRawHtml } = await import("../lib/website-features");
+  const html = `<html><head><title>Reserve at Sawmill | Milford, DE</title>
+    <meta property="og:title" content="x"><meta content="Spacious 1, 2 &amp; 3 bedroom apartments in Milford, DE." name="description">
+    <link rel="canonical" href="https://www.reserveatsawmillapartments.com/">
+    <script type="application/ld+json">{"@type":"ApartmentComplex"}</script></head>
+    <body><h1 class="hero">Welcome <span>Home</span></h1><a href="/floorplans">Floor plans</a>
+    <a href="https://www.reserveatsawmillapartments.com/amenities">Amenities</a><a href="https://other.com/">x</a><a href="tel:555">call</a>
+    <script>var junk = "lots of words here";</script><p>Live where you love.</p></body></html>`;
+  const s = seoFromRawHtml(html, "https://www.reserveatsawmillapartments.com/");
+  assert.equal(s.title, "Reserve at Sawmill | Milford, DE");
+  assert.equal(s.metaDescription, "Spacious 1, 2 & 3 bedroom apartments in Milford, DE.");
+  assert.equal(s.h1Count, 1);
+  assert.equal(s.h1Text, "Welcome Home");
+  assert.equal(s.hasCanonical, true);
+  assert.equal(s.hasSchema, true);
+  assert.equal(s.internalLinks, 2);
+  assert.ok(!/junk/.test(String(s.wordCount)) && s.wordCount > 5 && s.wordCount < 20);
+  const bare = seoFromRawHtml("<html><head><title>t</title></head><body><p>hi</p></body></html>", "https://a.com/");
+  assert.equal(bare.metaDescription, "");
+  assert.equal(bare.h1Count, 0);
+  assert.equal(bare.hasSchema, false);
+});

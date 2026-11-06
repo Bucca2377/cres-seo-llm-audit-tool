@@ -148,3 +148,62 @@ export function faqLinkFromLinks(links: { href: string; text: string }[], origin
   }
   return null;
 }
+
+/**
+ * On-page SEO facts read from a page's RAW HTML (the Bright Data copy of a site that
+ * bot-blocks our crawler). Same fields the crawler reads from the live DOM. The old
+ * fallback (web_fetch) only sees page TEXT, so it reported every meta description,
+ * H1 and schema block as missing (Reserve at Sawmill: 0/1 meta, no H1, no schema).
+ */
+export function seoFromRawHtml(
+  html: string,
+  pageUrl: string
+): {
+  title: string;
+  metaDescription: string;
+  h1Count: number;
+  h1Text: string;
+  hasCanonical: boolean;
+  hasSchema: boolean;
+  internalLinks: number;
+  wordCount: number;
+} {
+  const decode = (s: string) =>
+    s
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&#0?39;|&apos;|&rsquo;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/\s+/g, " ")
+      .trim();
+  const metaTag = (html.match(/<meta\b[^>]*\bname\s*=\s*["']description["'][^>]*>/i) || [])[0] || "";
+  const metaDescription = decode((metaTag.match(/\bcontent\s*=\s*"([^"]*)"/i) || metaTag.match(/\bcontent\s*=\s*'([^']*)'/i) || [])[1] || "");
+  const h1s = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((m) => decode(m[1])).filter(Boolean);
+  let host = "";
+  try {
+    host = new URL(pageUrl).host.replace(/^www\./, "");
+  } catch {
+    /* relative links still count below */
+  }
+  let internalLinks = 0;
+  for (const m of html.matchAll(/<a\b[^>]*\bhref\s*=\s*["']([^"'#]+)["']/gi)) {
+    const href = m[1].trim();
+    if (/^(mailto|tel|javascript):/i.test(href)) continue;
+    if (!/^https?:\/\//i.test(href) || (host && href.replace(/^https?:\/\/(www\.)?/i, "").startsWith(host))) internalLinks++;
+  }
+  const body = (html.match(/<body\b[\s\S]*$/i) || [html])[0]
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
+  return {
+    title: decode((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || ""),
+    metaDescription,
+    h1Count: h1s.length,
+    h1Text: h1s[0] || "",
+    hasCanonical: /<link\b[^>]*\brel\s*=\s*["']canonical["']/i.test(html),
+    hasSchema: /<script\b[^>]*type\s*=\s*["']application\/ld\+json["']/i.test(html),
+    internalLinks,
+    wordCount: decode(body).split(/\s+/).filter(Boolean).length,
+  };
+}

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { specialFromHtml } from "@/lib/detectors";
-import { detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml, faqLinkFromLinks } from "@/lib/website-features";
+import { detectLeasingPlatform, virtualTourFromHtml, onlineApplicationFromHtml, faqLinkFromLinks, seoFromRawHtml } from "@/lib/website-features";
 import { officeHoursFromHtml } from "@/lib/hours";
 
 export const runtime = "nodejs";
@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
       error: `Headless browser failed to launch after 4 attempts: ${msg}. Run "npx playwright install chromium" and restart the dev server.`,
     });
   }
-  const pages: { url: string; status: number | null; text: string; seo?: PageSeoData }[] = [];
+  const pages: { url: string; status: number | null; text: string; seo?: PageSeoData; seoUnblocked?: boolean }[] = [];
   // Images collected separately by source: a GALLERY/PHOTOS page best represents the
   // property, so its images are graded FIRST — otherwise a floor-plans/amenities
   // start page fills the cap with diagrams and the photo grade says "no interior
@@ -285,9 +285,12 @@ export async function POST(req: NextRequest) {
         // web_fetch fallback still fills pricing/hours from the other pages; the
         // deterministic concession detector reads this rescued homepage text out
         // of siteText. Only runs when a key is set, so normal sites are untouched.
+        // On-page SEO read from the rescued raw HTML (the blocked DOM has none of it).
+        let seoUnblocked: ReturnType<typeof seoFromRawHtml> | null = null;
         if (pollLate && looksBotBlocked(pageStatus, pageText)) {
           const html = await fetchViaUnblockService(target);
           if (html) {
+            if (!looksBotBlocked(200, htmlToText(html))) seoUnblocked = seoFromRawHtml(html, target);
             const unblocked = htmlToText(html);
             if (unblocked.length > pageText.length) pageText = unblocked;
             // The special is usually in embedded JSON that htmlToText strips —
@@ -373,7 +376,7 @@ export async function POST(req: NextRequest) {
             wordCount: words,
           };
         });
-        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo, platform, officeHoursHtml, virtualTour, onlineApplication };
+        return { status: pageStatus, text: pageText.slice(0, PAGE_TEXT_CAP), links, images, seo: seoUnblocked || seo, seoUnblocked: !!seoUnblocked, platform, officeHoursHtml, virtualTour, onlineApplication };
       } finally {
         await ctx.close();
       }
@@ -396,6 +399,7 @@ export async function POST(req: NextRequest) {
       links: { href: string; text: string }[];
       images: string[];
       seo?: PageSeoData;
+      seoUnblocked?: boolean;
       platform?: string | null;
       officeHoursHtml?: Record<string, string> | null;
       virtualTour?: boolean;
@@ -415,7 +419,7 @@ export async function POST(req: NextRequest) {
         /* retry once */
       }
     }
-    pages.push({ url: start, status: home.status, text: home.text, seo: home.seo });
+    pages.push({ url: start, status: home.status, text: home.text, seo: home.seo, seoUnblocked: home.seoUnblocked });
     collectImages(home.images, GALLERY_IMG_RE.test(start));
     // Deterministic rendered-DOM reads, aggregated across pages: office hours from
     // the FIRST page that yields a map (homepage first), virtual tour true if ANY

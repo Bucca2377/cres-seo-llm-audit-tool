@@ -100,7 +100,7 @@ export interface TechnicalSeoResult {
    * when the crawler was bot-blocked (meta/H1/word counts reliable; schema
    * detection is best-effort). Drives the "read via fallback" caveat note.
    */
-  source?: "crawl" | "webfetch";
+  source?: "crawl" | "webfetch" | "unblock";
 }
 
 /** PageSpeed / Core Web Vitals for one strategy (mobile or desktop). */
@@ -1163,7 +1163,7 @@ export async function callFetch(opts: {
   follow?: boolean;
   maxPages?: number;
 }): Promise<{
-  pages: { url: string; status: number | null; text: string; seo?: Omit<PageSeo, "url" | "status"> }[];
+  pages: { url: string; status: number | null; text: string; seo?: Omit<PageSeo, "url" | "status">; seoUnblocked?: boolean }[];
   images?: string[];
   /** Office hours read deterministically from the rendered DOM (footer/widget/JSON-LD). */
   officeHoursHtml?: Record<string, string> | null;
