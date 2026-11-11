@@ -46,7 +46,16 @@ async function downloadImage(url: string): Promise<{ data: string; mediaType: st
     const r = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
-        Accept: "image/avif,image/webp,image/png,image/jpeg,*/*",
+        Accept: "image/webp,image/png,image/jpeg,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        // Image CDNs (Akamai on apartments.com) commonly expect the page as referer.
+        Referer: (() => {
+          try {
+            return new URL(url).origin.replace(/\/\/images\d*\./, "//www.") + "/";
+          } catch {
+            return "";
+          }
+        })(),
       },
       signal: AbortSignal.timeout(15000),
     });
@@ -108,14 +117,13 @@ export async function POST(req: NextRequest) {
   // refused by some CDNs (every Apartments.com gallery image returned "Unable to
   // download the file", so the listing's photos were never graded). A URL block is
   // only the fallback when we can't download one ourselves.
-  const imageBlocks = await Promise.all(
-    imageUrls.map(async (url) => {
-      const img = await downloadImage(url);
-      return img
-        ? { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } }
-        : { type: "image", source: { type: "url", url } };
-    })
-  );
+  const downloaded = await Promise.all(imageUrls.map((url) => downloadImage(url)));
+  const okImages = downloaded.filter((d): d is { data: string; mediaType: string } => !!d).slice(0, 6);
+  // Send only the images we actually got: one dead link used to fail the whole call.
+  // URL blocks only when none downloaded (some CDNs do let Anthropic fetch them).
+  const imageBlocks = okImages.length
+    ? okImages.map((img) => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } }))
+    : imageUrls.slice(0, 6).map((url) => ({ type: "image", source: { type: "url", url } }));
   const userContent = imageUrls.length > 0 ? [...imageBlocks, { type: "text", text: body.prompt }] : body.prompt;
 
   const payload: Record<string, unknown> = {
@@ -152,7 +160,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          data?.error?.message || `Anthropic API error (status ${r.status})`,
+          (data?.error?.message || `Anthropic API error (status ${r.status})`) +
+          (imageUrls.length && !okImages.length ? ` (none of the ${imageUrls.length} images could be downloaded by our server)` : ""),
       },
       { status: r.status }
     );

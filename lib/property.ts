@@ -550,6 +550,8 @@ export interface MarketingAuditResult {
   aptReadError?: string | null;
   /** Set when the direct read failed but the last good read (this date) filled the column. */
   aptReadCachedFrom?: string | null;
+  /** Why the Apartments.com photo review failed (team-only note). */
+  aptPhotoError?: string | null;
   timestamp: string;
 }
 

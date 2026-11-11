@@ -67,7 +67,8 @@ async function lastGoodRead(url: string): Promise<{ data: Record<string, unknown
 /** Gallery image URLs in the raw listing HTML (for the photo-quality pass). */
 function photoUrlsFromRawHtml(html: string): string[] {
   const all = html.match(/https?:\/\/images\d*\.apartments\.com\/i2\/[A-Za-z0-9_-]+\/\d+\/[A-Za-z0-9_.%-]+/g) || [];
-  return Array.from(new Set(all)).slice(0, 6);
+  // Skip management-company logos (e.g. ".../valiant-residential-logo.jpg"); they're not gallery photos.
+  return Array.from(new Set(all)).filter((u) => !/logo/i.test(u)).slice(0, 8);
 }
 
 export const runtime = "nodejs";

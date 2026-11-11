@@ -5258,7 +5258,10 @@ function MarketingAuditTab({
             aptReadCachedFrom = new Date(sj.cachedAt).toLocaleDateString("en-US");
           }
           // Gallery images from the raw HTML (or last good read) for the photo pass.
-          if (Array.isArray(sj.photoUrls) && sj.photoUrls.length >= 2 && aptRead.photoUrls.length < 2) aptRead.photoUrls = sj.photoUrls;
+          // These come verbatim from the page's HTML, so they ALWAYS win over the
+          // reader's list (the model truncates the long CDN paths into dead links,
+          // which made the photo review fail: Pecan Creek, Elevate at NuLu).
+          if (Array.isArray(sj.photoUrls) && sj.photoUrls.length >= 2) aptRead.photoUrls = sj.photoUrls;
           if (rawFetchOk) {
             aptRead.advertising = sj.advertising as boolean;
             aptRead.ok = true;
@@ -5905,6 +5908,7 @@ Return ONLY this JSON object, no prose before or after:
       // on the website/listing that its Google profile is missing.
       let webPhotoStatus: MarketingStatus | null = null;
       let aptPhotoStatus: MarketingStatus | null = null;
+      let aptPhotoError: string | null = null; // why the Apartments.com photo review failed (team note)
       let googleHasPro: boolean | null = null;
       if (siteImages.length >= 2) {
         try {
@@ -5973,11 +5977,11 @@ Return ONLY this JSON object, no prose before or after:
               typeof u === "string" && /^https?:\/\/[^/]*apartments\.com\//i.test(u)
           )
         : [];
-      const aptPhotoUrls: string[] = (aptRead?.photoUrls.length ? aptRead.photoUrls : parsedAptPhotos).slice(0, 6);
+      const aptPhotoUrls: string[] = (aptRead?.photoUrls.length ? aptRead.photoUrls : parsedAptPhotos).slice(0, 8);
       if (aptPhotoUrls.length >= 2) {
         try {
           setProgress("Assessing Apartments.com photos…");
-          const aPrompt = `These ${Math.min(aptPhotoUrls.length, 6)} images are from the Apartments.com listing gallery of ${current.name}, a ${current.propertyType || "multifamily apartment"} community. Judge PHOTOGRAPHIC quality ONLY — lighting, focus/sharpness, framing/composition, resolution — the way a leasing prospect perceives it. Vacant or unstaged units and a basic set are NORMAL and expected for a rental listing: do NOT downgrade for empty rooms, lack of staging/furniture, or limited coverage. Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you actually see"}. green = professional real-estate photography (well-lit, sharp, properly framed), EVEN IF the units are empty; amber = several genuinely weak shots (noticeably dark, blurry, crooked/tilted, or low-res phone snapshots); red = clearly amateur throughout or almost no usable photos. When in doubt between green and amber for a clean, well-lit set, choose green.`;
+          const aPrompt = `These images are from the Apartments.com listing gallery of ${current.name}, a ${current.propertyType || "multifamily apartment"} community. Judge PHOTOGRAPHIC quality ONLY — lighting, focus/sharpness, framing/composition, resolution — the way a leasing prospect perceives it. Vacant or unstaged units and a basic set are NORMAL and expected for a rental listing: do NOT downgrade for empty rooms, lack of staging/furniture, or limited coverage. Return ONLY JSON, no prose: {"status":"green|amber|red","note":"one concise clause under 18 words citing what you actually see"}. green = professional real-estate photography (well-lit, sharp, properly framed), EVEN IF the units are empty; amber = several genuinely weak shots (noticeably dark, blurry, crooked/tilted, or low-res phone snapshots); red = clearly amateur throughout or almost no usable photos. When in doubt between green and amber for a clean, well-lit set, choose green.`;
           // One unreachable image fails the whole call; retry once with the first 3.
           const aResp = await callAI({ prompt: aPrompt, images: aptPhotoUrls, maxTokens: 400 }).catch(() =>
             callAI({ prompt: aPrompt, images: aptPhotoUrls.slice(0, 3), maxTokens: 400 })
@@ -5995,9 +5999,13 @@ Return ONLY this JSON object, no prose before or after:
               aptPhotoStatus = aj.status;
             }
           }
-        } catch {
-          /* keep the text-only "quality not assessed" fallback */
+          if (!aptPhotoStatus) aptPhotoError = "the photo review returned no verdict";
+        } catch (e) {
+          // Keep the "quality not assessed" fallback, but say why (team-only note).
+          aptPhotoError = e instanceof Error ? e.message : String(e);
         }
+      } else if (aptRead?.ok && aptRead.advertising !== false) {
+        aptPhotoError = "no gallery photo links were found on the listing";
       }
 
       // If the Apartments.com listing is a shell (the page says the property is
@@ -6206,6 +6214,7 @@ Return ONLY this JSON object, no prose before or after:
         // last good read filled it, or when the listing isn't advertising (nothing to act on).
         aptReadError: aptIsDark || aptReadCachedFrom ? null : aptReadError,
         aptReadCachedFrom,
+        aptPhotoError,
         summary: parsed.summary || [],
         sources: { website: current.website, apartments: current.apartmentsUrl, google: current.gbpUrl },
         phones,
@@ -6666,6 +6675,11 @@ function MarketingAuditResultView({ results, property, onUpdateProperty }: { res
               {results.aptReadCachedFrom
                 ? `The Apartments.com column uses the last good read from ${results.aptReadCachedFrom}, so it is still accurate.`
                 : "The Apartments.com column used the backup reader, so hours and photo quality may show as Check."}
+            </div>
+          )}
+          {results.aptPhotoError && /quality not assessed/i.test(results.consistency?.find((r) => /photo/i.test(r.label))?.apartments?.note || "") && (
+            <div style={{ fontFamily: "'Josefin Sans',sans-serif", fontSize: 11.5, color: "#9a6a2a", background: "#fdf6ee", border: "1px solid #e6d9c6", borderRadius: 6, padding: "6px 10px", marginBottom: 8 }}>
+              Apartments.com photo review failed this run: <strong>{results.aptPhotoError}</strong>.
             </div>
           )}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -8020,7 +8034,7 @@ IF the page shows "This property is not currently advertising on Apartments.com"
         photoUrls: (() => {
           const fromPage = Array.from(
             new Set<string>(String(rawFetched).match(/https?:\/\/images\d*\.apartments\.com\/i2\/[A-Za-z0-9_-]+\/\d+\/[A-Za-z0-9_.%-]+/g) || [])
-          ).slice(0, 6);
+          ).filter((u) => !/logo/i.test(u)).slice(0, 6);
           return fromPage.length >= 2
             ? fromPage
             : strArr(j.photoUrls, 6).filter((u) => /^https?:\/\/[^/]*apartments\.com\//i.test(u));
