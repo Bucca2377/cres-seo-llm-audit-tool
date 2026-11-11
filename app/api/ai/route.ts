@@ -16,13 +16,62 @@ interface AIRequest {
   webFetch?: boolean;
   /**
    * Image URLs to include for a vision assessment (e.g. grading the quality of
-   * a property's gallery photos). Passed as URL image blocks; Anthropic fetches
-   * them. Capped server-side. Not combined with webFetch.
+   * a property's gallery photos). Downloaded server-side and sent as base64 (URL
+   * block only as a fallback). Capped server-side. Not combined with webFetch.
    */
   images?: string[];
 }
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+
+/** Image type from the file's first bytes (only the formats the API accepts). */
+function sniffImageType(b: Uint8Array): string | null {
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return "image/gif";
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
+  return null;
+}
+
+const MAX_IMAGE_BYTES = 4_500_000; // API limit is 5 MB per image
+
+async function downloadImage(url: string): Promise<{ data: string; mediaType: string } | null> {
+  const asBlock = (buf: ArrayBuffer) => {
+    const bytes = new Uint8Array(buf);
+    const mediaType = sniffImageType(bytes);
+    if (!mediaType || bytes.length < 1000 || bytes.length > MAX_IMAGE_BYTES) return null;
+    return { data: Buffer.from(bytes).toString("base64"), mediaType };
+  };
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+        Accept: "image/avif,image/webp,image/png,image/jpeg,*/*",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (r.ok) {
+      const b = asBlock(await r.arrayBuffer());
+      if (b) return b;
+    }
+  } catch {
+    /* try the unblock service */
+  }
+  const token = process.env.BRIGHTDATA_API_TOKEN;
+  const zone = process.env.BRIGHTDATA_ZONE;
+  if (!token || !zone) return null;
+  try {
+    const r = await fetch("https://api.brightdata.com/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ zone, url, format: "raw" }),
+      signal: AbortSignal.timeout(30000),
+    });
+    return r.ok ? asBlock(await r.arrayBuffer()) : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -55,13 +104,19 @@ export async function POST(req: NextRequest) {
   const imageUrls = Array.isArray(body.images)
     ? body.images.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u)).slice(0, 8)
     : [];
-  const userContent =
-    imageUrls.length > 0
-      ? [
-          ...imageUrls.map((url) => ({ type: "image", source: { type: "url", url } })),
-          { type: "text", text: body.prompt },
-        ]
-      : body.prompt;
+  // Download the images HERE and send the bytes. Anthropic's own URL fetcher is
+  // refused by some CDNs (every Apartments.com gallery image returned "Unable to
+  // download the file", so the listing's photos were never graded). A URL block is
+  // only the fallback when we can't download one ourselves.
+  const imageBlocks = await Promise.all(
+    imageUrls.map(async (url) => {
+      const img = await downloadImage(url);
+      return img
+        ? { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } }
+        : { type: "image", source: { type: "url", url } };
+    })
+  );
+  const userContent = imageUrls.length > 0 ? [...imageBlocks, { type: "text", text: body.prompt }] : body.prompt;
 
   const payload: Record<string, unknown> = {
     model: MODEL,
